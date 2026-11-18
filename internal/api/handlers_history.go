@@ -66,9 +66,13 @@ type historyBody struct {
 	// The BMS's lowest / highest cell temperature (°C) — the lowest is
 	// what the BMS derives the charge limit from — from the ~5-minute
 	// battery snapshot.
-	TCellMin []*float64    `json:"t_cell_min"`
-	TCellMax []*float64    `json:"t_cell_max"`
-	Totals   historyTotals `json:"totals"`
+	TCellMin []*float64 `json:"t_cell_min"`
+	TCellMax []*float64 `json:"t_cell_max"`
+	// Eps is the EPS (backup) port output, W: the part of haus the
+	// backup circuits drew (haus includes it). Null where unknown — a
+	// step stored before buckets kept it whose raw samples are gone.
+	Eps    []*int        `json:"eps"`
+	Totals historyTotals `json:"totals"`
 }
 
 // tenths converts a stored tenth-unit average to the unit (null when
@@ -79,6 +83,15 @@ func tenths(v sql.NullInt64) *float64 {
 	}
 	f := float64(v.Int64) / tenthsPerUnit
 	return &f
+}
+
+// nullInt is a nullable stored integer as a JSON value (null when absent).
+func nullInt(v sql.NullInt64) *int {
+	if !v.Valid {
+		return nil
+	}
+	n := int(v.Int64)
+	return &n
 }
 
 // tenthsPerUnit: temperatures are stored in 0.1 °C, the charge limit in
@@ -187,7 +200,7 @@ func foldAggs(in []store.Agg, step time.Duration) []store.Agg {
 		c.a.GridAvg = c.grid / c.n
 		c.a.BattAvg = c.batt / c.n
 		c.a.TBatt, c.a.TInv, c.a.TAmb, c.a.BMSChg = c.temps[0].mean(), c.temps[1].mean(), c.temps[2].mean(), c.temps[3].mean()
-		c.a.TCellMin, c.a.TCellMax = c.temps[4].mean(), c.temps[5].mean()
+		c.a.TCellMin, c.a.TCellMax, c.a.Eps = c.temps[4].mean(), c.temps[5].mean(), c.temps[6].mean()
 		out = append(out, c.a)
 	}
 	return out
@@ -198,10 +211,10 @@ type hourAcc struct {
 	a                     store.Agg
 	n                     int
 	sol, haus, grid, batt int // sums of present 15-min avgs
-	// battery, inverter, ambient temperature, BMS charge limit and the
-	// lowest / highest cell temperature: the mean of the windows that
-	// carried them
-	temps [6]nullMean
+	// battery, inverter, ambient temperature, BMS charge limit, the
+	// lowest / highest cell temperature and the EPS port: the mean of the
+	// windows that carried them
+	temps [7]nullMean
 }
 
 // nullMean averages the present values of a nullable series.
@@ -224,9 +237,9 @@ func (m *nullMean) mean() sql.NullInt64 {
 	return sql.NullInt64{Int64: m.sum / m.n, Valid: true}
 }
 
-// addTemps folds one window's temperature averages.
+// addTemps folds one window's nullable averages (temperatures, EPS).
 func (c *hourAcc) addTemps(b store.Agg) {
-	for i, v := range [6]sql.NullInt64{b.TBatt, b.TInv, b.TAmb, b.BMSChg, b.TCellMin, b.TCellMax} {
+	for i, v := range [7]sql.NullInt64{b.TBatt, b.TInv, b.TAmb, b.BMSChg, b.TCellMin, b.TCellMax, b.Eps} {
 		c.temps[i].add(v)
 	}
 }
@@ -275,6 +288,7 @@ func buildHistory(rangeLabel string, rv historyRange, since, until time.Time, ag
 			BMSChg:   []*float64{},
 			TCellMin: []*float64{},
 			TCellMax: []*float64{},
+			Eps:      []*int{},
 			Totals:   historyTotals{},
 		}
 	}
@@ -294,6 +308,7 @@ func buildHistory(rangeLabel string, rv historyRange, since, until time.Time, ag
 		BMSChg:   make([]*float64, n),
 		TCellMin: make([]*float64, n),
 		TCellMax: make([]*float64, n),
+		Eps:      make([]*int, n),
 	}
 	bySlot := make(map[int64]int, len(aggs))
 	for i, a := range aggs {
@@ -313,6 +328,7 @@ func buildHistory(rangeLabel string, rv historyRange, since, until time.Time, ag
 		body.Soc[i] = &a.SocLast
 		body.TBatt[i], body.TInv[i], body.TAmb[i], body.BMSChg[i] = tenths(a.TBatt), tenths(a.TInv), tenths(a.TAmb), tenths(a.BMSChg)
 		body.TCellMin[i], body.TCellMax[i] = tenths(a.TCellMin), tenths(a.TCellMax)
+		body.Eps[i] = nullInt(a.Eps)
 	}
 	t := historyTotals{}
 	for _, a := range aggs {

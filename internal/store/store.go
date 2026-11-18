@@ -193,6 +193,10 @@ func openStore(path string, tick <-chan time.Time, maxOpen int, now func() time.
 		_ = s.db.Close()
 		return nil, fmt.Errorf("store: repair PV history: %w", err)
 	}
+	if err := s.backfillEPS(); err != nil {
+		_ = s.db.Close()
+		return nil, fmt.Errorf("store: backfill EPS history: %w", err)
+	}
 	if n, err := s.synthesizeRestartConnections(); err != nil {
 		_ = s.db.Close()
 		return nil, fmt.Errorf("store: restart synthesis: %w", err)
@@ -478,6 +482,14 @@ CREATE TABLE IF NOT EXISTS notify_outbox (
 );
 `
 
+// schemaV12 keeps the EPS (backup) port's 15-minute average (owner,
+// 2026-11-19): the household load includes the backup circuits, and the
+// history shows their share as the dashboard does. NULL for the buckets
+// before it until backfillEPS fills those whose raw samples are kept.
+const schemaV12 = `
+ALTER TABLE buckets15m ADD COLUMN eps_avg INTEGER;
+`
+
 // wrappedPVMin is the bucket sol_max that can only come from a wrapped
 // PV reading.
 const wrappedPVMin = 32768
@@ -523,6 +535,49 @@ func (s *Store) repairWrappedPV() error {
 	return nil
 }
 
+// backfillEPS fills eps_avg for the buckets stored before buckets kept
+// it, from their raw samples while those are kept (the raw retention).
+// Older buckets stay NULL — unknown, never 0 — and are not looked at:
+// once done, a start costs one query.
+func (s *Store) backfillEPS() error {
+	first, ok, err := s.firstBucket(0)
+	if err != nil || !ok {
+		return err
+	}
+	rows, err := s.db.Query(`SELECT bucket FROM buckets15m WHERE eps_avg IS NULL AND bucket >= ?`, first.Unix())
+	if err != nil {
+		return err
+	}
+	var buckets []int64
+	for rows.Next() {
+		var b int64
+		if err := rows.Scan(&b); err != nil {
+			return closeRows(rows, err)
+		}
+		buckets = append(buckets, b)
+	}
+	if err := closeRows(rows, rows.Err()); err != nil {
+		return err
+	}
+	filled := 0
+	for _, b := range buckets {
+		from := time.Unix(b, 0).UTC()
+		res, err := s.db.Exec(`UPDATE buckets15m SET eps_avg =
+			(SELECT CAST(AVG(eps) AS INTEGER) FROM telemetry WHERE ts >= ? AND ts < ?) WHERE bucket = ?`,
+			encTS(from), encTS(from.Add(bucketLen)), b)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			filled++
+		}
+	}
+	if filled > 0 {
+		slog.Info("store: added the EPS port to history buckets from their raw samples", "buckets", len(buckets))
+	}
+	return nil
+}
+
 // migrate applies the schema, guarded by schema_migrations; idempotent on
 // an existing database. Each version applies only when the recorded
 // version is below it, so a v1 database upgrades in place.
@@ -549,6 +604,7 @@ func migrate(db *sql.DB, path string) error {
 		{9, schemaV9},
 		{10, schemaV10},
 		{11, schemaV11},
+		{12, schemaV12},
 	}
 	latest := migrations[len(migrations)-1].version
 	if n > latest {

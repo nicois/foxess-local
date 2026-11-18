@@ -481,7 +481,7 @@ func TestMigrationAddsVersionColumn(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatalf("migrations: %v", err)
 	}
-	if n != 11 { // v11: the notification outbox
-		t.Errorf("schema_migrations max: got %d, want 11", n)
+	if n != 12 { // v12: the buckets' EPS average
+		t.Errorf("schema_migrations max: got %d, want 12", n)
 	}
 }

@@ -283,3 +283,35 @@ func checkTemps(t *testing.T, b historyBody) {
 		}
 	}
 }
+
+// TestHistoryEPS (2026-11-19): the history carries the EPS (backup) port
+// output per step beside the household load that includes it, on the
+// per-minute (1 h) and folded hourly (30 d) paths alike.
+func TestHistoryEPS(t *testing.T) {
+	h := newHarness(t)
+	at := testBase.Add(-10 * time.Minute)
+	for i := range 3 {
+		h.st.RecordTelemetry(testConnID, at.Add(time.Duration(i)*5*time.Second), frame.Tele{Haus: 2000, Eps: 700, Soc: 50})
+	}
+	h.st.Flush()
+	check := func(b historyBody) {
+		t.Helper()
+		if len(b.Eps) != len(b.TS) {
+			t.Fatalf("%s: %d eps values for %d steps", b.Range, len(b.Eps), len(b.TS))
+		}
+		var got []int
+		for _, v := range b.Eps {
+			if v != nil {
+				got = append(got, *v)
+			}
+		}
+		if len(got) != 1 || got[0] != 700 {
+			t.Errorf("%s eps: %v, want one 700", b.Range, got)
+		}
+	}
+	check(decodeHist(t, h.do(t, "GET", "/api/v1/history?range=1h", RoleReadOnly, nil)))
+	if _, err := h.st.RollUp(); err != nil {
+		t.Fatal(err)
+	}
+	check(decodeHist(t, h.do(t, "GET", "/api/v1/history?range=30d", RoleReadOnly, nil)))
+}

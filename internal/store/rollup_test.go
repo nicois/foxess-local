@@ -258,6 +258,7 @@ func TestRepairWrappedPV(t *testing.T) {
 	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 8`); err != nil {
 		t.Fatal(err)
 	}
+	undoV12Columns(t, s)
 	undoV10Columns(t, s)
 	undoV9Columns(t, s)
 	_ = s.Close()
@@ -353,5 +354,67 @@ func TestCellTempsHeldFromSnap61(t *testing.T) {
 	}
 	if a := aggs[1]; a.TCellMin.Valid || !a.TBatt.Valid {
 		t.Fatalf("stale snapshot: %+v", a)
+	}
+}
+
+// TestEPSRollUp (2026-11-19): the EPS (backup) port output is averaged
+// into the 15-minute buckets, so the history can show the share of the
+// household load that the backup circuits drew (load includes it).
+func TestEPSRollUp(t *testing.T) {
+	s := newTestStore(t)
+	b := testBase.Truncate(15 * time.Minute)
+	s.now = fixedClock(b.Add(time.Hour))
+	s.RecordTelemetry(testConnID, b, frame.Tele{Haus: 2000, Eps: 600, Soc: 50})
+	s.RecordTelemetry(testConnID, b.Add(5*time.Second), frame.Tele{Haus: 2000, Eps: 800, Soc: 50})
+	s.Flush()
+	if _, err := s.RollUp(); err != nil {
+		t.Fatal(err)
+	}
+	aggs, err := s.HistoryBuckets(b, b.Add(time.Hour))
+	if err != nil || len(aggs) != 1 {
+		t.Fatalf("buckets %+v %v", aggs, err)
+	}
+	if !aggs[0].Eps.Valid || aggs[0].Eps.Int64 != 700 {
+		t.Fatalf("bucket eps %+v", aggs[0].Eps)
+	}
+	raw, err := s.HistoryRaw(b, b.Add(time.Minute))
+	if err != nil || len(raw) != 1 || raw[0].Eps.Int64 != 700 {
+		t.Fatalf("raw minute eps %+v %v", raw, err)
+	}
+}
+
+// TestEPSBackfill (2026-11-19): a bucket rolled up before buckets kept
+// EPS (eps_avg NULL) gets it from its raw samples while they are kept;
+// one whose samples are gone stays NULL (unknown, never 0).
+func TestEPSBackfill(t *testing.T) {
+	s := newTestStore(t)
+	b := testBase.Truncate(15 * time.Minute)
+	s.now = fixedClock(b.Add(time.Hour))
+	s.RecordTelemetry(testConnID, b, frame.Tele{Haus: 2000, Eps: 500, Soc: 50})
+	s.Flush()
+	if _, err := s.RollUp(); err != nil {
+		t.Fatal(err)
+	}
+	gone := b.Add(-24 * time.Hour).Unix() // a bucket with no raw samples left
+	if _, err := s.db.Exec(`INSERT INTO buckets15m(bucket, sol_avg, sol_min, sol_max, sol_wh, haus_avg, haus_min, haus_max, haus_wh,
+		grid_avg, grid_min, grid_max, grid_imp_wh, grid_exp_wh, batt_avg, batt_min, batt_max, batt_chg_wh, batt_dis_wh, acport_avg, soc_last)
+		VALUES (?, 0,0,0,0, 1000,1000,1000,250, 0,0,0,0,0, 0,0,0,0,0, 0, 50)`, gone); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE buckets15m SET eps_avg = NULL`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.backfillEPS(); err != nil {
+		t.Fatal(err)
+	}
+	aggs, err := s.HistoryBuckets(b.Add(-48*time.Hour), b.Add(time.Hour))
+	if err != nil || len(aggs) != 2 {
+		t.Fatalf("buckets %+v %v", aggs, err)
+	}
+	if aggs[0].Eps.Valid {
+		t.Fatalf("a bucket without raw samples: eps %+v, want NULL", aggs[0].Eps)
+	}
+	if !aggs[1].Eps.Valid || aggs[1].Eps.Int64 != 500 {
+		t.Fatalf("backfilled eps %+v", aggs[1].Eps)
 	}
 }

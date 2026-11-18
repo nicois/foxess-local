@@ -61,6 +61,12 @@ version; anything else bumps the patch version.
 - `/update` carries `reason_code`, so a UI can translate why an update
   cannot be applied here.
 
+- History: the Home chart draws the backup (EPS) port's share beside the
+  whole household load (which includes it), when the range has any; the
+  history table, CSV/JSON export and `/history` (`eps`) carry it too.
+  History buckets keep it from now on (schema v12); older buckets get it
+  from their raw samples while those are kept (30 days by default).
+
 ### Changed
 - Release checks run weekly by default (they were daily).
 - The web UI in German, French, Italian, Spanish and Simplified Chinese.

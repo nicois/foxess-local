@@ -2598,6 +2598,7 @@ components:
           items: { type: [integer, 'null'] }
         haus:
           type: array
+          description: Household load, W, mean per step — the EPS (backup) port included (see eps).
           items: { type: [integer, 'null'] }
         batt:
           type: array
@@ -2629,6 +2630,10 @@ components:
           type: array
           description: The BMS's warmest cell temperature, °C, mean per step (same source and nulls as t_cell_min).
           items: { type: [number, 'null'] }
+        eps:
+          type: array
+          description: The EPS (backup) port's output, W, mean per step — the part of haus the backup circuits drew (haus includes it). Null where unknown (a step stored before 2026-11-19 whose raw samples are no longer kept).
+          items: { type: [integer, 'null'] }
         totals:
           type: object
           required: [sol_wh, haus_wh, grid_import_wh, grid_export_wh, batt_charged_wh, batt_discharged_wh, stored_delta_wh]

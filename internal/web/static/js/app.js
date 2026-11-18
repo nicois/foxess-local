@@ -1311,17 +1311,18 @@ function exportRows(h) {
   h.ts.forEach((t, i) => {
     const r = { solar_w: h.sol[i], home_w: h.haus[i], grid_w: h.grid[i], battery_w: h.batt[i], soc_pct: h.soc[i] };
     if (Object.values(r).every((v) => v == null)) return;
+    r.eps_w = h.eps?.[i] ?? null;
     out.push({ time: new Date(t * 1000).toISOString(), ts: t, ...r });
   });
   return out;
 }
 
 function exportCSV(h) {
-  const cols = ["time", "ts", "solar_w", "home_w", "grid_w_import_positive", "battery_w_charge_positive", "soc_pct"];
+  const cols = ["time", "ts", "solar_w", "home_w", "grid_w_import_positive", "battery_w_charge_positive", "soc_pct", "eps_w"];
   const lines = [cols.join(",")];
   for (const r of exportRows(h)) {
     const v = (x) => (x == null ? "" : String(x));
-    lines.push([r.time, r.ts, v(r.solar_w), v(r.home_w), v(r.grid_w), v(r.battery_w), v(r.soc_pct)].join(","));
+    lines.push([r.time, r.ts, v(r.solar_w), v(r.home_w), v(r.grid_w), v(r.battery_w), v(r.soc_pct), v(r.eps_w)].join(","));
   }
   download(exportName("csv"), "text/csv", lines.join("\n") + "\n");
 }
@@ -1338,7 +1339,8 @@ function exportJSON(h) {
       time: { unit: "ISO 8601 UTC", description: "start of the step" },
       ts: { unit: "unix seconds", description: "start of the step" },
       solar_w: { unit: "W", description: "PV generation (≥ 0)" },
-      home_w: { unit: "W", description: "household load (≥ 0)" },
+      home_w: { unit: "W", description: "household load (≥ 0), the backup (EPS) port included" },
+      eps_w: { unit: "W", description: "the backup (EPS) port's output: the part of home_w the backup circuits drew (null = not recorded)" },
       grid_w: { unit: "W", description: "grid at the panel: positive = importing, negative = exporting" },
       battery_w: { unit: "W", description: "battery: positive = charging, negative = discharging" },
       soc_pct: { unit: "%", description: "battery state of charge at the end of the step" },
@@ -1399,7 +1401,7 @@ function histRows(h) {
   const w = (v, tick) => fmtAxisW(v, tick);
   return [
     { key: "sol", title: tr("Solar"), cls: "s-solar", values: h.sol, fmt: w },
-    { key: "haus", title: tr("Home"), cls: "s-home", values: h.haus, fmt: w },
+    homeRow(h, w),
     { key: "grid", title: tr("Grid"), cls: "s-grid", values: h.grid, fmt: w, legend: tr("above 0 = importing · below 0 = exporting") },
     { key: "batt", title: tr("Battery"), cls: "s-batt", values: h.batt, fmt: w, legend: tr("above 0 = charging · below 0 = discharging") },
     { key: "soc", title: tr("State of charge"), cls: "s-batt", values: h.soc, fixed: [0, 100], area: false, fmt: (v) => Math.round(v) + " %" },
@@ -1416,6 +1418,18 @@ function histRows(h) {
   ];
 }
 
+// homeRow: the household load. It includes the backup (EPS) port; when
+// the range has backup-port output, its share is drawn on the same chart
+// (the dashboard's Home shows the main-board circuits, load − backup).
+function homeRow(h, w) {
+  const row = { key: "haus", title: tr("Home"), cls: "s-home", values: h.haus, fmt: w };
+  if (!(h.eps ?? []).some((v) => v != null && v >= ACTIVE_W)) return row;
+  return { ...row, series: [
+    { title: tr("whole household"), cls: "s-home", values: h.haus },
+    { title: tr("backup port"), cls: "s-eps", values: h.eps, dash: true },
+  ] };
+}
+
 // fmtAxisC / fmtAxisA: temperature and current, one decimal in the tooltip
 const fmtAxisC = (v, tick) => (tick ? Math.round(v) : v.toFixed(1)) + " °C";
 const fmtAxisA = (v, tick) => (tick ? Math.round(v) : v.toFixed(1)) + " A";
@@ -1429,13 +1443,13 @@ function renderHistTable(h) {
     const c = (v) => `<td class="num">${v == null ? "—" : esc(fmtAxisW(v, false))}</td>`;
     const u = (s, f) => `<td class="num">${s?.[i] == null ? "—" : esc(f(s[i], false))}</td>`;
     rows.push(`<tr><td>${esc(new Date(h.ts[i] * 1000).toLocaleString(locale()))}</td>${c(h.sol[i])}${c(h.haus[i])}${c(h.grid[i])}${c(h.batt[i])}` +
-      `<td class="num">${h.soc[i] == null ? "—" : h.soc[i] + " %"}</td>` +
+      `<td class="num">${h.soc[i] == null ? "—" : h.soc[i] + " %"}</td>${c(h.eps?.[i])}` +
       `${u(h.bms_chg_a, fmtAxisA)}${u(h.t_cell_min, fmtAxisC)}${u(h.t_batt, fmtAxisC)}${u(h.t_inv, fmtAxisC)}${u(h.t_amb, fmtAxisC)}</tr>`);
   }
   const th = (s) => `<th scope="col">${esc(s)}</th>`;
   el.innerHTML = rows.length === 0 ? `<p class="muted small">${esc(tr("No data in this range yet."))}</p>` :
     `<table><caption class="sr-only">${esc(tr("History values, {range}, newest first", { range: RANGES.find(([r]) => r === S.histRange)?.[2] ?? "" }))}</caption>` +
-    `<thead><tr>${th(tr("time"))}${th(tr("solar"))}${th(tr("home"))}${th(tr("grid (+ import)"))}${th(tr("battery (+ charging)"))}${th(tr("SoC"))}` +
+    `<thead><tr>${th(tr("time"))}${th(tr("solar"))}${th(tr("home"))}${th(tr("grid (+ import)"))}${th(tr("battery (+ charging)"))}${th(tr("SoC"))}${th(tr("backup port"))}` +
     `${th(tr("BMS charge limit"))}${th(tr("coldest cell"))}${th(tr("battery temp"))}${th(tr("inverter temp"))}${th(tr("ambient temp"))}</tr></thead>` +
     `<tbody>${rows.join("")}</tbody></table>`;
 }
