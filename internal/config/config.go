@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"foxesslocal/internal/quirks"
+
 	"foxesslocal/internal/forward"
 	"foxesslocal/internal/policy"
 
@@ -28,13 +30,13 @@ const (
 // UISettable are the keys the web UI can also set (F12): a value set
 // there is stored in the database and wins over the file; InFile tells
 // whether the file sets one (the source Settings shows).
-var UISettable = []string{
+var UISettable = append([]string{
 	"battery.capacity_wh", "access.public_read_only", "access.public_all_pages", "forward.mode",
 	"notify.webhook_url", "notify.ntfy_url",
 	"store.write_delay_s",
 	"update.check_interval_h", "update.prerelease", "update.auto_apply",
 	"alerts.soc_threshold_pct", "alerts.soc_horizon_min", "alerts.soc_p_value", "alerts.soc_window_min",
-}
+}, quirks.Keys()...)
 
 // retiredKeys were accepted by earlier releases and no longer do
 // anything: they load with a warning (the installed config keeps
@@ -68,7 +70,10 @@ type Config struct {
 	Scheduler Scheduler `toml:"scheduler"`
 	Battery   Battery   `toml:"battery"`
 	Update    Update    `toml:"update"`
-	Debug     Debug     `toml:"debug"`
+	// Quirks turns known inverter quirks on or off by id (package
+	// quirks); an unlisted quirk takes its default.
+	Quirks map[string]bool `toml:"quirks"`
+	Debug  Debug           `toml:"debug"`
 
 	// Warnings lists retired keys present in the file (not TOML; the
 	// caller logs them at startup).
@@ -363,6 +368,14 @@ func Load(path string) (*Config, error) {
 	}
 	if err := c.checkKeys(md.Undecoded()); err != nil {
 		return nil, fmt.Errorf("load config %s: %w", path, err)
+	}
+	if len(c.Quirks) == 0 {
+		c.Quirks = nil // an empty [quirks] table is no table
+	}
+	for id := range c.Quirks {
+		if _, ok := quirks.FromKey(quirks.Key(id)); !ok {
+			return nil, fmt.Errorf("load config %s: unknown quirk %q in [quirks]", path, id)
+		}
 	}
 	for _, k := range UISettable {
 		if md.IsDefined(strings.Split(k, ".")...) {

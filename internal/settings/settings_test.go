@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"foxesslocal/internal/quirks"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -184,4 +186,27 @@ func TestUpdateSettings(t *testing.T) {
 	off, err := New(st2, cfgOff, clock)
 	require.NoError(t, err)
 	assert.Equal(t, time.Duration(0), off.Get().UpdateInterval)
+}
+
+// TestQuirkSettings (2026-11-19): a quirk is off by default, the file
+// can turn it on, the UI can override either way, and an expert may set
+// it (it changes only how values are shown).
+func TestQuirkSettings(t *testing.T) {
+	key := quirks.Key(quirks.EPSDropouts)
+	st, cfg := setup(t, "")
+	s, err := New(st, cfg, clock)
+	require.NoError(t, err)
+	assert.False(t, s.Get().Quirks[quirks.EPSDropouts])
+	assert.Equal(t, SourceDefault, s.Sources()[key])
+	require.NoError(t, s.Set(key, "true", "expert"))
+	assert.True(t, s.Get().Quirks[quirks.EPSDropouts])
+	assert.Equal(t, SourceUI, s.Sources()[key])
+	require.Error(t, s.Set(key, "maybe", "expert"))
+	assert.True(t, Expert(key), "an expert setting")
+
+	st2, cfgOn := setup(t, "[quirks]\neps_dropouts = true\n")
+	on, err := New(st2, cfgOn, clock)
+	require.NoError(t, err)
+	assert.True(t, on.Get().Quirks[quirks.EPSDropouts])
+	assert.Equal(t, SourceFile, on.Sources()[key])
 }

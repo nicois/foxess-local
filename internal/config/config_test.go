@@ -359,3 +359,19 @@ func TestNetHostNames(t *testing.T) {
 	_, err = config.Load(writeCfg(t, t.TempDir(), "[net]\nhost_names = [\"http://x/\"]\n"))
 	require.ErrorContains(t, err, "net.host_names")
 }
+
+// TestQuirksTable (2026-11-19): [quirks] turns a known quirk on or off
+// (the source Settings shows is the file); an unknown name is an error
+// like any other unknown key.
+func TestQuirksTable(t *testing.T) {
+	cfg, err := config.Load(writeCfg(t, t.TempDir(), "[quirks]\neps_dropouts = true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Quirks["eps_dropouts"] || !cfg.InFile("quirks.eps_dropouts") {
+		t.Fatalf("quirks %v, in file %v", cfg.Quirks, cfg.InFile("quirks.eps_dropouts"))
+	}
+	if _, err := config.Load(writeCfg(t, t.TempDir(), "[quirks]\nno_such_quirk = true\n")); err == nil {
+		t.Fatal("an unknown quirk loaded")
+	}
+}

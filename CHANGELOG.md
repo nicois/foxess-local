@@ -67,6 +67,12 @@ version; anything else bumps the patch version.
   History buckets keep it from now on (schema v12); older buckets get it
   from their raw samples while those are kept (30 days by default).
 
+- Inverter quirks (More → Inverter quirks, `[quirks]` in the config
+  file, `GET /quirks`): switches for reading behaviours seen in the
+  field, off until reports show them on other installations. The first,
+  `eps_dropouts`, shows the backup port on the dashboard as the median
+  of its last 5 readings. Problem reports say which quirks were on.
+
 ### Changed
 - Release checks run weekly by default (they were daily).
 - The web UI in German, French, Italian, Spanish and Simplified Chinese.
@@ -80,6 +86,10 @@ version; anything else bumps the patch version.
   the tag. Each draft release's notes are its changelog section.
 
 ### Fixed
+- The dashboard's main-board load (household − backup port) never shows
+  below 0, and the history's backup line never rises above the household
+  line: the difference is measurement error (the grid meter's offset),
+  not a load.
 - The Update choices ran together on one line; the reason an update
   cannot be applied ("a source build: update by rebuilding") was not
   translated.

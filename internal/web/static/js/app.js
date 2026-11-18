@@ -53,6 +53,8 @@ const S = {
   histRange: loadPref("fl.histRange", ["1h", "6h", "24h", "72h", "7d", "30d"], "24h"), // dashboard history range
   public: false,          // unauthenticated public session (spec §5.5)
   epsSeen: false,        // the EPS port has supplied power (backup branch shown)
+  epsRing: [],           // the last EPS_MEDIAN_N live backup-port readings (quirk eps_dropouts)
+  quirks: {},            // id → on (GET /quirks)
   cfg: null,             // GET /config
   offlineSince: null,    // display ts of the last connection:offline
   cmdBusy: 0,            // in-flight command count (PUT/POST/DELETE only)
@@ -243,6 +245,7 @@ function enterApp() {
   connectSSE();
   refreshMeta();
   refreshUpdateBadge();
+  loadQuirks();
   setInterval(() => refreshUpdateBadge(), 30 * 60 * 1000);
   maybeStartSetup();
 }
@@ -740,6 +743,9 @@ let snapPending = null;
 let snapQueued = false;
 
 function queueSnapshot(d) {
+  // every reading joins the ring, also those the frame coalescing skips
+  const e = d?.power?.eps_w;
+  if (e != null) S.epsRing = [...S.epsRing, e].slice(-EPS_MEDIAN_N);
   snapPending = d;
   if (snapQueued) return;
   snapQueued = true;
@@ -919,6 +925,7 @@ const ROUTES = {
   "settings": renderSettings,
   "setup": renderSetup,
   "report": renderReport,
+  "quirks": renderQuirks,
 };
 
 // old links keep working
@@ -928,14 +935,14 @@ const ROUTE_TITLES = {
   "dashboard": tr("Home"), "schedule": tr("Schedule"), "control": tr("Control"),
   "activity": tr("Activity"), "more": tr("More"), "device": tr("Device"),
   "cloud": tr("Cloud & maintenance"), "messages": tr("Frame messages"), "settings": tr("Settings"),
-  "setup": tr("Setup"), "report": tr("Report a problem"),
+  "setup": tr("Setup"), "report": tr("Report a problem"), "quirks": tr("Inverter quirks"),
 };
 
 // FORWARD_NAME: the cloud-forwarding modes' display names.
 const FORWARD_NAME = () => ({ off: tr("off"), telemetry_only: tr("telemetry only"), full: tr("full") });
 
 // the primary nav item each route lives under
-const NAV_OF = { "device": "more", "cloud": "more", "messages": "more", "settings": "more", "setup": "more", "report": "more" };
+const NAV_OF = { "device": "more", "cloud": "more", "messages": "more", "settings": "more", "setup": "more", "report": "more", "quirks": "more" };
 
 function routeName() {
   if (dashOnly()) return "dashboard";
@@ -1099,12 +1106,15 @@ function inverterLoss(p) {
 }
 
 // splitEPS: the grid-port output (to the switchboard) and the main-board
-// load, net of the backup port (both registers include it).
+// load, net of the backup port (both registers include it). The load is
+// AC output + grid, so the grid meter's offset and the backup-port
+// reading's noise can put "load − backup" below 0 when the main board
+// draws little: it never shows below 0 (measurement error, not a load).
 function splitEPS(p) {
   const eps = p?.eps_w ?? 0;
   return {
     toBoard: p?.ac_port_w == null ? null : p.ac_port_w - eps,
-    mainLoad: p?.load_w == null ? null : p.load_w - eps,
+    mainLoad: p?.load_w == null ? null : Math.max(0, p.load_w - eps),
   };
 }
 
@@ -1128,7 +1138,35 @@ function flowOf(p) {
 // trailing-window average when one is selected (null until it loads).
 function nowPower(st) {
   // the averaged window is the dashboard's control; elsewhere it is live
-  return S.nowWindow === "now" || routeName() !== "dashboard" ? st?.power : S.avg?.power ?? null;
+  const live = S.nowWindow === "now" || routeName() !== "dashboard";
+  if (!live) return S.avg?.power ?? null;
+  const p = st?.power;
+  // quirk eps_dropouts: the backup port as the median of its last readings
+  // (single low readings the AC output does not share are ignored)
+  if (p && S.quirks.eps_dropouts && S.epsRing.length > 0) return { ...p, eps_w: median(S.epsRing) };
+  return p;
+}
+
+// EPS_MEDIAN_N: the backup-port readings the eps_dropouts quirk takes the
+// median of (5 × ~5 s: up to two dropouts in a row are ignored).
+const EPS_MEDIAN_N = 5;
+
+function median(xs) {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+}
+
+// loadQuirks reads which inverter quirks are on (the dashboard applies
+// them); without it every quirk counts as off.
+async function loadQuirks() {
+  try {
+    const r = await apiFetch("/quirks");
+    if (!r.ok) return null;
+    const b = await r.json();
+    S.quirks = Object.fromEntries(b.quirks.map((q) => [q.id, q.enabled]));
+    return b.quirks;
+  } catch { return null; }
 }
 
 function paintNow(st) {
@@ -1426,7 +1464,9 @@ function homeRow(h, w) {
   if (!(h.eps ?? []).some((v) => v != null && v >= ACTIVE_W)) return row;
   return { ...row, series: [
     { title: tr("whole household"), cls: "s-home", values: h.haus },
-    { title: tr("backup port"), cls: "s-eps", values: h.eps, dash: true },
+    // drawn no higher than the household load that includes it (the
+    // difference is within measurement error; the table shows the raw value)
+    { title: tr("backup port"), cls: "s-eps", values: h.eps.map((v, i) => (v == null || h.haus[i] == null ? v : Math.min(v, h.haus[i]))), dash: true },
   ] };
 }
 
@@ -2105,6 +2145,7 @@ async function renderMore() {
     ${link("setup", tr("Setup"), esc(tr("checks, battery capacity, cloud and access choices")), '<path d="m5 12 4 4 10-10"/>')}
     ${link("settings", tr("Settings"), esc(tr("language, access tokens, notifications, tuning, diagnostics")), '<circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>')}
     ${link("report", tr("Report a problem"), esc(tr("one file for the developers, plus a prefilled issue")), '<path d="M12 3 2 21h20zM12 9v5M12 17.5v.5"/>')}
+    ${link("quirks", tr("Inverter quirks"), esc(tr("compensate for known reading quirks")), '<path d="M4 12h3l2-5 3 10 2-5h6"/><circle cx="19" cy="6" r="1.5"/>')}
     ${link("messages", tr("Frame messages"), esc(tr("the raw message log (diagnostics)")), '<path d="M4 6h16M4 12h16M4 18h10"/>')}
   </ul>`;
 }
@@ -2908,6 +2949,52 @@ async function renderReport() {
   </article>`;
 }
 
+// QUIRK_TEXT: the quirks' translated texts by id (the server's English
+// is the fallback for a quirk this page does not know yet).
+const QUIRK_TEXT = () => ({
+  eps_dropouts: {
+    title: tr("Backup-port reading dropouts"),
+    symptom: tr("The backup (EPS) port reading drops by about a quarter for a reading or two, while the inverter's AC output, which includes it, stays steady. The household split on the dashboard then jumps around."),
+    effect: tr("The dashboard shows the backup port as the median of its last 5 readings (about 25 s), so such single low readings are ignored. A real change shows within about 15 s."),
+    seen: tr("KH10, firmware 1.73: one installation (2026-11-19)"),
+  },
+});
+
+// renderQuirks: the known inverter quirks, each on or off (expert).
+async function renderQuirks() {
+  const qs = await loadQuirks();
+  const body = qs == null
+    ? `<p class="muted">${esc(tr("Cannot load the quirks."))}</p>`
+    : qs.map((q) => {
+      const t = QUIRK_TEXT()[q.id] ?? { title: q.title, effect: q.effect };
+      const def = q.default ? tr("on") : tr("off");
+      return `<article class="panel quirk">
+        <div class="card-head"><h3>${esc(t.title)}</h3>
+          <span class="chip ${q.enabled ? "ok" : ""}">${esc(q.enabled ? tr("on") : tr("off"))}</span></div>
+        ${t.symptom ? `<p>${esc(t.symptom)}</p>` : ""}
+        <p><strong>${esc(tr("When on:"))}</strong> ${esc(t.effect)}</p>
+        <p class="muted small">${esc(tr("Seen on: {where}", { where: t.seen ?? q.seen }))} · ${esc(tr("default: {v}", { v: def }))} · ${esc(SOURCE_TEXT[q.source] ?? q.source)}</p>
+        <label class="radio-row"><input type="checkbox" data-quirk="${esc(q.id)}" ${q.enabled ? "checked" : ""}>
+          <span>${esc(tr("Compensate for this quirk"))}</span></label>
+        <div class="btn-row">
+          <button type="button" class="cmd" data-action="quirk-save" data-id="${esc(q.id)}">${esc(tr("Save"))}</button>
+          ${q.source === "ui" ? `<button type="button" class="ghost" data-action="quirk-reset" data-id="${esc(q.id)}">${esc(tr("Back to the default"))}</button>` : ""}
+        </div>
+      </article>`;
+    }).join("");
+  return `
+  ${pageHead(tr("Inverter quirks"), esc(tr("Behaviours seen on some inverters that this app can compensate for. A quirk changes only what the web pages show: the history, the API and exports keep the inverter's own values.")))}
+  <section class="stack quirks">${body}</section>
+  <p class="muted small">${esc(tr("New quirks start off until reports show they are common to a model or firmware. If you see one of these (or something like it) on your inverter, please say so: More → Report a problem. Changing a quirk needs the expert role."))}</p>`;
+}
+
+// quirkSave sets (on/off) or resets one quirk, then reloads the page.
+async function quirkSave(id, reset) {
+  const box = document.querySelector(`input[data-quirk="${CSS.escape(id)}"]`);
+  const body = { ["quirks." + id]: reset ? null : !!box?.checked };
+  if (await setupSave("/settings", "PUT", body, tr("quirk saved"))) render();
+}
+
 // reportIssueURL is a prefilled GitHub issue for a downloaded report.
 function reportIssueURL(file, desc) {
   const base = S.cfg?.issue_url;
@@ -3087,6 +3174,12 @@ document.addEventListener("click", async (e) => {
       break;
     case "tuning-save":
       tuningSave();
+      break;
+    case "quirk-save":
+      quirkSave(t.dataset.id, false);
+      break;
+    case "quirk-reset":
+      quirkSave(t.dataset.id, true);
       break;
     case "update-choices":
       updateChoicesSave();

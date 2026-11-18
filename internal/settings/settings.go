@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"foxesslocal/internal/quirks"
+
 	"foxesslocal/internal/config"
 	"foxesslocal/internal/policy"
 )
@@ -83,6 +85,9 @@ const maxIntervalH = 720
 // Expert reports whether a setting is an expert-level tuning knob (an
 // expert may change it; the other settings need an installer).
 func Expert(key string) bool {
+	if _, ok := quirks.FromKey(key); ok {
+		return true // a quirk changes only how values are shown
+	}
 	return numeric[key].expert
 }
 
@@ -109,6 +114,8 @@ type Values struct {
 	UpdateInterval   time.Duration // 0 = no scheduled release checks
 	UpdatePrerelease bool
 	UpdateAutoApply  bool
+	// Quirks are the known inverter quirks, on or off, by id.
+	Quirks map[string]bool
 }
 
 // Store is the persistence the settings need (internal/store.Store).
@@ -173,6 +180,7 @@ func New(st Store, cfg *config.Config, clock func() time.Time) (*Settings, error
 		src: map[string]Source{},
 		ui:  map[string]string{},
 	}
+	addQuirks(s.file, cfg)
 	for k := range s.file {
 		if _, ok := numeric[k]; ok { // the file's numbers: range-checked like the UI's
 			if err := validate(k, s.file[k]); err != nil {
@@ -196,6 +204,17 @@ func New(st Store, cfg *config.Config, clock func() time.Time) (*Settings, error
 	}
 	s.recompute()
 	return s, nil
+}
+
+// addQuirks adds each quirk's file value: the config's, else its default.
+func addQuirks(file map[string]string, cfg *config.Config) {
+	for _, q := range quirks.All() {
+		on, set := cfg.Quirks[q.ID]
+		if !set {
+			on = q.Default
+		}
+		file[quirks.Key(q.ID)] = strconv.FormatBool(on)
+	}
 }
 
 // Get returns the effective values.
@@ -339,11 +358,26 @@ func (s *Settings) recomputeLocked() {
 		SocWindow:        time.Duration(num(get(KeySocWindow)) * float64(time.Minute)),
 		UpdateInterval:   time.Duration(num(get(KeyUpdateInterval)) * float64(time.Hour)),
 		UpdatePrerelease: upre, UpdateAutoApply: uauto,
+		Quirks: map[string]bool{},
 	}
+	for _, q := range quirks.All() {
+		s.val.Quirks[q.ID], _ = strconv.ParseBool(get(quirks.Key(q.ID)))
+	}
+}
+
+// validateBool checks a true/false setting.
+func validateBool(key, value string) error {
+	if _, err := strconv.ParseBool(value); err != nil {
+		return fmt.Errorf("settings: %s must be true or false, got %q", key, value)
+	}
+	return nil
 }
 
 // validate checks one UI value.
 func validate(key, value string) error {
+	if _, ok := quirks.FromKey(key); ok {
+		return validateBool(key, value)
+	}
 	switch key {
 	case KeyCapacityWh:
 		n, err := strconv.Atoi(value)
@@ -351,9 +385,7 @@ func validate(key, value string) error {
 			return fmt.Errorf("settings: %s must be a whole number of Wh from 1 to %d, got %q", key, MaxCapacityWh, value)
 		}
 	case KeyPublicReadOnly, KeyPublicAllPages, KeyUpdatePrerelease, KeyUpdateAutoApply:
-		if _, err := strconv.ParseBool(value); err != nil {
-			return fmt.Errorf("settings: %s must be true or false, got %q", key, value)
-		}
+		return validateBool(key, value)
 	case KeyNotifyWebhook, KeyNotifyNtfy:
 		if err := ValidateURL(value); err != nil {
 			return fmt.Errorf("settings: %s %w", key, err)

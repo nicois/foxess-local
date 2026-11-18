@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"foxesslocal/internal/quirks"
+
 	"foxesslocal/internal/config"
 	"foxesslocal/internal/policy"
 	"foxesslocal/internal/settings"
@@ -293,5 +295,41 @@ func TestSettingsUpdateChoices(t *testing.T) {
 	}
 	if rr := h.do(t, httpPut, pathSettings, RoleInstaller, map[string]any{settings.KeyUpdateInterval: 721}); rr.Code != http.StatusBadRequest {
 		t.Fatalf("721 h: %d", rr.Code)
+	}
+}
+
+// TestQuirksEndpoint (2026-11-19): GET /quirks lists each known quirk
+// with its default, effective state and source (read-only role); an
+// expert turns one on through PUT /settings.
+func TestQuirksEndpoint(t *testing.T) {
+	h := newHarness(t)
+	withSettings(t, h)
+	get := func() quirkItem {
+		t.Helper()
+		rr := h.do(t, "GET", "/api/v1/quirks", RoleReadOnly, nil)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("GET /quirks: %d", rr.Code)
+		}
+		var b quirksView
+		if err := json.Unmarshal(rr.Body.Bytes(), &b); err != nil {
+			t.Fatal(err)
+		}
+		for _, q := range b.Quirks {
+			if q.ID == quirks.EPSDropouts {
+				return q
+			}
+		}
+		t.Fatalf("eps_dropouts missing: %+v", b)
+		return quirkItem{}
+	}
+	if q := get(); q.Enabled || q.Default || q.Source != "default" || q.Title == "" {
+		t.Fatalf("initial: %+v", q)
+	}
+	body := map[string]any{quirks.Key(quirks.EPSDropouts): true}
+	if rr := h.do(t, httpPut, pathSettings, RoleExpert, body); rr.Code != http.StatusOK {
+		t.Fatalf("expert PUT: %d %s", rr.Code, rr.Body.String())
+	}
+	if q := get(); !q.Enabled || q.Source != "ui" {
+		t.Fatalf("after PUT: %+v", q)
 	}
 }

@@ -1508,3 +1508,10 @@ a.badge { text-decoration: none; &:hover { text-decoration: underline; } }
 }
 .sub-head { margin: 1.2rem 0 0; font-size: 1rem; }
 .g-detail { margin: 0.6rem 0 0.2rem; line-height: 1.5; }
+
+/* the Inverter quirks page */
+.quirks .quirk {
+  p { margin: 0.4rem 0; }
+  .radio-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.35rem 0; cursor: pointer; }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.4rem; }
+}

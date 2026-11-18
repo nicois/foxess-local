@@ -240,6 +240,38 @@ identity or home.
 - Regex scrubbing: rejected. A binary-protocol identifier that the regex
   misses leaks silently. The codec-plus-scan approach fails closed.
 
+### D-026: Reading quirks are display-only switches, off until seen in the field
+
+**Decision** (owner, 2026-11-19): a behaviour seen on one installation
+that makes a reading misleading becomes a **quirk** (`internal/quirks`):
+an id, what turning it on changes, where it was seen, and a default.
+It is a setting (`quirks.<id>`: `[quirks]` in the config file, or the
+Inverter quirks page; expert role) and is listed by `GET /quirks`.
+
+- A new quirk defaults **off** until reports show it on other
+  installations of a model or firmware; the default may then follow
+  the identified device.
+- A quirk changes only what the web pages show. Stored history, the
+  API, exports and Home Assistant keep the inverter's own values, so
+  everything stays checkable against the inverter.
+- Problem reports (F8) carry which quirks were on.
+
+The first is `eps_dropouts`: on the owner's KH10 (firmware 1.73) the
+EPS port reading drops by about a quarter in single readings that the
+AC output, which includes the port, does not follow (9 of 35 readings
+at 130–138 W against 174–218 W, the AC output steady at 193–209 W).
+On, the dashboard shows the median of the last 5 readings.
+
+Not a quirk: the dashboard never shows the main-board load
+(load − EPS) below 0. Load is AC output + grid, so the grid meter's
+offset and any EPS noise can put the difference below 0 when the main
+board draws little, on any inverter.
+
+**Alternatives considered**: always smoothing (rejected: hides a real
+behaviour on inverters without the dropouts); smoothing at the API
+(rejected: Home Assistant and exports would no longer match the
+inverter).
+
 ## Constraint (ratified 2026-11-16)
 
 **C-008 (ratified, `02-constraints.md`): writes need write-grade evidence

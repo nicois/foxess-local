@@ -126,6 +126,15 @@
 # (EQ4800) = 41930.
 # capacity_wh = 41930
 
+[quirks]
+# Inverter behaviours seen in the field that the web pages can compensate
+# for (More → Inverter quirks lists each one; a value set there wins).
+# A quirk changes only what the pages show: history, the API and exports
+# keep the inverter's own values.
+# eps_dropouts: the backup (EPS) port reading drops by about a quarter
+# for a reading or two; on, the dashboard shows the median of the last 5.
+# eps_dropouts = false
+
 [update]
 # Release checks: one HTTPS request to the GitHub releases API carrying
 # only the app version. Releases are signature-checked before anything is

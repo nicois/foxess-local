@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"foxesslocal/internal/quirks"
 )
 
 const (
@@ -96,5 +98,24 @@ func TestConfigIssueURL(t *testing.T) {
 	decode(t, h.do(t, httpGet, "/api/v1/config", RoleReadOnly, nil), &cfg)
 	if cfg["issue_url"] != "https://github.com/owner/foxess-local/issues/new" {
 		t.Fatalf("issue_url %v", cfg["issue_url"])
+	}
+}
+
+// TestReportFactsQuirks (2026-11-19): a problem report says which
+// inverter quirks were on, so a field report of a quirk can be read
+// against what the reporter's dashboard showed.
+func TestReportFactsQuirks(t *testing.T) {
+	h := newHarness(t)
+	set := withSettings(t, h)
+	if err := set.Set(quirks.Key(quirks.EPSDropouts), "true", "test"); err != nil {
+		t.Fatal(err)
+	}
+	facts, err := h.srv.reportFacts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, _ := facts["quirks"].(map[string]bool)
+	if !q[quirks.EPSDropouts] {
+		t.Fatalf("facts quirks: %#v", facts["quirks"])
 	}
 }

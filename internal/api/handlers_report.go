@@ -104,6 +104,8 @@ func (s *Server) reportFacts() (map[string]any, error) {
 			"public_all_pages":    v.PublicAllPages,
 		},
 		"setup_checks": s.setupChecks(st),
+		// which inverter quirks the reporter's pages compensated for
+		"quirks": v.Quirks,
 	}
 	if st.AsOf != nil {
 		facts["data_age_s"] = int(s.clock().Sub(*st.AsOf).Seconds())

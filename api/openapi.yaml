@@ -1028,6 +1028,7 @@ paths:
                 update.check_interval_h: { type: [integer, 'null'], minimum: 0, maximum: 720 }
                 update.prerelease: { type: [boolean, 'null'] }
                 update.auto_apply: { type: [boolean, 'null'] }
+                quirks.eps_dropouts: { type: [boolean, 'null'], description: "Expert. See GET /quirks." }
               additionalProperties: false
       responses:
         '200':
@@ -1057,6 +1058,42 @@ paths:
           content:
             application/yaml:
               schema: { type: string }
+  /quirks:
+    get:
+      tags: [Config]
+      operationId: getQuirks
+      summary: Known inverter quirks and whether each is on
+      description: |
+        Inverter behaviours seen in the field that the app can compensate
+        for, each with what turning it on changes, where it was seen, its
+        default and its effective state. A quirk only changes how values
+        are shown; stored history, the API and exports stay as the
+        inverter reports them. Change one with `PUT /settings`
+        (`quirks.<id>`, expert role) or `[quirks]` in the config file.
+      x-required-role: read-only
+      responses:
+        '200':
+          description: The quirks
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [quirks]
+                properties:
+                  quirks:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, title, effect, seen, default, enabled, source]
+                      properties:
+                        id: { type: string, examples: [eps_dropouts] }
+                        title: { type: string }
+                        effect: { type: string, description: What turning it on changes. }
+                        seen: { type: string, description: Where it has been observed. }
+                        default: { type: boolean }
+                        enabled: { type: boolean }
+                        source: { type: string, enum: [default, config, ui] }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /update:
     get:
       tags: [Config]

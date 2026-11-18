@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"time"
 
+	"foxesslocal/internal/quirks"
+
 	"foxesslocal/internal/identity"
 	"foxesslocal/internal/settings"
 )
@@ -33,6 +35,8 @@ var settingsOrder = []string{
 	settings.KeyUpdateInterval, settings.KeyUpdatePrerelease, settings.KeyUpdateAutoApply,
 }
 
+func init() { settingsOrder = append(settingsOrder, quirks.Keys()...) }
+
 // secretShown stands in for a secret setting's value below installer.
 const secretShown = "(set)"
 
@@ -54,6 +58,7 @@ func (s *Server) settingsRoutes(mux *http.ServeMux) {
 	// expert: the tuning knobs; each other key also needs an installer
 	// (checked per key in the handler)
 	s.handle(mux, "PUT /api/v1/settings", s.protect(RoleExpert, s.handleSettingsPut))
+	s.handle(mux, "GET /api/v1/quirks", s.protect(RoleReadOnly, s.handleQuirks))
 	s.handle(mux, "POST /api/v1/notify/test", s.protect(RoleInstaller, s.handleNotifyTest))
 	s.handle(mux, "GET /api/v1/setup", s.protect(RoleInstaller, s.handleSetup))
 	s.handle(mux, "POST /api/v1/setup/complete", s.protect(RoleInstaller, s.handleSetupComplete))
@@ -105,6 +110,9 @@ func (s *Server) settingsBody(a SettingsAdmin, tk Token) settingsView {
 		settings.KeyUpdateInterval:   int(v.UpdateInterval / time.Hour),
 		settings.KeyUpdatePrerelease: v.UpdatePrerelease,
 		settings.KeyUpdateAutoApply:  v.UpdateAutoApply,
+	}
+	for id, on := range v.Quirks {
+		vals[quirks.Key(id)] = on
 	}
 	out := settingsView{}
 	for _, k := range settingsOrder {
@@ -416,4 +424,31 @@ func checkCapacity(capWh int) Check {
 	c.Status, c.Detail = checkFail, "not set: the stored energy cannot be shown"
 	c.Fix = "Enter the battery's usable capacity (modules × kWh per module; an EQ4800 module is 4.66 kWh)."
 	return c
+}
+
+// quirkItem is one known quirk with its effective state (GET /quirks).
+type quirkItem struct {
+	quirks.Quirk
+	Enabled bool   `json:"enabled"`
+	Source  string `json:"source"` // default | config | ui
+}
+
+type quirksView struct {
+	Quirks []quirkItem `json:"quirks"`
+}
+
+// handleQuirks is GET /quirks: every known inverter quirk, what turning
+// it on does, where it was seen, its default and its effective state.
+// Read-only; an expert changes one with PUT /settings (quirks.<id>).
+func (s *Server) handleQuirks(w http.ResponseWriter, _ *http.Request, _ Token) {
+	a, ok := s.admin(w)
+	if !ok {
+		return
+	}
+	v, src := a.Get(), a.Sources()
+	out := quirksView{Quirks: []quirkItem{}}
+	for _, q := range quirks.All() {
+		out.Quirks = append(out.Quirks, quirkItem{Quirk: q, Enabled: v.Quirks[q.ID], Source: string(src[quirks.Key(q.ID)])})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
