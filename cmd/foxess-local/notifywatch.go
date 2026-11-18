@@ -36,6 +36,8 @@ var systemNotices = map[string]struct {
 	api.SystemGridLost:           {notify.Critical, "Grid down: the inverter is on backup"},
 	api.SystemGridRestored:       {notify.Info, "Grid back"},
 	api.SystemUncleanRestart:     {notify.Warning, "foxess-local restarted after an unexpected stop"},
+	api.SystemBatteryLow:         {notify.Warning, "Battery low"},
+	api.SystemBatteryForecastLow: {notify.Warning, "Battery running low"},
 	api.SystemGateRuleLoss:       {notify.Critical, "Gate rule loss: the inverter was unfiltered"},
 	api.SystemUpgradeRolledBack:  {notify.Critical, "Upgrade rolled back"},
 	api.SystemMaintenanceOpened:  {notify.Warning, "Maintenance window opened: the cloud may write to the inverter"},

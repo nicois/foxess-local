@@ -68,6 +68,9 @@ type Store struct {
 	stop     chan struct{}
 	done     chan struct{}
 
+	// writeDelay is the write delay in ns (0 = flushInterval; SetWriteDelay)
+	writeDelay atomic.Int64
+
 	// enq / applied count enqueued and applied write items; Flush hands
 	// off over these atomics because the flusher may run outside the
 	// caller's synctest bubble (bubble channels are fatal to cross).

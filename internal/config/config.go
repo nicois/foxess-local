@@ -31,6 +31,8 @@ const (
 var UISettable = []string{
 	"battery.capacity_wh", "access.public_read_only", "access.public_all_pages", "forward.mode",
 	"notify.webhook_url", "notify.ntfy_url",
+	"store.write_delay_s",
+	"alerts.soc_threshold_pct", "alerts.soc_horizon_min", "alerts.soc_p_value", "alerts.soc_window_min",
 }
 
 // retiredKeys were accepted by earlier releases and no longer do
@@ -55,6 +57,7 @@ type Config struct {
 	Retention Retention `toml:"retention"`
 	Access    Access    `toml:"access"`
 	Notify    Notify    `toml:"notify"`
+	Alerts    Alerts    `toml:"alerts"`
 	Net       Net       `toml:"net"`
 	Store     Store     `toml:"store"`
 	Forward   Forward   `toml:"forward"`
@@ -185,7 +188,69 @@ type Net struct {
 // Store holds the SQLite persistence path (the framesvc/forward store).
 type Store struct {
 	Path string `toml:"path"`
+	// WriteDelayS is how long new records may wait in memory before they
+	// are written, in seconds (default DefaultWriteDelayS; 0 = at once,
+	// every 0.25 s). A power cut loses what waits; commands and setting
+	// changes are always written at once.
+	WriteDelayS *int `toml:"write_delay_s"`
 }
+
+// DefaultWriteDelayS is the default write delay (owner, 2026-11-18).
+const DefaultWriteDelayS = 60
+
+// WriteDelay is the write delay in seconds (the default when unset).
+func (s Store) WriteDelay() int {
+	if s.WriteDelayS == nil {
+		return DefaultWriteDelayS
+	}
+	return *s.WriteDelayS
+}
+
+// Threshold is the battery-alert threshold in percent (0 = off; the
+// default when unset).
+func (a Alerts) Threshold() int {
+	if a.SocThresholdPct == nil {
+		return DefaultSocThresholdPct
+	}
+	return *a.SocThresholdPct
+}
+
+// HorizonMin is the forecast's horizon in minutes (the default when
+// unset).
+func (a Alerts) HorizonMin() int { return orDefault(a.SocHorizonMin, DefaultSocHorizonMin) }
+
+// PValue is the forecast's p-value (the default when unset).
+func (a Alerts) PValue() float64 { return orDefault(a.SocPValue, DefaultSocPValue) }
+
+// WindowMin is the forecast's sampling window in minutes (the default
+// when unset).
+func (a Alerts) WindowMin() int { return orDefault(a.SocWindowMin, DefaultSocWindowMin) }
+
+func orDefault[T int | float64](v, d T) T {
+	if v == 0 {
+		return d
+	}
+	return v
+}
+
+// Alerts tunes the battery alerts (owner, 2026-11-18): a notice when the
+// state of charge is at or below the threshold, and one when a line
+// fitted to the last window of readings says, with confidence 1 − p,
+// that it will be there within the horizon.
+type Alerts struct {
+	SocThresholdPct *int    `toml:"soc_threshold_pct"` // 0 = off
+	SocHorizonMin   int     `toml:"soc_horizon_min"`
+	SocPValue       float64 `toml:"soc_p_value"`
+	SocWindowMin    int     `toml:"soc_window_min"`
+}
+
+// The battery-alert defaults.
+const (
+	DefaultSocThresholdPct = 20
+	DefaultSocHorizonMin   = 120
+	DefaultSocPValue       = 0.05
+	DefaultSocWindowMin    = 30
+)
 
 // Forward holds the cloud-forward ladder (C-001): the mode. The
 // maintenance window is process-local state (no config key).
@@ -303,6 +368,8 @@ func (c *Config) checkKeys(undecoded []toml.Key) error {
 
 // applyDefaults fills every unset setting; paths derive from StateDir.
 func (c *Config) applyDefaults() error {
+	// [store] write_delay_s and [alerts] default in their accessors
+	// (Store.WriteDelay, Alerts.Threshold, …)
 	if c.StateDir == "" {
 		c.StateDir = DefaultStateDir
 	}

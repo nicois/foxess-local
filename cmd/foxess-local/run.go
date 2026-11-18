@@ -113,6 +113,7 @@ type handle struct {
 	capt     *wincap.Capturer   // maintenance-window captures
 	notifier *notify.Notifier   // outbound notifications (F2)
 	grid     gridWatch          // grid lost / restored, from the inverter state
+	soc      socWatch           // the battery alerts, from the state of charge
 	pprof    *http.Server       // [debug] pprof_listen; nil when off
 	live     *liveness.Tracker  // online = a session up and fresh telemetry
 	tok      *api.TokenStore    // flushed on shutdown (token last_used)
@@ -790,6 +791,7 @@ func (h *handle) svcObs(ev framesvc.Event) {
 		if gev, ok := h.grid.observe(ev.Tele.InvState, h.clk()); ok {
 			h.bus.PublishSystem(gev)
 		}
+		h.observeSoc(ev.Tele.Soc, h.clk())
 		h.bus.PublishSnapshot(api.SnapshotEvent{
 			TS: h.clk(),
 			Power: api.Power{
@@ -1155,6 +1157,9 @@ func buildSettings(st *store.Store, cfg *config.Config, clk func() time.Time) (*
 	}
 	fwd := forward.New(st, clk, set.Get().ForwardMode)
 	fwd.OnChange(func(m policy.ForwardMode, _ string) error { return set.Persist(settings.KeyForwardMode, string(m)) })
+	// the write delay applies at once (owner, 2026-11-18: fragile storage)
+	st.SetWriteDelay(set.Get().WriteDelay)
+	set.OnChange(func(v settings.Values) { st.SetWriteDelay(v.WriteDelay) })
 	return set, fwd, nil
 }
 

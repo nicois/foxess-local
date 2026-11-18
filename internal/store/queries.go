@@ -134,6 +134,7 @@ type State struct {
 // TelemetryRange returns telemetry rows with since <= ts < until
 // (inclusive of since, exclusive of until), ordered by ts.
 func (s *Store) TelemetryRange(since, until time.Time) ([]Telemetry, error) {
+	s.catchUp()
 	rows, err := s.rdb.Query(`
 		SELECT conn_id, ts, sol, grid, haus, acport, batt, soc, charge_state,
 			idnt_grid, idnt_ac, haus_dup
@@ -164,6 +165,7 @@ func (s *Store) TelemetryRange(since, until time.Time) ([]Telemetry, error) {
 // QueryAudit returns audit events with ts >= since (inclusive), filtered
 // by kind when given, ordered by ts.
 func (s *Store) QueryAudit(since time.Time, kinds ...string) ([]AuditEvent, error) {
+	s.catchUp()
 	q := "SELECT ts, kind, detail FROM audit_events WHERE ts >= ?"
 	args := []any{encTS(since)}
 	if len(kinds) > 0 {
@@ -197,6 +199,7 @@ func (s *Store) QueryAudit(since time.Time, kinds ...string) ([]AuditEvent, erro
 // the C-001 audit ("which s2c frames passed, and by which open state") — ordered by
 // ts, conn, and seq.
 func (s *Store) AuditFrames(decision Decision, dir capture.Dir) ([]FrameRecord, error) {
+	s.catchUp()
 	rows, err := s.rdb.Query(`
 		SELECT conn_id, seq, dir, off, ts, class, dev, fn, plen, payload,
 			decision, reason, origin, decoded
@@ -211,6 +214,7 @@ func (s *Store) AuditFrames(decision Decision, dir capture.Dir) ([]FrameRecord, 
 // FramesBetween returns every frame with from <= ts < to, oldest first
 // (the diagnostic bundle's frame log).
 func (s *Store) FramesBetween(from, to time.Time) ([]FrameRecord, error) {
+	s.catchUp()
 	rows, err := s.rdb.Query(`
 		SELECT conn_id, seq, dir, off, ts, class, dev, fn, plen, payload,
 			decision, reason, origin, decoded
@@ -349,6 +353,7 @@ type FramePage struct {
 // in hand, later ranges stop at its oldest timestamp. The cost follows
 // the page size, never the log size, for common and rare filters alike.
 func (s *Store) FramesPage(p FramePage) ([]FrameRecord, error) {
+	s.catchUp()
 	if len(p.Sets) == 0 || p.Limit <= 0 || (p.Classes != nil && len(p.Classes) == 0) {
 		return []FrameRecord{}, nil
 	}
@@ -467,6 +472,7 @@ type AuditQuery struct {
 // AuditPage returns one page of audit events (newest first, at most
 // Limit; the ts index bounds the walk).
 func (s *Store) AuditPage(a AuditQuery) ([]AuditEvent, error) {
+	s.catchUp()
 	if a.Limit <= 0 {
 		return []AuditEvent{}, nil
 	}

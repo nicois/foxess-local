@@ -382,13 +382,13 @@ func TestBatchWriter(t *testing.T) {
 
 	payload := telePayload(1, 1, 1, 1, 1, 1, 2)
 	const (
-		countPathN = 128
+		countPathN = maxPending // the memory cap (the write delay holds the rest)
 		totalN     = countPathN + tickFrames + 1
 	)
 	for i := range countPathN {
 		s.RecordFrame(frameRecord(testConnID, i, capture.DirC2S, classTele, payload))
 	}
-	// The 128th record must trigger a flush without Flush() or a tick.
+	// The maxPending-th record must trigger a flush without Flush() or a tick.
 	waitFor(t, func() bool { return countRows(t, s, tableFrames) == countPathN })
 
 	// Tick path: a few records below the batch size, then one tick.

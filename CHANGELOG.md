@@ -21,6 +21,20 @@ version; anything else bumps the patch version.
 ## [Unreleased]
 
 ### Added
+- A write delay for fragile storage (SD cards, eMMC: OpenStick-class
+  boards). New readings wait in memory and are written in fewer, larger
+  batches, every 60 s by default (`[store] write_delay_s`, 0–900;
+  also under More → Settings → Tuning, expert).
+  - A power cut loses at most what was waiting.
+  - Commands and setting changes are written at once, a clean stop
+    writes everything, and History and Messages are never behind.
+- Battery alerts (`battery-low`, `battery-forecast-low`): a notice
+  when the charge is at or below the alert level (20 % by default), and
+  when a line fitted to the last 30 minutes says, with 95 % confidence,
+  that it will be there within 2 hours. All four knobs are in
+  `[alerts]` and under Tuning (expert); a level of 0 turns them off.
+- Expert tokens can change the tuning settings; the other settings
+  still need an installer.
 - `CHANGELOG.md`, and `make tag`. `make tag` picks the next version
   from the entries under Unreleased, dates them, commits and creates
   the tag. Each draft release's notes are its changelog section.

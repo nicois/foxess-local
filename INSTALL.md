@@ -303,6 +303,9 @@ needs attention, without the web UI open:
   5-minute check puts them back);
 - an upgrade that rolled back;
 - foxess-local itself restarting after an unexpected stop (a power cut);
+- the battery at or below its alert level (20 % by default), or forecast
+  to get there within two hours (tunable at expert level under More →
+  Settings → Tuning; 0 turns these off);
 - a failed command or schedule, a write refused by the hourly limit,
   low disk space;
 - the cloud-forwarding mode or a maintenance window changing.

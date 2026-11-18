@@ -787,7 +787,8 @@ onSSE("connection", (d) => setOnline(d.state === "online"));
 
 onSSE("system", (d) => {
   const bad = d.type.includes("failed") || d.type.includes("error");
-  toast(d.type + (d.detail ? ": " + d.detail : ""), bad ? "error" : "info");
+  const warn = d.type.startsWith("battery-") || d.type === "grid-lost" || d.type === "unclean-restart";
+  toast(d.type + (d.detail ? ": " + d.detail : ""), bad ? "error" : warn ? "warn" : "info");
   if (routeName() === "maintenance" &&
       ["maintenance-opened", "maintenance-extended", "maintenance-expired", "maintenance-closed"].includes(d.type)) {
     render();
@@ -2535,6 +2536,7 @@ async function renderSettings() {
   <section class="stack">
     ${updatesPanel(upd)}
     ${notifyPanel(sets)}
+    ${tuningPanel(sets)}
     <article class="panel">
       <h3>Access tokens</h3>
       ${tokenList}
@@ -2594,7 +2596,8 @@ function notifyPanel(sets) {
       <h3>Notifications</h3>
       <p class="small">Hear about a problem without this page open: the inverter offline for 10 minutes (and back),
         the gate losing its rules, a failed command or schedule, a write refused by the hourly limit, low disk,
-        an upgrade rolled back, and cloud-forwarding or maintenance-window changes.</p>
+        an upgrade rolled back, cloud-forwarding or maintenance-window changes, a lost grid, a restart after a power cut,
+        and a low or falling battery (see Tuning).</p>
       ${hidden ? `<dl class="kv">${fields}</dl><p class="muted small">Sign in with an installer token to change or test them.</p>`
         : `<div class="fields stacked-fields">${fields}</div>
       <div class="row-actions">
@@ -2603,6 +2606,57 @@ function notifyPanel(sets) {
       </div>
       <p class="muted small">Empty turns a target off. The URLs are kept from other users: only installers see them.</p>`}
     </article>`;
+}
+
+// TUNING_KEYS: the expert-level knobs (owner, 2026-11-18): [key, label,
+// unit, min, max, step, help].
+const TUNING_KEYS = [
+  ["store.write_delay_s", "Write delay", "s", 0, 900, 1,
+    "How long new readings may wait in memory before they are saved. Longer is gentler on an SD card or eMMC; a power cut loses what waits. Commands and setting changes are always saved at once. 0 saves at once."],
+  ["alerts.soc_threshold_pct", "Battery alert level", "%", 0, 95, 1,
+    "Notify when the battery is at or below this charge, or is forecast to reach it. 0 turns the battery alerts off."],
+  ["alerts.soc_horizon_min", "Forecast horizon", "min", 10, 1440, 1,
+    "How far ahead the forecast looks."],
+  ["alerts.soc_window_min", "Forecast window", "min", 5, 240, 1,
+    "How much recent history the forecast fits its line to."],
+  ["alerts.soc_p_value", "Forecast p-value", "", 0.001, 0.5, 0.001,
+    "How sure the forecast must be: 0.05 means 95 % confident. Smaller means fewer, later warnings."],
+];
+
+// tuningPanel: the expert knobs — anyone may look; saving needs an
+// expert token (the API refuses otherwise, and the toast says so).
+function tuningPanel(sets) {
+  if (!sets) return "";
+  const item = (k) => sets.settings?.find((s) => s.key === k);
+  const fields = TUNING_KEYS.map(([k, label, unit, min, max, step, help]) => {
+    const it = item(k);
+    return `<label>${esc(label)}${unit ? ` <span class="muted small">(${esc(unit)})</span>` : ""}
+      <input type="number" id="tune-${k.replace(/\./g, "-")}" value="${esc(it?.value ?? "")}" data-orig="${esc(it?.value ?? "")}" min="${min}" max="${max}" step="${step}" inputmode="decimal">
+      <span class="muted small">${esc(help)}${it?.source === "config" ? " Set in the config file; a value saved here wins." : ""}</span></label>`;
+  }).join("");
+  return `
+    <article class="panel">
+      <h3>Tuning <span class="chip muted">expert</span></h3>
+      <div class="fields stacked-fields">${fields}</div>
+      <div class="row-actions">
+        <button type="button" class="cmd" data-action="tuning-save">Save</button>
+      </div>
+    </article>`;
+}
+
+// tuningSave stores the knobs that changed (empty = back to the file's
+// or the default). Unchanged ones are not sent: saving them would pin
+// today's default as a UI value.
+async function tuningSave() {
+  const body = {};
+  for (const [k] of TUNING_KEYS) {
+    const el = byId("tune-" + k.replace(/\./g, "-"));
+    const v = el.value.trim();
+    if (v === el.dataset.orig) continue;
+    body[k] = v === "" ? null : Number(v);
+  }
+  if (Object.keys(body).length === 0) { toast("nothing changed"); return; }
+  if (await setupSave("/settings", "PUT", body, "tuning saved")) render();
 }
 
 // notifySave stores both targets ("" = off).
@@ -2900,6 +2954,9 @@ document.addEventListener("click", async (e) => {
       break;
     case "notify-save":
       notifySave();
+      break;
+    case "tuning-save":
+      tuningSave();
       break;
     case "notify-test":
       notifyTest();

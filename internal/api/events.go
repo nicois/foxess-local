@@ -44,6 +44,11 @@ const (
 	// SystemUncleanRestart: foxess-local started after an unexpected stop
 	// (no clean-shutdown marker): a power cut, or a crash.
 	SystemUncleanRestart = "unclean-restart"
+	// SystemBatteryLow / SystemBatteryForecastLow: the battery alerts
+	// (internal/socalert): at or below the alert level, or forecast to be
+	// there within the horizon.
+	SystemBatteryLow         = "battery-low"
+	SystemBatteryForecastLow = "battery-forecast-low"
 )
 
 // Audit event kinds (the store audit_events rows the API writes; the

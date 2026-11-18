@@ -109,6 +109,7 @@ func (s *Store) windowAgg(from, to time.Time) (Agg, bool, error) {
 // (signed for grid/battery: the net flow), with the sample count in N;
 // ok is false for an empty window.
 func (s *Store) WindowAverage(from, to time.Time) (Agg, bool, error) {
+	s.catchUp()
 	return s.windowAgg(from, to)
 }
 
@@ -173,6 +174,7 @@ func (s *Store) firstBucket(last int64) (time.Time, bool, error) {
 // were still in flight is self-healed by the re-cover, and older buckets
 // are never re-read (the channel has no retransmission). Idempotent.
 func (s *Store) RollUp() (int, error) {
+	s.catchUp()
 	end := s.now().Truncate(bucketLen)
 	last, err := s.lastBucket()
 	if err != nil {
@@ -236,6 +238,7 @@ FROM buckets15m WHERE bucket >= ? AND bucket < ? ORDER BY bucket`,
 // no rollup at all it starts at the bucket of MIN(ts), never at since
 // (a 7-day range must not scan 672 empty windows).
 func (s *Store) HistoryBucketsLive(since, now time.Time) ([]Agg, error) {
+	s.catchUp()
 	out, err := s.HistoryBuckets(since, now)
 	if err != nil {
 		return nil, err
@@ -273,6 +276,7 @@ func (s *Store) HistoryBucketsLive(since, now time.Time) ([]Agg, error) {
 // HistoryRaw aggregates raw telemetry into 1-minute buckets [since, until)
 // (the 1-hour range path).
 func (s *Store) HistoryRaw(since, until time.Time) ([]Agg, error) {
+	s.catchUp()
 	from := since.UTC().Truncate(time.Minute)
 	to := until.UTC().Truncate(time.Minute)
 	if to.Before(until) {

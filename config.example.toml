@@ -60,13 +60,27 @@
 # More → Settings, where a value wins over this file): the inverter
 # offline for 10 minutes and back, the gate losing its rules, a failed
 # command or schedule, a write refused by the hourly budget, low disk,
-# an upgrade rolled back, and maintenance-window / forward-mode changes.
+# an upgrade rolled back, maintenance-window / forward-mode changes, a
+# lost grid, a restart after a power cut, and the battery alerts
+# ([alerts]).
 # webhook_url: a JSON POST per notice — e.g. a Home Assistant webhook
 # trigger. The body: {"source", "event", "severity", "title",
 # "message", "ts"}.
 # webhook_url = "http://homeassistant.local:8123/api/webhook/foxess-local-<random>"
 # ntfy_url: an ntfy topic (a phone push); pick a hard-to-guess topic.
 # ntfy_url = "https://ntfy.sh/foxess-<random>"
+
+[alerts]
+# The battery alerts (also settable in the web UI at expert level, More →
+# Settings). battery-low: the state of charge is at or below the
+# threshold. battery-forecast-low: a straight line fitted to the last
+# soc_window_min of readings says, with confidence 1 − soc_p_value, that
+# it will be there within soc_horizon_min. Each fires once until the
+# charge recovers 5 points above the threshold.
+# soc_threshold_pct = 20   # 0 = off
+# soc_horizon_min = 120
+# soc_p_value = 0.05       # 0.05 = 95 % confident
+# soc_window_min = 30
 
 [net]
 # allow_public: accept clients from non-local sources (default: LAN only
@@ -112,6 +126,12 @@
 # Per-path overrides of the state_dir layout (rarely needed):
 # [store]
 # path = "/var/lib/foxess-local/foxess.db"
+# write_delay_s: how long new readings may wait in memory before they are
+# written (0 = at once; at most 900). Fewer, larger writes wear an SD
+# card or eMMC far less; a power cut loses what waits. Commands and
+# setting changes are always written at once. Also settable in the web
+# UI (More → Settings, expert).
+# write_delay_s = 60
 # [tokens]
 # path = "/var/lib/foxess-local/tokens.json"
 # [certs]

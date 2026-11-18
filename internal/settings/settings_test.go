@@ -110,3 +110,52 @@ func TestSetupCompleted(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, again.SetupCompleted())
 }
+
+// TestTuningDefaults (owner, 2026-11-18): the write delay and the
+// battery-alert knobs have defaults, take the file's values, and are
+// range-checked; they are the expert-level settings.
+func TestTuningDefaults(t *testing.T) {
+	st, cfg := setup(t, "[alerts]\nsoc_threshold_pct = 15\n")
+	s, err := New(st, cfg, clock)
+	require.NoError(t, err)
+	v := s.Get()
+	assert.Equal(t, 60*time.Second, v.WriteDelay)
+	assert.Equal(t, 15, v.SocThresholdPct)
+	assert.Equal(t, 120*time.Minute, v.SocHorizon)
+	assert.InDelta(t, 0.05, v.SocPValue, 1e-9)
+	assert.Equal(t, 30*time.Minute, v.SocWindow)
+	assert.Equal(t, SourceFile, s.Sources()[KeySocThreshold])
+
+	for k, bad := range map[string]string{
+		KeyWriteDelay: "901", KeySocThreshold: "101", KeySocHorizon: "5",
+		KeySocPValue: "0.6", KeySocWindow: "1",
+	} {
+		require.Error(t, s.Set(k, bad, "expert"), "%s=%s", k, bad)
+	}
+	require.NoError(t, s.Set(KeyWriteDelay, "900", "expert"))
+	require.NoError(t, s.Set(KeySocPValue, "0.01", "expert"))
+	require.NoError(t, s.Set(KeySocThreshold, "0", "expert")) // 0 = off
+	v = s.Get()
+	assert.Equal(t, 15*time.Minute, v.WriteDelay)
+	assert.InDelta(t, 0.01, v.SocPValue, 1e-9)
+	assert.Equal(t, 0, v.SocThresholdPct)
+
+	assert.True(t, Expert(KeySocWindow))
+	assert.True(t, Expert(KeyWriteDelay))
+	assert.False(t, Expert(KeyNotifyNtfy))
+	assert.False(t, Expert(KeyCapacityWh))
+}
+
+// TestOnChange: a change (or a reset) tells the host the new values —
+// the write delay applies at once, without a restart.
+func TestOnChange(t *testing.T) {
+	st, cfg := setup(t, "")
+	s, err := New(st, cfg, clock)
+	require.NoError(t, err)
+	var got []time.Duration
+	s.OnChange(func(v Values) { got = append(got, v.WriteDelay) })
+	require.NoError(t, s.Set(KeyWriteDelay, "900", "expert"))
+	require.NoError(t, s.Set(KeyWriteDelay, "900", "expert")) // no change: no call
+	require.NoError(t, s.Reset(KeyWriteDelay, "expert"))
+	assert.Equal(t, []time.Duration{15 * time.Minute, time.Minute}, got)
+}

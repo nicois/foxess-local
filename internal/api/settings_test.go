@@ -232,3 +232,45 @@ func TestSettingsNotifyTargets(t *testing.T) {
 		t.Fatalf("reset: %s", src)
 	}
 }
+
+// TestSettingsExpertTuning (owner, 2026-11-18): an expert may change the
+// tuning knobs (write delay, battery alerts) but not the installer's
+// settings; a body mixing both is refused whole; values are range-checked.
+func TestSettingsExpertTuning(t *testing.T) {
+	h := newHarness(t)
+	set := withSettings(t, h)
+	var b settingsBody
+	decode(t, h.do(t, httpGet, pathSettings, RoleReadOnly, nil), &b)
+	if v, src := b.find(settings.KeyWriteDelay); v != float64(60) || src != string(settings.SourceDefault) {
+		t.Fatalf("write delay: %v %s", v, src)
+	}
+	if v, _ := b.find(settings.KeySocPValue); v != 0.05 {
+		t.Fatalf("p-value: %v", v)
+	}
+	rr := h.do(t, httpPut, pathSettings, RoleExpert, map[string]any{
+		settings.KeyWriteDelay: 900, settings.KeySocThreshold: 25, settings.KeySocPValue: 0.01,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expert PUT: %d %s", rr.Code, rr.Body.String())
+	}
+	if v := set.Get(); v.SocThresholdPct != 25 || v.SocPValue != 0.01 {
+		t.Fatalf("not applied: %+v", v)
+	}
+	if rr := h.do(t, httpPut, pathSettings, RoleExpert, map[string]any{
+		settings.KeySocWindow: 10, settings.KeyCapacityWh: 1000,
+	}); rr.Code != http.StatusForbidden {
+		t.Fatalf("expert setting an installer key: %d %s", rr.Code, rr.Body.String())
+	}
+	if set.Get().SocWindow == 10*60*1e9 {
+		t.Fatal("a refused body changed something")
+	}
+	if rr := h.do(t, httpPut, pathSettings, RoleStandard, map[string]any{settings.KeySocWindow: 10}); rr.Code != http.StatusForbidden {
+		t.Fatalf("standard: %d", rr.Code)
+	}
+	for k, bad := range map[string]any{settings.KeyWriteDelay: 901, settings.KeySocPValue: "x", settings.KeySocHorizon: 2.5} {
+		if rr := h.do(t, httpPut, pathSettings, RoleExpert, map[string]any{k: bad}); rr.Code != http.StatusBadRequest ||
+			!strings.Contains(rr.Body.String(), k) {
+			t.Errorf("%s=%v: %d %s", k, bad, rr.Code, rr.Body.String())
+		}
+	}
+}

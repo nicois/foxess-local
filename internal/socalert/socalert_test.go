@@ -1,0 +1,145 @@
+package socalert
+
+import (
+	"math"
+	"math/rand/v2"
+	"strings"
+	"testing"
+	"time"
+)
+
+var t0 = time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
+
+var params = Params{Threshold: 20, Horizon: 2 * time.Hour, Window: 30 * time.Minute, P: 0.05}
+
+// feed runs SoC samples every 5 s from t0 for d, soc(t) given in hours,
+// rounded as the inverter reports it, and returns every alert.
+func feed(w *Watch, p Params, d time.Duration, soc func(h float64) float64) []Alert {
+	var out []Alert
+	for at := time.Duration(0); at <= d; at += 5 * time.Second {
+		v := int(math.Round(soc(at.Hours())))
+		out = append(out, w.Observe(t0.Add(at), v, p)...)
+	}
+	return out
+}
+
+// TestForecastAlerts (owner, 2026-11-18): a discharge that will reach the
+// threshold within the horizon alerts once, with the expected time.
+func TestForecastAlerts(t *testing.T) {
+	var w Watch
+	// 60 % falling 15 %/h: 20 % at 02:40; the 2 h forecast reaches it
+	// after about 40 min, so an hour of readings must alert, once
+	got := feed(&w, params, time.Hour, func(h float64) float64 { return 60 - 15*h })
+	if len(got) != 1 || got[0].Kind != KindForecastLow {
+		t.Fatalf("alerts %+v", got)
+	}
+	// whole-percent readings put the fitted crossing within a minute of
+	// 02:40
+	if !strings.Contains(got[0].Detail, "falling 15 %/h") || !strings.Contains(got[0].Detail, "95 % confident") ||
+		(!strings.Contains(got[0].Detail, "02:39") && !strings.Contains(got[0].Detail, "02:40")) {
+		t.Fatalf("detail %q", got[0].Detail)
+	}
+}
+
+// TestForecastQuiet: a slow discharge that will not reach the threshold
+// within the horizon, a rising charge, and too little data never alert.
+func TestForecastQuiet(t *testing.T) {
+	for name, soc := range map[string]func(h float64) float64{
+		"slow":   func(h float64) float64 { return 60 - 5*h }, // 20 % in 8 h
+		"rising": func(h float64) float64 { return 40 + 10*h },
+		"flat":   func(float64) float64 { return 25 },
+	} {
+		var w Watch
+		if got := feed(&w, params, 2*time.Hour, soc); len(got) != 0 {
+			t.Errorf("%s: %+v", name, got)
+		}
+	}
+	var w Watch // a steep fall, but only 10 min of the 30 min window
+	if got := feed(&w, params, 10*time.Minute, func(h float64) float64 { return 30 - 30*h }); len(got) != 0 {
+		t.Errorf("too little data: %+v", got)
+	}
+}
+
+// TestForecastNoise: noisy readings around a level do not alert, while
+// the same noise on a clear fall still does.
+func TestForecastNoise(t *testing.T) {
+	r := rand.New(rand.NewPCG(1, 2))
+	var w Watch
+	// a level well clear of the alert level, ±4 % of noise
+	if got := feed(&w, params, 2*time.Hour, func(float64) float64 { return 45 + 4*r.NormFloat64() }); len(got) != 0 {
+		t.Errorf("noise alone: %+v", got)
+	}
+	var w2 Watch
+	if got := feed(&w2, params, time.Hour, func(h float64) float64 { return 50 - 20*h + 2*r.NormFloat64() }); len(got) != 1 {
+		t.Errorf("a clear fall under noise: %+v", got)
+	}
+}
+
+// TestLowAndRearm: at or below the threshold, one battery-low (and no
+// forecast after it); both re-arm only 5 points above the threshold.
+func TestLowAndRearm(t *testing.T) {
+	var w Watch
+	p := params
+	var got []Alert
+	for i, soc := range []int{22, 21, 20, 19, 20, 21, 24, 25, 26, 20} {
+		got = append(got, w.Observe(t0.Add(time.Duration(i)*time.Minute), soc, p)...)
+	}
+	if len(got) != 2 || got[0].Kind != KindLow || got[1].Kind != KindLow {
+		t.Fatalf("alerts %+v", got)
+	}
+	if !strings.Contains(got[0].Detail, "20 %") {
+		t.Fatalf("detail %q", got[0].Detail)
+	}
+}
+
+// TestForecastRearm: after a forecast alert, a discharge that goes on
+// stays quiet; charging back up re-arms it, and the next fall alerts
+// again.
+func TestForecastRearm(t *testing.T) {
+	var w Watch
+	soc := func(h float64) float64 {
+		switch {
+		case h < 1:
+			return 60 - 15*h // falls: alert
+		case h < 2:
+			return 45 + 20*(h-1) // charges back to 65
+		}
+		return 65 - 15*(h-2) // falls again: alert again
+	}
+	// the second fall forecasts once the window has slid past the
+	// charging (about 3 h 15 min in)
+	if got := feed(&w, params, 4*time.Hour, soc); len(got) != 2 {
+		t.Fatalf("alerts %+v", got)
+	}
+}
+
+// TestOffAndClockJump: threshold 0 turns the alerts off; a clock that
+// jumps back (no RTC, NTP syncing) starts the window afresh.
+func TestOffAndClockJump(t *testing.T) {
+	var w Watch
+	off := params
+	off.Threshold = 0
+	if got := feed(&w, off, time.Hour, func(h float64) float64 { return 15 - 10*h }); len(got) != 0 {
+		t.Fatalf("off: %+v", got)
+	}
+	var w2 Watch
+	feed(&w2, params, 20*time.Minute, func(h float64) float64 { return 60 - 15*h })
+	w2.Observe(t0.Add(-time.Hour), 55, params)
+	if n := len(w2.samples); n != 1 {
+		t.Fatalf("after a backward jump %d samples, want 1", n)
+	}
+}
+
+// TestTQuantile: the t quantile used for the bound is close to the
+// tabulated values.
+func TestTQuantile(t *testing.T) {
+	for _, c := range []struct {
+		p    float64
+		df   int
+		want float64
+	}{{0.05, 10, 1.812}, {0.05, 30, 1.697}, {0.05, 1000, 1.646}, {0.01, 30, 2.457}} {
+		if got := tQuantile(c.p, c.df); math.Abs(got-c.want) > 0.01 {
+			t.Errorf("t(%v, %d) = %.3f, want %.3f", c.p, c.df, got, c.want)
+		}
+	}
+}

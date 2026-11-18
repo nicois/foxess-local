@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -27,6 +28,8 @@ type SettingsAdmin interface {
 var settingsOrder = []string{
 	settings.KeyCapacityWh, settings.KeyPublicReadOnly, settings.KeyPublicAllPages, settings.KeyForwardMode,
 	settings.KeyNotifyWebhook, settings.KeyNotifyNtfy,
+	settings.KeyWriteDelay,
+	settings.KeySocThreshold, settings.KeySocHorizon, settings.KeySocPValue, settings.KeySocWindow,
 }
 
 // secretShown stands in for a secret setting's value below installer.
@@ -47,7 +50,9 @@ func secretValue(v string, installer bool) any {
 // settingsRoutes registers the settings and setup endpoints (F12).
 func (s *Server) settingsRoutes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/v1/settings", s.protect(RoleReadOnly, s.handleSettingsGet))
-	s.handle(mux, "PUT /api/v1/settings", s.protect(RoleInstaller, s.handleSettingsPut))
+	// expert: the tuning knobs; each other key also needs an installer
+	// (checked per key in the handler)
+	s.handle(mux, "PUT /api/v1/settings", s.protect(RoleExpert, s.handleSettingsPut))
 	s.handle(mux, "POST /api/v1/notify/test", s.protect(RoleInstaller, s.handleNotifyTest))
 	s.handle(mux, "GET /api/v1/setup", s.protect(RoleInstaller, s.handleSetup))
 	s.handle(mux, "POST /api/v1/setup/complete", s.protect(RoleInstaller, s.handleSetupComplete))
@@ -91,6 +96,11 @@ func (s *Server) settingsBody(a SettingsAdmin, tk Token) settingsView {
 		settings.KeyForwardMode:    string(v.ForwardMode),
 		settings.KeyNotifyWebhook:  secretValue(v.NotifyWebhook, installer),
 		settings.KeyNotifyNtfy:     secretValue(v.NotifyNtfy, installer),
+		settings.KeyWriteDelay:     int(v.WriteDelay / time.Second),
+		settings.KeySocThreshold:   v.SocThresholdPct,
+		settings.KeySocHorizon:     int(v.SocHorizon / time.Minute),
+		settings.KeySocPValue:      v.SocPValue,
+		settings.KeySocWindow:      int(v.SocWindow / time.Minute),
 	}
 	out := settingsView{}
 	for _, k := range settingsOrder {
@@ -126,6 +136,20 @@ func (s *Server) handleSettingsPut(w http.ResponseWriter, r *http.Request, tk To
 	if p != nil {
 		writeProblem(w, http.StatusBadRequest, *p)
 		return
+	}
+	// an expert changes only the tuning knobs: one installer key refuses
+	// the whole body (nothing is stored)
+	if roleLevel[tk.Role] < roleLevel[RoleInstaller] {
+		for _, c := range changes {
+			if !settings.Expert(c.key) {
+				writeProblem(w, http.StatusForbidden, problem{
+					Title: "Insufficient role", Code: "insufficient_role",
+					Detail:       c.key + " needs an installer token",
+					RequiredRole: string(RoleInstaller), TokenRole: string(tk.Role),
+				})
+				return
+			}
+		}
 	}
 	for _, c := range changes {
 		var err error
@@ -196,6 +220,16 @@ func settingValue(key string, raw json.RawMessage) (string, error) {
 			return "", fmt.Errorf("must be a whole number of Wh from 1 to %d, or null", settings.MaxCapacityWh)
 		}
 		return strconv.Itoa(n), nil
+	case settings.KeyWriteDelay, settings.KeySocThreshold, settings.KeySocHorizon, settings.KeySocPValue, settings.KeySocWindow:
+		var f float64
+		if err := json.Unmarshal(raw, &f); err != nil {
+			return "", errors.New("must be a number, or null")
+		}
+		v := strconv.FormatFloat(f, 'g', -1, 64)
+		if err := settings.Check(key, v); err != nil {
+			return "", err
+		}
+		return v, nil
 	default: // the booleans
 		var b bool
 		if err := json.Unmarshal(raw, &b); err != nil {

@@ -14,12 +14,20 @@ import (
 	"foxesslocal/internal/frame"
 )
 
-// Batch-writer tuning. flushInterval is the production tick; tests inject
-// their own tick channel so no wall-clock is needed to drive a flush.
+// Batch-writer tuning. flushInterval is the production tick and the
+// shortest write delay; tests inject their own tick channel so no
+// wall-clock is needed to drive a flush.
+//
+// The write delay (SetWriteDelay; owner, 2026-11-18) lets records wait in
+// memory between writes: fewer, larger transactions wear an SD card or
+// eMMC far less, at the cost of losing what waits at a power cut. Audit
+// entries (commands, setting changes) are written at once, with
+// everything before them; reads of recent data write what waits first;
+// a clean Close writes everything. maxPending bounds the memory.
 const (
-	flushInterval  = 250 * time.Millisecond
-	flushBatchSize = 128
-	classTele      = frame.KindTele
+	flushInterval = 250 * time.Millisecond
+	maxPending    = 10_000
+	classTele     = frame.KindTele
 )
 
 // Decision is a frame's verdict (the frames.decision column).
@@ -259,7 +267,8 @@ func (s *Store) flusher() {
 		select {
 		case it := <-s.batch:
 			batch = append(batch, it)
-			if len(batch) >= flushBatchSize {
+			if _, urgent := it.(auditItem); urgent || len(batch) >= maxPending {
+				batch = s.drain(batch)
 				flush()
 			}
 		case ch := <-s.flushReq:
@@ -428,4 +437,31 @@ func applyTele(tx *sql.Tx, connID string, ts time.Time, tele frame.Tele) error {
 		tele.Batt, int(tele.Soc), int(tele.ChargeState), tele.IDGrid,
 		tele.IDAcport, tele.HausDup, tele.Eps, tb, ti, ta, bc, cmin, cmax)
 	return err
+}
+
+// SetWriteDelay sets how long records may wait in memory before they are
+// written (at least flushInterval; applies from the next tick).
+func (s *Store) SetWriteDelay(d time.Duration) {
+	d = max(d, flushInterval)
+	s.writeDelay.Store(int64(d))
+	if s.ticker != nil {
+		s.ticker.Reset(d)
+	}
+}
+
+// WriteDelay is the current write delay.
+func (s *Store) WriteDelay() time.Duration {
+	if d := time.Duration(s.writeDelay.Load()); d > 0 {
+		return d
+	}
+	return flushInterval
+}
+
+// catchUp writes what waits before a read of recent data, when a write
+// delay holds records back (with the default delay the tick is soon
+// enough, and a read never forces a write).
+func (s *Store) catchUp() {
+	if s.WriteDelay() > flushInterval && s.applied.Load() < s.enq.Load() {
+		s.Flush()
+	}
 }

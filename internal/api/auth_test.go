@@ -42,7 +42,7 @@ var roleOps = []roleOp{
 	{httpDelete, "/api/v1/config/tokens/t1", RoleInstaller},
 	{httpGet, "/api/v1/events", RoleReadOnly},
 	{httpGet, pathSettings, RoleReadOnly},
-	{httpPut, pathSettings, RoleInstaller},
+	{httpPut, pathSettings, RoleExpert}, // installer keys: checked per key (TestSettingsExpertTuning)
 	{httpGet, pathSetup, RoleInstaller},
 	{httpPost, pathSetupComplete, RoleInstaller},
 	{httpPost, pathReport, RoleInstaller},

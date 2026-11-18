@@ -972,7 +972,24 @@ paths:
         to turn the target off (over a config-file value). A notification
         URL is never written to the audit log (it records `(set)` /
         `(off)`).
-      x-required-role: installer
+
+        The tuning knobs need only an **expert** token; every other key
+        needs an installer, and one such key in an expert's body refuses
+        the whole request (`403`, nothing stored):
+        - `store.write_delay_s` (0–900, default 60): how long new records
+          may wait in memory before they are written. Fewer, larger
+          writes wear an SD card or eMMC far less; a power cut loses what
+          waits. Commands and setting changes are always written at once.
+          Applies immediately.
+        - `alerts.soc_threshold_pct` (0–95, default 20; 0 = off),
+          `alerts.soc_horizon_min` (10–1440, default 120),
+          `alerts.soc_p_value` (0.001–0.5, default 0.05),
+          `alerts.soc_window_min` (5–240, default 30): the battery alerts
+          (`battery-low` when the charge is at or below the threshold;
+          `battery-forecast-low` when a line fitted to the last window of
+          readings says, with confidence 1 − p, that it will be there
+          within the horizon).
+      x-required-role: expert
       requestBody:
         required: true
         content:
@@ -985,6 +1002,11 @@ paths:
                 access.public_all_pages: { type: [boolean, 'null'] }
                 notify.webhook_url: { type: [string, 'null'], maxLength: 2048 }
                 notify.ntfy_url: { type: [string, 'null'], maxLength: 2048 }
+                store.write_delay_s: { type: [integer, 'null'], minimum: 0, maximum: 900 }
+                alerts.soc_threshold_pct: { type: [integer, 'null'], minimum: 0, maximum: 95 }
+                alerts.soc_horizon_min: { type: [integer, 'null'], minimum: 10, maximum: 1440 }
+                alerts.soc_p_value: { type: [number, 'null'], minimum: 0.001, maximum: 0.5 }
+                alerts.soc_window_min: { type: [integer, 'null'], minimum: 5, maximum: 240 }
               additionalProperties: false
       responses:
         '200':
@@ -2571,7 +2593,7 @@ components:
       properties:
         type:
           type: string
-          enum: [forward-mode-changed, maintenance-opened, maintenance-extended, maintenance-expired, maintenance-closed, alert, gate-rule-loss, upgrade-rolled-back, grid-lost, grid-restored, unclean-restart]
+          enum: [forward-mode-changed, maintenance-opened, maintenance-extended, maintenance-expired, maintenance-closed, alert, gate-rule-loss, upgrade-rolled-back, grid-lost, grid-restored, unclean-restart, battery-low, battery-forecast-low]
         detail:
           type: string
     ResyncEvent:
