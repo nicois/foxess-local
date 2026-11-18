@@ -1,0 +1,101 @@
+{
+  "session": "20261115/1794729390376-1",
+  "policy": "off",
+  "epoch_ms": 1794729390384,
+  "inputs": [
+    {
+      "leg": "c2s",
+      "file": "in1.bin",
+      "at_us": 0
+    },
+    {
+      "leg": "c2s",
+      "file": "in2.bin",
+      "at_us": 5000
+    },
+    {
+      "leg": "c2s",
+      "file": "in3.bin",
+      "at_us": 10000
+    }
+  ],
+  "want": [
+    {
+      "leg": "client",
+      "file": "want1.bin",
+      "after_input": 2
+    },
+    {
+      "leg": "client",
+      "file": "want2.bin",
+      "after_input": 2
+    },
+    {
+      "leg": "client",
+      "file": "want3.bin",
+      "after_input": 2
+    },
+    {
+      "leg": "client",
+      "file": "want4.bin",
+      "after_input": 2
+    },
+    {
+      "leg": "client",
+      "file": "want5.bin",
+      "after_input": 2
+    }
+  ],
+  "audit": [
+    {
+      "decision": "forwarded",
+      "dir": "c2s",
+      "class": "register",
+      "rel_to": 0
+    },
+    {
+      "decision": "forwarded",
+      "dir": "c2s",
+      "class": "other",
+      "rel_to": 1
+    },
+    {
+      "decision": "forwarded",
+      "dir": "c2s",
+      "class": "other",
+      "rel_to": 2
+    },
+    {
+      "decision": "injected",
+      "dir": "s2c",
+      "origin": "bootstrap",
+      "rel_to": 0
+    },
+    {
+      "decision": "injected",
+      "dir": "s2c",
+      "origin": "bootstrap",
+      "rel_to": 0
+    },
+    {
+      "decision": "injected",
+      "dir": "s2c",
+      "origin": "bootstrap",
+      "rel_to": 0
+    },
+    {
+      "decision": "injected",
+      "dir": "s2c",
+      "origin": "trigread",
+      "rel_to": 0
+    },
+    {
+      "decision": "injected",
+      "dir": "s2c",
+      "origin": "trigread",
+      "rel_to": 0
+    }
+  ],
+  "note": "The full registration burst (2a/2c/2b, meta carries no per-c2s-frame ts, so 0/5/10 ms burst spacing is nominal) and the service's whole local bootstrap response: the trio (18/13/14 B) + the two trigger reads (19 B each). Client-leg bytes are the baseline s2c bytes, byte-exact including the stamp (u == floor((t0+trioDelay)/1s), asserted at extraction).",
+  "extract": "python3 /tmp/extract_golden_tx.py; session 20261115/1794729390376-1; c2s frames dev0 2a/2c/2b contiguous from 0; s2c frames 0-2 (trio, dev0 reg|0x80 + 6a, stamp u asserted) and the post-trio PDU reads @0x9C40/@0x277E"
+}

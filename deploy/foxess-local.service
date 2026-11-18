@@ -1,0 +1,51 @@
+[Unit]
+Description=FoxESS local control (foxess-local)
+After=network.target foxess-gate.service
+Wants=foxess-gate.service
+# keep restarting: the upgrade guard needs the attempts to count (it
+# restores the previous binary on the fourth failed start)
+StartLimitIntervalSec=0
+
+[Service]
+User=foxess
+# rolls a self-upgrade back if the new binary keeps failing (root-owned,
+# read-only to the app; design D-023)
+ExecStartPre=/usr/local/lib/foxess-local/upgrade-guard.sh
+ExecStart=/var/lib/foxess-local/bin/foxess-local run   # foxess-owned dir: self-upgrade without root
+# Restart=always also restarts a clean exit: a self-upgrade exits 0 and
+# systemd starts the new binary
+Restart=always
+RestartSec=5
+AmbientCapabilities=CAP_NET_ADMIN          # interim — TPROXY listener; removed with socket activation
+# the only capability the process can ever hold (audit S5)
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/foxess-local
+# sandbox (audit S8): no kernel, clock, cgroup or hostname changes, no
+# devices beyond the basics, no namespaces, realtime or set-uid files,
+# the usual service system calls only, no writable+executable memory
+# (pure Go: no JIT), and only the address families it uses (IP, the
+# journal's Unix socket, netlink for interface lookups)
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+PrivateDevices=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

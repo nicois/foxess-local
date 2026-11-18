@@ -1,0 +1,24 @@
+{
+  "session": "20261115/1794729390376-1",
+  "policy": "off",
+  "epoch_ms": 1794729390384,
+  "inputs": [
+    {
+      "leg": "c2s",
+      "file": "in1.bin",
+      "at_us": 0
+    }
+  ],
+  "want": [],
+  "audit": [
+    {
+      "decision": "forwarded",
+      "dir": "c2s",
+      "class": "keepalive",
+      "rel_to": 0
+    }
+  ],
+  "silence_ms": 2000,
+  "note": "Off mode is byte-level deny: the keepalive is audited forwarded (the c2s path has no s2c verdict) but nothing reaches the cloud leg (endFlow wantC2S=0) and the client leg stays silent (no upstream to relay).",
+  "extract": "python3 /tmp/extract_golden_tx.py; session 20261115/1794729390376-1; first c2s frame with dev0 0x06"
+}

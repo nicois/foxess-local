@@ -1,0 +1,56 @@
+{
+  "session": "20261115/1794729390376-1",
+  "policy": "full",
+  "epoch_ms": 1794729390384,
+  "inputs": [
+    {
+      "leg": "c2s",
+      "file": "in1.bin",
+      "at_us": 0
+    },
+    {
+      "leg": "s2c",
+      "file": "in2.bin",
+      "at_us": 10000
+    },
+    {
+      "leg": "s2c",
+      "file": "in3.bin",
+      "at_us": 286000
+    }
+  ],
+  "want": [
+    {
+      "leg": "client",
+      "file": "want1.bin",
+      "after_input": 1
+    },
+    {
+      "leg": "client",
+      "file": "want2.bin",
+      "after_input": 2
+    }
+  ],
+  "audit": [
+    {
+      "decision": "forwarded",
+      "dir": "c2s",
+      "class": "keepalive",
+      "rel_to": 0
+    },
+    {
+      "decision": "forwarded",
+      "dir": "s2c",
+      "class": "mbread",
+      "rel_to": 1
+    },
+    {
+      "decision": "forwarded",
+      "dir": "s2c",
+      "class": "mbread",
+      "rel_to": 2
+    }
+  ],
+  "note": "full mode relays s2c: the baseline's BB80/BB8A read pair reaches the client byte-exact, in order, at the corpus spacing (meta s2c timestamps). The keepalive opens the flow (c2s ts absent from meta; 10 ms is nominal).",
+  "extract": "python3 /tmp/extract_golden_tx.py; session 20261115/1794729390376-1; first c2s dev0 0x06; s2c PDU fn03 @0xBB80 x10 then @0xBB8A x80; spacing from meta.jsonl"
+}

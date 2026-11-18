@@ -1,0 +1,2668 @@
+openapi: 3.1.0
+info:
+  title: foxesslocal API
+  version: 1.0.0
+  description: |
+    Self-owned REST API for local control of a Foxess KH10 inverter
+    (uplink intercepted at the egress gate; the frame service is the sole
+    upstream-to-inverter path). Consumed by the foxess-control HA
+    integration, the web UI, and scripts.
+
+    ## Roles
+
+    Authenticated with a named bearer token. Roles form an ordered hierarchy
+    (`read-only < standard < expert < installer`); a token grants its level
+    and everything below it. The minimum role each operation requires is
+    declared in its `x-required-role` extension; a token below that level
+    receives `403` with `code: insufficient_role` (carrying `required_role`
+    and `token_role`).
+
+    - **read-only** — all reads, including the event stream.
+    - **standard** — battery management: work mode, scheduler.
+    - **expert** — + meter compensation.
+    - **installer** — + power limits, forward mode, maintenance window,
+      token management.
+
+    ## Events
+
+    `GET /events` is a Server-Sent Events stream (`text/event-stream`).
+    Browsers' `EventSource` cannot set headers; it may pass the bearer token
+    as `?token=` (LAN-only v1). All other clients use the `Authorization`
+    header. Send `Last-Event-ID` on (re)connect for replay.
+
+    ## Errors
+
+    RFC 7807 `application/problem+json` with a stable machine-readable `code`.
+    Writes are synchronous and confirmed: the response carries the device's
+    read-back value (rounding visible, e.g. export 4995 -> 5000). No read-back
+    within the timeout yields `504 command_failed` with `applied: unknown`.
+servers:
+  - url: /api/v1
+    description: >-
+      The app that serves this document (it is at /api/v1/openapi.yaml on
+      every install). Elsewhere: http://<the gateway host>:18080/api/v1 —
+      the [server] http_listen port.
+security:
+  - bearerAuth: []
+tags:
+  - name: State
+  - name: Commands
+  - name: Forward
+  - name: Audit
+  - name: Maintenance
+  - name: Config
+  - name: Events
+paths:
+  /compatibility:
+    get:
+      tags: [State]
+      operationId: getCompatibility
+      summary: Per-feature confidence that the register meanings fit this inverter
+      description: |
+        Design D-020. Each feature (live values, settings read, work mode,
+        power limits, current limits, meter compensation, schedule) is
+        graded from the identified model / firmware and plausibility checks
+        on the latest register reads: `exact` (verified profile, checks
+        pass), `compatible` (same family and register layout, other
+        firmware, checks pass), `pending` (not read yet), `unknown`
+        (unrecognised device, or a check failed — the failing check is
+        named). Reporting only: writes are not gated by it yet (C-008,
+        design step 4).
+      x-required-role: read-only
+      responses:
+        '200':
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompatibilityReport'
+  /state:
+    get:
+      tags: [State]
+      operationId: getState
+      summary: Normalized inverter snapshot
+      description: |
+        Full snapshot. `as_of` is the newest frame reflected. `power` and
+        `battery.soc_pct`/`battery.state` update at the inverter's 5 s
+        telemetry cadence (live register polls); `battery.stored_energy_wh`
+        follows the SoC (SoC × `battery.capacity_wh`); `battery.pack_voltage_v`
+        updates at the ~5 min snapshot-burst cadence and is `null` until the
+        first burst. Config sections
+        (`work_mode`, `meter_compensation_w`, `limits`, `schedule`) carry the
+        newer of the last confirmed write (own or observed upstream) and the
+        last register read (read at session start, then every 5 min). Before
+        either exists they read 0 / disabled.
+      x-required-role: read-only
+      responses:
+        '200':
+          description: Snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/State'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+  /device-scan:
+    post:
+      tags: [State]
+      operationId: startDeviceScan
+      summary: Start a read-only register scan of the inverter
+      description: |
+        Reads, once, every register block the identified model's
+        candidate foxess_modbus maps name (each map with its own read
+        function, never an address the map marks invalid), after the
+        identity blocks; an unidentified inverter gets the identity
+        blocks only. Reads only — nothing is written. Reads are paced
+        (250 ms apart) so the live values keep updating. A block the
+        inverter refuses is recorded, not fatal. The finished scan joins
+        the next problem report (`POST /report`, `register-scan.jsonl`,
+        de-identified). Audited (`device-scan`).
+      x-required-role: installer
+      responses:
+        '202':
+          description: Started
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceScanStatus' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '409':
+          description: A scan is already running (`scan_running`).
+        '503':
+          description: Scans are not offered by this server (`scan_unavailable`).
+    get:
+      tags: [State]
+      operationId: getDeviceScan
+      summary: The register scan's progress
+      x-required-role: installer
+      responses:
+        '200':
+          description: Progress
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceScanStatus' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '503':
+          description: Scans are not offered by this server (`scan_unavailable`).
+  /report:
+    post:
+      tags: [State]
+      operationId: createProblemReport
+      summary: Build a problem report (diagnostic bundle + description)
+      description: |
+        A problem report for the developers: the de-identified diagnostic
+        bundle of the last `hours` (as `GET /bundle`) plus `report.json`
+        — the tester's `description`, the app's facts (version, model,
+        firmware, verification and write support, forward mode, settings,
+        the setup checklist, data age, inverter clock offset) and the
+        recent problem events from the audit log (errors, reconnects,
+        commands, setting and update changes; times as seconds before
+        the report, connection IDs renumbered, token names dropped).
+        Serial numbers are pseudonymised everywhere, the description
+        included; the export fails closed if one survives. Nothing is
+        uploaded: the tester attaches the file to an issue
+        (`GET /config` `issue_url`). Audited (`report-export`).
+      x-required-role: installer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                description: { type: string, maxLength: 4000 }
+                hours: { type: integer, minimum: 1, maximum: 168, default: 24 }
+      responses:
+        '200':
+          description: The report archive (tar.gz), named foxess-report-<model>-fw<version>.tar.gz
+          content:
+            application/gzip:
+              schema: { type: string, format: binary }
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+  /bundle:
+    get:
+      tags: [State]
+      operationId: getBundle
+      summary: Download a de-identified diagnostic bundle (installer)
+      description: |
+        Design D-022. A tar.gz with manifest.json, compatibility.json,
+        registers.csv (latest register reads) and frames.jsonl (every frame
+        in the window, payload hex). Device serial numbers (inverter,
+        datalogger, battery modules) are replaced by same-length pseudonyms,
+        RTC read responses have their date zeroed, connection IDs are
+        renumbered and dates shifted to 2000-01-01 (time of day kept); the
+        archive is then scanned for every identifier in ASCII and hex and
+        the export fails (500) on any hit. Nothing is uploaded. Audited.
+      x-required-role: installer
+      parameters:
+        - name: hours
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 168, default: 24}
+      responses:
+        '200':
+          description: The archive.
+          content:
+            application/gzip:
+              schema: {type: string, format: binary}
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+  /write-override:
+    get:
+      tags: [Commands]
+      operationId: getWriteOverride
+      summary: Whether untested writes are enabled for this inverter
+      x-required-role: read-only
+      responses:
+        '200':
+          description: The current device and the installer's grant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WriteOverride'
+    put:
+      tags: [Commands]
+      operationId: grantWriteOverride
+      summary: Enable untested writes for this exact inverter (installer)
+      description: |
+        C-008 (amended 2026-11-16). Grants writes whose encoding exists but
+        is unverified on this model / firmware, bound to the exact model
+        and firmware identified now: any change of either makes the grant
+        inapplicable (it no longer covers the device). It cannot enable an
+        impossible write (`write_unsupported`) nor override failing checks.
+        Audited. Requires `acknowledge_risk: true` — untested writes can
+        misconfigure the inverter.
+      x-required-role: installer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [acknowledge_risk]
+              properties:
+                acknowledge_risk:
+                  type: boolean
+                  const: true
+      responses:
+        '200':
+          description: Granted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WriteOverride'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '409':
+          description: The inverter is not identified yet (`device_not_identified`).
+    delete:
+      tags: [Commands]
+      operationId: revokeWriteOverride
+      summary: Revoke the grant (installer)
+      x-required-role: installer
+      responses:
+        '204':
+          description: Revoked (audited).
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+  /history:
+    get:
+      tags: [State]
+      operationId: getHistory
+      summary: Bucketed historical series
+      x-required-role: read-only
+      description: |
+        Power and SoC history over a fixed range. `ts` is dense over the
+        window (unix seconds); value arrays carry `null` where no data
+        exists (gaps are not interpolated). An empty range returns empty
+        arrays. `totals` aggregate present data only; `stored_delta_wh`
+        scales the SoC first→last delta by the usable capacity
+        (`battery.capacity_wh`), and is null while the capacity is not set.
+      parameters:
+        - name: range
+          in: query
+          required: true
+          schema: { type: string, enum: [1h, 6h, 24h, 72h, 7d, 30d] }
+      responses:
+        '200':
+          description: Series
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/History' }
+        '400': { $ref: '#/components/responses/InvalidValue' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/InsufficientRole' }
+  /power/average:
+    get:
+      tags: [State]
+      operationId: getPowerAverage
+      summary: Mean power over a trailing window
+      description: |
+        The mean of every live sample (5 s cadence) in the trailing window
+        ending now — signed for grid / battery, so the net flow. `samples`
+        vs `expected_samples` shows coverage; `power` is null when the
+        window holds no samples. Same sign conventions as `State.power`.
+      x-required-role: read-only
+      parameters:
+        - name: window
+          in: query
+          required: true
+          schema: {type: string, enum: [5m, 15m, 30m, 1h]}
+      responses:
+        '200':
+          description: The window average
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [window, from, to, samples, expected_samples, power]
+                properties:
+                  window: {type: string}
+                  from: {type: string, format: date-time}
+                  to: {type: string, format: date-time}
+                  samples: {type: integer}
+                  expected_samples: {type: integer}
+                  power:
+                    oneOf:
+                      - $ref: '#/components/schemas/Power'
+                      - type: 'null'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /work-mode:
+    put:
+      tags: [Commands]
+      operationId: setWorkMode
+      summary: Set immediate work mode
+      description: |
+        The two modes the inverter's immediate-mode register supports
+        (force charge / force discharge are scheduler windows — use
+        `PUT /schedule`). Synchronous: returns the confirmed read-back value.
+        **Write gate (C-008):** the inverter must be identified and the
+        feature's register encoding trusted for it. Refusals: `501
+        write_unsupported` (`reason` unmapped / not_supported: impossible),
+        `403 write_unverified` (untested on this model / firmware: an
+        installer can grant it, `PUT /write-override`), `409
+        checks_failing` (a plausibility check says the map looks wrong:
+        not overridable), `503 device_not_identified` (retry once the
+        identity reads land).
+      x-required-role: standard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkModeRequest'
+      responses:
+        '200':
+          description: Confirmed value (read-back)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkModeRequest'
+        '501':
+          $ref: '#/components/responses/WriteUnsupported'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '409':
+          $ref: '#/components/responses/CommandInFlight'
+        '503':
+          $ref: '#/components/responses/InverterOffline'
+        '504':
+          $ref: '#/components/responses/CommandFailed'
+  /schedule:
+    put:
+      tags: [Commands]
+      operationId: setSchedule
+      summary: Replace the 8-group schedule table
+      description: |
+        Full-table replace (read via `GET /state`). Validation: overlapping
+        enabled windows -> `400 schedule_overlap`; `end <= start` ->
+        `400 invalid_value`; an enabled group's SoC fields outside 10..100
+        or `fd_pwr_w` outside 0..10500 -> `400 invalid_value` (the
+        installer's ranges). A disabled group's values are not checked: it
+        is written the way the cloud writes an unused group (00:00-00:00,
+        self-use, max/min SoC 100/10, fd SoC 10, fd power 0), and the
+        read-back shows that. The gateway replicates the device's full read-modify-write
+        push including mirror blocks; that is an internal detail.
+        **Write gate (C-008):** the inverter must be identified and the
+        feature's register encoding trusted for it. Refusals: `501
+        write_unsupported` (`reason` unmapped / not_supported: impossible),
+        `403 write_unverified` (untested on this model / firmware: an
+        installer can grant it, `PUT /write-override`), `409
+        checks_failing` (a plausibility check says the map looks wrong:
+        not overridable), `503 device_not_identified` (retry once the
+        identity reads land).
+      x-required-role: standard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Schedule'
+      responses:
+        '200':
+          description: Confirmed table (read-back)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+        '501':
+          $ref: '#/components/responses/WriteUnsupported'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '409':
+          $ref: '#/components/responses/CommandInFlight'
+        '503':
+          $ref: '#/components/responses/InverterOffline'
+        '504':
+          $ref: '#/components/responses/CommandFailed'
+  /meter-compensation:
+    put:
+      tags: [Commands]
+      operationId: setMeterCompensation
+      summary: Set meter compensation
+      description: |
+        Signed watts, -500..500. Synchronous: returns the confirmed read-back value.
+
+        **Write gate (C-008):** the inverter must be identified and the
+        feature's register encoding trusted for it. Refusals: `501
+        write_unsupported` (`reason` unmapped / not_supported: impossible),
+        `403 write_unverified` (untested on this model / firmware: an
+        installer can grant it, `PUT /write-override`), `409
+        checks_failing` (a plausibility check says the map looks wrong:
+        not overridable), `503 device_not_identified` (retry once the
+        identity reads land).
+      x-required-role: expert
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeterCompensationRequest'
+      responses:
+        '200':
+          description: Confirmed value (read-back)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeterCompensationRequest'
+        '501':
+          $ref: '#/components/responses/WriteUnsupported'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '409':
+          $ref: '#/components/responses/CommandInFlight'
+        '503':
+          $ref: '#/components/responses/InverterOffline'
+        '504':
+          $ref: '#/components/responses/CommandFailed'
+  /current-limits:
+    put:
+      tags: [Commands]
+      operationId: setCurrentLimits
+      summary: Set the grid import / export current limits
+      description: |
+        The current limits at the grid connection (diagram marker 1),
+        registers 41027 / 41028 in 0.1 A. Partial updates; at least one
+        field. Amps are rounded to 0.1 A.
+        **Write gate (C-008):** the inverter must be identified and the
+        feature's register encoding trusted for it (`identity.writes` in
+        `GET /state` names the support per feature). Refusals: `501
+        write_unsupported`, `403 write_unverified` (an installer can grant
+        untested writes, `PUT /write-override`), `409 checks_failing`,
+        `503 device_not_identified`. Writes are rationed: the inverter's
+        current value is read first and an unchanged one is not written;
+        at most 10 real writes per setting per hour (`429 write_budget`).
+      x-required-role: installer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CurrentLimits'
+      responses:
+        '200':
+          description: The values as set (confirmed by the inverter's echo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentLimits'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '409':
+          $ref: '#/components/responses/CommandInFlight'
+        '501':
+          $ref: '#/components/responses/WriteUnsupported'
+        '503':
+          $ref: '#/components/responses/InverterOffline'
+        '504':
+          $ref: '#/components/responses/CommandFailed'
+  /port-limits:
+    put:
+      tags: [Commands]
+      operationId: setPortLimits
+      summary: Set the inverter grid-port load / generation limits
+      description: |
+        The inverter's grid port (diagram marker 2): `load_limit_w`
+        (LoadLimitPower, 41200) caps what the inverter draws from the
+        switchboard — battery charging plus backup pass-through combined
+        (measured 2026-11-17); `generation_limit_w` (GenerationLimitPower,
+        41201) is presumed to cap its output (untested). Partial updates;
+        at least one field.
+        **Write gate (C-008):** the inverter must be identified and the
+        feature's register encoding trusted for it (`identity.writes` in
+        `GET /state` names the support per feature). Refusals: `501
+        write_unsupported`, `403 write_unverified` (an installer can grant
+        untested writes, `PUT /write-override`), `409 checks_failing`,
+        `503 device_not_identified`. Writes are rationed: the inverter's
+        current value is read first and an unchanged one is not written;
+        at most 10 real writes per setting per hour (`429 write_budget`).
+      x-required-role: installer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PortLimits'
+      responses:
+        '200':
+          description: The values as set (confirmed by the inverter's echo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortLimits'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '409':
+          $ref: '#/components/responses/CommandInFlight'
+        '501':
+          $ref: '#/components/responses/WriteUnsupported'
+        '503':
+          $ref: '#/components/responses/InverterOffline'
+        '504':
+          $ref: '#/components/responses/CommandFailed'
+  /battery-currents:
+    put:
+      tags: [Commands]
+      operationId: setBatteryCurrents
+      summary: Set the max battery charge / discharge current
+      description: |
+        Battery-side (DC) current limits (diagram marker 3), registers
+        41007 / 41008 in 0.1 A. Partial updates; at least one field.
+        **Write gate (C-008):** the inverter must be identified and the
+        feature's register encoding trusted for it (`identity.writes` in
+        `GET /state` names the support per feature). Refusals: `501
+        write_unsupported`, `403 write_unverified` (an installer can grant
+        untested writes, `PUT /write-override`), `409 checks_failing`,
+        `503 device_not_identified`. Writes are rationed: the inverter's
+        current value is read first and an unchanged one is not written;
+        at most 10 real writes per setting per hour (`429 write_budget`).
+      x-required-role: installer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatteryCurrents'
+      responses:
+        '200':
+          description: The values as set (confirmed by the inverter's echo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatteryCurrents'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '409':
+          $ref: '#/components/responses/CommandInFlight'
+        '501':
+          $ref: '#/components/responses/WriteUnsupported'
+        '503':
+          $ref: '#/components/responses/InverterOffline'
+        '504':
+          $ref: '#/components/responses/CommandFailed'
+  /power-limit:
+    put:
+      tags: [Commands]
+      operationId: setPowerLimit
+      summary: Set the inverter power limit
+      description: |
+        The inverter's AC output as a percentage of its rating (diagram
+        marker 4), register 41016.
+        **Write gate (C-008):** the inverter must be identified and the
+        feature's register encoding trusted for it (`identity.writes` in
+        `GET /state` names the support per feature). Refusals: `501
+        write_unsupported`, `403 write_unverified` (an installer can grant
+        untested writes, `PUT /write-override`), `409 checks_failing`,
+        `503 device_not_identified`. Writes are rationed: the inverter's
+        current value is read first and an unchanged one is not written;
+        at most 10 real writes per setting per hour (`429 write_budget`).
+      x-required-role: installer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PowerLimit'
+      responses:
+        '200':
+          description: The values as set (confirmed by the inverter's echo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PowerLimit'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '409':
+          $ref: '#/components/responses/CommandInFlight'
+        '501':
+          $ref: '#/components/responses/WriteUnsupported'
+        '503':
+          $ref: '#/components/responses/InverterOffline'
+        '504':
+          $ref: '#/components/responses/CommandFailed'
+  /eps-mode:
+    put:
+      tags: [Commands]
+      operationId: setEpsMode
+      summary: Set the backup (EPS) port mode
+      description: |
+        Diagram marker 5, register 41015: `ups` (3) switches the backup
+        circuits to the battery within milliseconds on a grid failure;
+        `eps` (2) switches more slowly. The circuits on the port may lose
+        power briefly during the change. `disabled` (presumed 1) has never
+        been written on a verified device and is refused.
+        **Write gate (C-008):** the inverter must be identified and the
+        feature's register encoding trusted for it (`identity.writes` in
+        `GET /state` names the support per feature). Refusals: `501
+        write_unsupported`, `403 write_unverified` (an installer can grant
+        untested writes, `PUT /write-override`), `409 checks_failing`,
+        `503 device_not_identified`. Writes are rationed: the inverter's
+        current value is read first and an unchanged one is not written;
+        at most 10 real writes per setting per hour (`429 write_budget`).
+      x-required-role: installer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EpsModeRequest'
+      responses:
+        '200':
+          description: The values as set (confirmed by the inverter's echo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EpsModeRequest'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '409':
+          $ref: '#/components/responses/CommandInFlight'
+        '501':
+          $ref: '#/components/responses/WriteUnsupported'
+        '503':
+          $ref: '#/components/responses/InverterOffline'
+        '504':
+          $ref: '#/components/responses/CommandFailed'
+  /limits:
+    put:
+      tags: [Commands]
+      operationId: setLimits
+      summary: Set import / export power limits
+      description: |
+        Partial updates allowed; at least one field required. Values are
+        clamped to 0..30000. The inverter rounds (observed 50 W step): the
+        response carries the confirmed read-back values, which may differ
+        from the request.
+        **Write gate (C-008):** the inverter must be identified and the
+        feature's register encoding trusted for it. Refusals: `501
+        write_unsupported` (`reason` unmapped / not_supported: impossible),
+        `403 write_unverified` (untested on this model / firmware: an
+        installer can grant it, `PUT /write-override`), `409
+        checks_failing` (a plausibility check says the map looks wrong:
+        not overridable), `503 device_not_identified` (retry once the
+        identity reads land).
+      x-required-role: installer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LimitsUpdate'
+      responses:
+        '200':
+          description: Confirmed values (read-back)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Limits'
+        '501':
+          $ref: '#/components/responses/WriteUnsupported'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '409':
+          $ref: '#/components/responses/CommandInFlight'
+        '503':
+          $ref: '#/components/responses/InverterOffline'
+        '504':
+          $ref: '#/components/responses/CommandFailed'
+  /registers/read:
+    post:
+      tags: [Commands]
+      operationId: readRegisters
+      summary: Read a raw Modbus register block (installer probe)
+      description: |
+        Reads one block through the command gateway — fn 3 (holding) or
+        4 (input), 1..125 registers — and returns the device's values in
+        address order. Writes nothing. An unsupported register answers
+        with a Modbus exception, reported as 502 command_failed with the
+        exception code in the detail. Audited like every command.
+      x-required-role: installer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterReadRequest'
+      responses:
+        '200':
+          description: The device's register values
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterReadResponse'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '409':
+          $ref: '#/components/responses/CommandInFlight'
+        '503':
+          $ref: '#/components/responses/InverterOffline'
+        '504':
+          $ref: '#/components/responses/CommandFailed'
+  /forward-mode:
+    get:
+      tags: [Forward]
+      operationId: getForwardMode
+      summary: Get cloud-forward mode
+      x-required-role: read-only
+      responses:
+        '200':
+          description: Current mode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForwardModeState'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+    put:
+      tags: [Forward]
+      operationId: setForwardMode
+      summary: Set cloud-forward mode
+      description: |
+        The forward-mode ladder: `off` (no cloud leg at all — the
+        hook-generated frames only), `telemetry_only` (inverter→cloud
+        mirrored; cloud→inverter only the cloud's Modbus read requests,
+        which cannot change the inverter — every write is denied; each
+        answer goes to whoever asked, so the app's own reads stay local),
+        `full` (both directions: every kind of frame the cloud is known
+        to send — session control, reads, writes — passes; anything else,
+        a firmware push included, is held until a maintenance window is
+        open; an explicit installer-gated audited opt-in). An active maintenance window overrides the mode while it
+        lasts; this endpoint writes the persistent setting, which is in
+        force on window expiry or close. The change applies at once: the
+        mode is decided per connection, so the live session is closed at
+        its next frame and the inverter reconnects under the new mode
+        (a few seconds without live data; audited as `reconnect`).
+      x-required-role: installer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForwardModeState'
+      responses:
+        '200':
+          description: New mode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForwardModeState'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+  /audit:
+    get:
+      tags: [Audit]
+      operationId: listAudit
+      summary: Policy and command decision log
+      description: |
+        Immutable log of every upstream-to-inverter decision and operator
+        command: source (token name or `cloud`), action, and whether the
+        inverter confirmed the write. Newest first; page with `before`.
+      x-required-role: read-only
+      parameters:
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - name: source
+          in: query
+          description: Token name, or `cloud`
+          schema:
+            type: string
+        - name: action
+          in: query
+          schema:
+            $ref: '#/components/schemas/AuditAction'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Before'
+      responses:
+        '200':
+          description: Decision entries (newest first)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+  /messages:
+    get:
+      tags: [Audit]
+      operationId: listMessages
+      summary: Raw frame log
+      description: Both directions, all frames, with decoded summary where available. Power-user/debug view.
+      x-required-role: read-only
+      parameters:
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - name: dir
+          in: query
+          schema:
+            $ref: '#/components/schemas/FrameDirection'
+        - name: frame
+          in: query
+          schema:
+            $ref: '#/components/schemas/FrameType'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Before'
+      responses:
+        '200':
+          description: Frame entries (newest first)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MessageEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+  /settings:
+    get:
+      tags: [Config]
+      operationId: getSettings
+      summary: The settings the UI can change, with their sources
+      description: |
+        Each setting's effective value and where it came from: `ui` (set
+        through this API; stored in the database; wins), `config` (the
+        config file) or `default` (built in). `battery.capacity_wh` is
+        null while unknown (no built-in default). The notification targets
+        `notify.webhook_url` / `notify.ntfy_url` are secrets: null when
+        off, the URL for an installer, the string `(set)` for anyone else.
+      x-required-role: read-only
+      responses:
+        '200':
+          description: The settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '503':
+          description: The server runs without stored settings (tools, tests).
+    put:
+      tags: [Config]
+      operationId: setSettings
+      summary: Change settings
+      description: |
+        A partial map of setting key → value; `null` resets a key to the
+        config file's (or the built-in) value. Every value is checked
+        before any is stored; each change is audited (kind `setting`).
+        `forward.mode` is refused here — use `PUT /forward-mode`, which
+        applies it to the cloud connection at once (it is persisted the
+        same way). Values: `battery.capacity_wh` an integer 1–200000 (Wh);
+        `access.public_read_only` and `access.public_all_pages` booleans;
+        `notify.webhook_url` / `notify.ntfy_url` an http(s) URL, or `""`
+        to turn the target off (over a config-file value). A notification
+        URL is never written to the audit log (it records `(set)` /
+        `(off)`).
+      x-required-role: installer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                battery.capacity_wh: { type: [integer, 'null'], minimum: 1, maximum: 200000 }
+                access.public_read_only: { type: [boolean, 'null'] }
+                access.public_all_pages: { type: [boolean, 'null'] }
+                notify.webhook_url: { type: [string, 'null'], maxLength: 2048 }
+                notify.ntfy_url: { type: [string, 'null'], maxLength: 2048 }
+              additionalProperties: false
+      responses:
+        '200':
+          description: The settings after the change
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '503':
+          description: The server runs without stored settings (tools, tests).
+  /openapi.yaml:
+    get:
+      tags: [Config]
+      operationId: getSpec
+      summary: This document
+      description: The API's contract as built into the running version (YAML). Open — it describes the API and holds no data.
+      security: []
+      responses:
+        '200':
+          description: The OpenAPI document
+          content:
+            application/yaml:
+              schema: { type: string }
+  /update:
+    get:
+      tags: [Config]
+      operationId: getUpdate
+      summary: Release and self-upgrade status
+      description: |
+        The running version, the newest release from the daily check (when
+        enabled: `[update] check`), whether it can be applied here, and an
+        upgrade in flight (`pending`) or rolled back by the guard
+        (`rolled_back`, until dismissed). Releases are signed offline and
+        verified against the key built into the running binary (D-023).
+      x-required-role: read-only
+      responses:
+        '200':
+          description: The status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UpdateView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /update/check:
+    post:
+      tags: [Config]
+      operationId: checkUpdate
+      summary: Check for a release now
+      description: One request to the release feed (carrying only the version); returns the status as GET /update.
+      x-required-role: installer
+      responses:
+        '200':
+          description: The status after the check
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UpdateView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/InsufficientRole' }
+  /update/apply:
+    post:
+      tags: [Config]
+      operationId: applyUpdate
+      summary: Install the latest release and restart
+      description: |
+        Downloads the latest release, verifies its signature and checksum,
+        self-tests it, swaps it in atomically (the old binary kept) and
+        restarts into it after the response. The new version must bring
+        the inverter back with fresh readings before it is trusted; the
+        guard rolls back a version that fails to (D-023).
+      x-required-role: installer
+      responses:
+        '202':
+          description: Installed; the service restarts into it
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [restarting, from, to]
+                properties:
+                  restarting: { type: boolean }
+                  from: { type: string, description: The version replaced. }
+                  to: { type: string, description: The version installed. }
+        '409':
+          description: Not possible here (`update_not_possible` — container, no self-upgrade, …) or already current (`update_not_available`)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '502':
+          description: The download failed (`update_failed`) or did not verify (`update_verification_failed` — signature, checksum or self-test)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '507':
+          description: Not enough free disk space for the new binary (`insufficient_space`)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/InsufficientRole' }
+  /update/rolled-back:
+    delete:
+      tags: [Config]
+      operationId: dismissRollback
+      summary: Dismiss the rollback notice
+      x-required-role: installer
+      responses:
+        '204': { description: Dismissed (also when there was none) }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/InsufficientRole' }
+  /notify/test:
+    post:
+      tags: [Config]
+      operationId: testNotify
+      summary: Send a test notification
+      description: |
+        One test notice to every configured target now (no queue, no
+        retry), with each target's outcome. Notifications (F2) go out on
+        their own for: the inverter offline for 10 minutes and back
+        online, the grid lost (also when already down at start-up) and
+        back, gate rule loss, upgrade rolled back (critical; "back
+        online" and "grid back" are info); alerts
+        (failed commands and schedules, a write refused by the hourly
+        budget, low disk), maintenance-window and forward-mode changes
+        (warning; ntfy priority high). "Back online" is info (ntfy
+        default). The webhook receives JSON `{source, event, severity,
+        title, message, ts}`; ntfy a text body with `Title`, `Priority`
+        and `Tags` headers. A repeat of the same notice within 15 minutes
+        is suppressed. Notices wait in a database outbox until every target
+        has them (retried with backoff, from 30 s up to 15 min, for about a
+        day), so they survive a restart; one delivered late says when it
+        happened. An unexpected stop (no clean shutdown, e.g. a power cut)
+        is announced at the next start (`unclean-restart`, warning).
+      x-required-role: installer
+      responses:
+        '200':
+          description: Each target's outcome
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [target]
+                      properties:
+                        target: { type: string, enum: [webhook, ntfy] }
+                        error: { type: string, description: 'Absent on success. Never contains the URL.' }
+        '409':
+          description: No target configured (`notify_not_configured`)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+  /setup:
+    get:
+      tags: [Config]
+      operationId: getSetup
+      summary: The first-run checklist
+      description: |
+        What the setup wizard shows: whether setup was completed, and a
+        checklist (`inverter_connected`, `identified`, `verified`,
+        `clock`, `battery_capacity`), each `ok`, `warn`, `fail` or
+        `pending` with a human-readable `detail` and, when not ok, a
+        `fix`. `battery.modules` is the module count from the inverter's
+        battery snapshot, to suggest a capacity (modules × kWh per module).
+      x-required-role: installer
+      responses:
+        '200':
+          description: The checklist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Setup'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+  /setup/complete:
+    post:
+      tags: [Config]
+      operationId: completeSetup
+      summary: Record that the setup wizard was finished
+      x-required-role: installer
+      responses:
+        '204':
+          description: Recorded (audited)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+  /maintenance:
+    get:
+      tags: [Maintenance]
+      operationId: getMaintenance
+      summary: Maintenance window state
+      description: |
+        The window is process-local: it does not survive a restart.
+        While active, the cloud channel is an unfettered bidirectional
+        pass-through over whatever forward mode is configured.
+      x-required-role: read-only
+      responses:
+        '200':
+          description: Window state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceState'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+    post:
+      tags: [Maintenance]
+      operationId: openMaintenance
+      summary: Open (or re-arm) the maintenance window
+      description: |
+        Opens a time-boxed window of unfettered bidirectional comms — the
+        cloud may do anything in that direction, including firmware pushes.
+        Default 30 min; `duration` (e.g. "45m") is capped at 4 h per call
+        (over the cap → `400`). While the window is active a `POST`
+        re-arms the deadline instead of opening again.
+      x-required-role: installer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                duration:
+                  type: string
+                  description: 'Go duration string, e.g. "30m" or "2h"; absent/empty uses the 30 min default.'
+                capture:
+                  type: boolean
+                  default: false
+                  description: >-
+                    Record the window's traffic, both directions, byte-exact as
+                    received (before any parsing or policy), so a firmware
+                    update installed in the window is kept in full. Listed under
+                    /captures, kept until deleted; recording stops at the size
+                    cap (`retention.capture_max_mb`, default 256).
+      responses:
+        '200':
+          description: Window state (opened or re-armed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceState'
+        '400':
+          description: 'Invalid duration (unparseable or over the 4 h cap) — `code: invalid_value`, field `duration`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+    delete:
+      tags: [Maintenance]
+      operationId: closeMaintenance
+      summary: Close the maintenance window
+      description: The configured forward mode is back in force immediately.
+      x-required-role: installer
+      responses:
+        '200':
+          description: Window state (closed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceState'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '409':
+          description: 'The window is not active (`code: maintenance_not_active`)' 
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /captures:
+    get:
+      tags: [Maintenance]
+      operationId: listCaptures
+      summary: Maintenance-window captures, newest first
+      x-required-role: installer
+      responses:
+        '200':
+          description: The captures
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/CaptureInfo'}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+  /captures/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[0-9]{8}T[0-9]{6}Z$'}
+    get:
+      tags: [Maintenance]
+      operationId: getCapture
+      summary: Download one capture (.tar.gz)
+      description: |
+        The window's files, byte-exact and not de-identified (they hold the
+        inverter's serials — keep the archive private): window.json, and per
+        connection c2s.bin (inverter → cloud), s2c.bin (cloud → inverter)
+        and meta.jsonl, in prox's capture layout (tools/mon150 reads it).
+        Audited.
+      x-required-role: installer
+      responses:
+        '200':
+          description: The archive.
+          content:
+            application/gzip:
+              schema: {type: string, format: binary}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Maintenance]
+      operationId: deleteCapture
+      summary: Delete one capture
+      description: Audited. `409` while it is still recording.
+      x-required-role: installer
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Still recording
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /config:
+    get:
+      tags: [Config]
+      operationId: getConfig
+      summary: Read-only server configuration view
+      x-required-role: read-only
+      responses:
+        '200':
+          description: Configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+  /config/tokens:
+    get:
+      tags: [Config]
+      operationId: listTokens
+      summary: List API tokens
+      x-required-role: installer
+      responses:
+        '200':
+          description: Tokens (no secrets)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TokenInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+    post:
+      tags: [Config]
+      operationId: createToken
+      summary: Create a token
+      description: The plaintext token is returned exactly once.
+      x-required-role: installer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenCreate'
+      responses:
+        '201':
+          description: Token created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenCreated'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+  /config/tokens/{id}:
+    delete:
+      tags: [Config]
+      operationId: revokeToken
+      summary: Revoke a token
+      x-required-role: installer
+      parameters:
+        - $ref: '#/components/parameters/TokenId'
+      responses:
+        '204':
+          description: Revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /events:
+    get:
+      tags: [Events]
+      operationId: streamEvents
+      summary: Server-Sent Events stream
+      description: |
+        `text/event-stream`. Event types and payloads:
+
+        | event | payload |
+        |---|---|
+        | `snapshot` | `SnapshotEvent` — every 150 B telemetry frame (~5 s) |
+        | `config` | `ConfigEvent` — any confirmed register change (ours or a cloud push) |
+        | `connection` | `ConnectionEvent` — inverter liveness up/down (session down, or data-silent >15 s — server-computed) |
+        | `system` | `SystemEvent` — forward-mode change, maintenance window transitions, alerts |
+        | `resync` | `ResyncEvent` — replay window exceeded; do `GET /state` |
+        | `gap` | `GapEvent` — per-client drops; do `GET /state` |
+
+        `id` is monotonic per connection epoch; send it back as
+        `Last-Event-ID` for replay. The 5 s snapshot cadence is the
+        heartbeat: treat >15 s of silence as offline. Browsers' `EventSource`
+        passes the bearer token as `?token=` (LAN-only v1).
+      x-required-role: read-only
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema:
+            type: integer
+        - name: token
+          in: query
+          required: false
+          description: Bearer token for EventSource clients (cannot set headers). Prefer the Authorization header.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '503':
+          description: >-
+            The concurrent-stream limit is reached (code too_many_streams;
+            Retry-After set).
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /healthz:
+    get:
+      tags: [Config]
+      operationId: health
+      summary: Liveness
+      description: Unauthenticated; no secret data (container healthcheck).
+      security: []
+      responses:
+        '200':
+          description: Alive
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+  /readyz:
+    get:
+      tags: [Config]
+      operationId: ready
+      summary: Readiness
+      description: |
+        Whether the service is doing its job, unlike `/healthz` (the
+        process answers). Checks: the inverter listener is bound, the
+        inverter is connected with fresh readings, every database write
+        has landed, disk space, and the inverter's clock. **503** while
+        any check fails; 200 with `status: degraded` on a warning.
+        Unauthenticated for monitors: without a token each check carries
+        its id, title and status only; any valid token adds `detail` and
+        `fix`. Also at `/api/v1/readyz`. `foxess-local doctor` prints it.
+      security: []
+      responses:
+        '200':
+          description: Ready or degraded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Readiness' }
+        '503':
+          description: Not ready (a check fails)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Readiness' }
+  /metrics:
+    get:
+      tags: [Config]
+      operationId: metrics
+      summary: Prometheus metrics
+      description: |
+        The Prometheus text format (0.0.4): `foxess_ready`,
+        `foxess_check_status{check}` (0 ok, 1 pending, 2 warning, 3
+        failing), `foxess_inverter_online`, `foxess_data_age_seconds`,
+        `foxess_power_watts{flow}` (pv, grid, load, battery, ac_port, eps;
+        same signs as `State.power`), `foxess_battery_soc_percent`,
+        `foxess_battery_stored_energy_wh`, `foxess_bms_charge_limit_amperes`,
+        `foxess_temperature_celsius{sensor}` (battery, inverter, ambient,
+        cell_min, cell_max), `foxess_forward_mode{mode}`,
+        `foxess_maintenance_window_active` and `foxess_build_info{version}`.
+        A value with no reading yet is omitted, never reported as 0. Read
+        like the dashboard: a token, or none while public read-only access
+        is on. Also at `/api/v1/metrics`.
+      x-required-role: read-only
+      responses:
+        '200':
+          description: Metrics
+          content:
+            text/plain:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Named token with a role (read-only < standard < expert < installer). See `x-required-role` per operation.
+  parameters:
+    From:
+      name: from
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+    To:
+      name: to
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+    Before:
+      name: before
+      in: query
+      required: false
+      description: Exclusive upper time bound (RFC 3339); cursor for the next older page.
+      schema:
+        type: string
+        format: date-time
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+    TokenId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    WriteUnsupported:
+      description: >-
+        The write is impossible on this inverter (`write_unsupported`;
+        `reason` unmapped or not_supported).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: 'Missing or invalid token (`code: unauthorized`)'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    InsufficientRole:
+      description: 'Token role below the operation''s requirement (`code: insufficient_role`; carries `required_role`, `token_role`)'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    InvalidValue:
+      description: >-
+        Validation failure (`code: invalid_value` with `errors[]`, or `code:
+        schedule_overlap`). Request bodies are strict: a field the operation
+        does not define, or data after the JSON value, is an invalid_value —
+        nothing in the request is applied (a misspelt field is never dropped
+        silently).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: 'Unknown resource (`code: not_found`)'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    CommandInFlight:
+      description: 'One command in flight at a time (`code: command_in_flight`)'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    InverterOffline:
+      description: 'No inverter data within 15 s — session down or established-but-silent (`code: inverter_offline`)'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    CommandFailed:
+      description: 'No device read-back within timeout (`code: command_failed`; carries `applied`)'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Internal:
+      description: 'Internal error (`code: internal`)'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    Role:
+      type: string
+      enum: [read-only, standard, expert, installer]
+    State:
+      type: object
+      required: [as_of, online, power, battery, work_mode, meter_compensation_w, limits, schedule, forward_mode, identity]
+      properties:
+        as_of:
+          type: [string, 'null']
+          format: date-time
+          description: >-
+            Timestamp of the newest frame reflected in this snapshot; null
+            until the first inverter frame. With online=false this
+            distinguishes never-seen (null) from was-seeing-it-then-stopped
+            (stale timestamp) — the two shapes the web UI renders
+            differently.
+        online:
+          type: boolean
+          description: >-
+            Server-computed liveness: true only if inverter data (the 5 s
+            telemetry cadence, never the ~293 s snapshot bursts) was received
+            within the last 15 s. False for a down session AND for an
+            established-but-silent one (zombie) — the unambiguous staleness
+            indicator; clients must not recompute it from as_of (clock skew).
+        power:
+          $ref: '#/components/schemas/Power'
+        battery:
+          $ref: '#/components/schemas/Battery'
+        work_mode:
+          $ref: '#/components/schemas/WorkMode'
+        active_mode:
+          type: object
+          required: [mode, source]
+          description: >-
+            What runs now. With the scheduler on, the first enabled group (by
+            index) whose window holds the time (end exclusive); otherwise the
+            base work_mode. Precedence and end handling are inferred from the
+            inverter's behaviour, not documented.
+          properties:
+            mode: {type: string, description: "a ScheduleGroup work mode"}
+            source: {type: string, enum: [schedule, base]}
+            group: {type: integer, description: "the deciding group (source schedule)"}
+            start: {type: string}
+            end: {type: string}
+        eps_mode:
+          type: string
+          enum: [ups, eps, disabled, '']
+          description: EPS (backup) port output setting (41015; '' = unknown).
+        meter_compensation_w:
+          type: integer
+          format: int32
+          minimum: -500
+          maximum: 500
+          description: Signed watts (register 41029).
+        limits:
+          $ref: '#/components/schemas/Limits'
+        schedule:
+          $ref: '#/components/schemas/Schedule'
+        forward_mode:
+          $ref: '#/components/schemas/ForwardMode'
+        identity:
+          $ref: '#/components/schemas/Identity'
+        temperatures:
+          $ref: '#/components/schemas/Temperatures'
+        inverter_state:
+          type: string
+          enum: [self-test, waiting, checking, on-grid, off-grid, recoverable-fault, unrecoverable-fault, unknown]
+          description: >-
+            The inverter's state register (31027; foxess_modbus's names).
+            off-grid: the grid is down and the backup (EPS) circuits run on the
+            battery. unknown until the first live reading.
+        grid_connected:
+          type: [boolean, 'null']
+          description: true on grid, false off grid (a grid outage), null in any other state or before a reading.
+    Readiness:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          enum: [ready, degraded, not_ready]
+        checks:
+          type: array
+          items:
+            type: object
+            required: [id, title, status]
+            properties:
+              id: { type: string, description: 'listener, disk, inverter_connected, store, clock' }
+              title: { type: string }
+              status: { type: string, enum: [ok, pending, warn, fail] }
+              detail: { type: string, description: With a token only. }
+              fix: { type: string, description: With a token only, when not ok. }
+    Temperatures:
+      type: object
+      description: >-
+        Live temperatures, °C; null when not reported. battery_c, inverter_c
+        and ambient_c are the inverter's own readings (registers 31023,
+        31018, 31019) with each 5 s sample. cell_min_c / cell_max_c are the
+        BMS's coldest and warmest cell (the battery snapshot, about every 5
+        minutes; null once it is over 15 minutes old). The coldest cell is
+        the FoxESS portal's "BMS battery temperature": the BMS sets the
+        charge limit (battery.bms_charge_limit_a) from it and the SoC.
+      properties:
+        battery_c: { type: [number, 'null'] }
+        inverter_c: { type: [number, 'null'] }
+        ambient_c: { type: [number, 'null'] }
+        cell_min_c: { type: [number, 'null'] }
+        cell_max_c: { type: [number, 'null'] }
+    Identity:
+      type: object
+      description: >-
+        Who the inverter says it is (design D-020). The serial number comes
+        from the device-info snapshot the inverter sends unprompted. Model
+        and firmware come from the model / version registers (30000 ×15,
+        30016-30018, read with the settings every 5 min) when the inverter
+        answers them, else from the snapshot. Empty strings until observed.
+      required: [sn, model, firmware, verified_profile, compatibility, writes]
+      properties:
+        sn:
+          type: string
+        model:
+          type: string
+          examples: [KH10]
+        firmware:
+          type: object
+          required: [master, slave, manager]
+          properties:
+            master: {type: string, examples: ['1.73']}
+            slave: {type: string, examples: ['1.03']}
+            manager: {type: string, examples: ['1.71']}
+        writes:
+          type: object
+          description: >-
+            Write feature → support on this device's layout: verified,
+            untested (an installer grant can enable it), unmapped or
+            not_supported (impossible). Unmapped until a layout is established.
+            Features: work_mode, power_limits, meter_compensation, schedule,
+            current_limits, battery_currents, power_limit, port_limits,
+            eps_mode (the last five: PUT /current-limits, /battery-currents,
+            /power-limit, /port-limits, /eps-mode).
+          additionalProperties:
+            type: string
+            enum: [verified, untested, unmapped, not_supported]
+        compatibility:
+          type: object
+          description: Feature name → confidence level (details at GET /compatibility).
+          additionalProperties:
+            $ref: '#/components/schemas/ConfidenceLevel'
+        verified_profile:
+          type: [string, 'null']
+          description: >-
+            The verified profile this device matches exactly (model and all
+            three firmware versions), e.g. `kh10-fw1.73`; null for any other
+            model or firmware. Only a verified profile's register meanings
+            are proven by captured cloud writes.
+    WriteOverride:
+      type: object
+      required: [granted, device, grant]
+      properties:
+        granted:
+          type: boolean
+          description: The grant exists and covers the current device.
+        device:
+          type: object
+          properties:
+            model: {type: string}
+            firmware:
+              type: object
+              properties:
+                master: {type: string}
+                slave: {type: string}
+                manager: {type: string}
+        grant:
+          type: [object, 'null']
+          description: The persisted grant (it may cover another firmware than the current one).
+          properties:
+            model: {type: string}
+            firmware: {type: object}
+            by: {type: string}
+            at: {type: string, format: date-time}
+    ConfidenceLevel:
+      type: string
+      enum: [exact, compatible, pending, unknown]
+    CompatibilityReport:
+      type: object
+      required: [family, features]
+      properties:
+        verified_profile:
+          type: string
+          description: Present when the device matches a verified profile exactly.
+        family:
+          type: string
+          description: Recognised model family and register layout; empty when unrecognised.
+        features:
+          type: array
+          items:
+            type: object
+            required: [name, level, reason, checks]
+            properties:
+              name: {type: string, examples: [power_limits]}
+              level: {$ref: '#/components/schemas/ConfidenceLevel'}
+              reason: {type: string}
+              checks:
+                type: array
+                items:
+                  type: object
+                  required: [name, status]
+                  properties:
+                    name: {type: string, examples: [pv_power_product]}
+                    status: {type: string, enum: [pass, fail, pending, skip]}
+                    detail: {type: string}
+    Power:
+      type: object
+      description: '150 B telemetry frame (5 s cadence). Sign conventions per field; identities: grid = load + battery - pv, ac_port = pv - battery.'
+      required: [pv_w, grid_w, load_w, ac_port_w, battery_w]
+      properties:
+        pv_w:
+          type: integer
+          format: int32
+          description: PV generation, positive.
+        grid_w:
+          type: integer
+          format: int32
+          description: At the panel. Positive = import from grid, negative = export.
+        load_w:
+          type: integer
+          format: int32
+          description: Household load, positive.
+        ac_port_w:
+          type: integer
+          format: int32
+          description: Inverter AC port. Positive = output, negative = input.
+        battery_w:
+          type: integer
+          format: int32
+          description: Positive = charging, negative = discharging.
+        eps_w:
+          type: integer
+          format: int32
+          description: >-
+            EPS (backup / UPS) port output, positive. 0 when the port is off
+            or unloaded, and on telemetry that does not report it. Included
+            in both ac_port_w and load_w (KH, verified 2026-11-17): the
+            switchboard gets ac_port_w − eps_w, the main-board circuits
+            draw load_w − eps_w.
+    Battery:
+      type: object
+      required: [soc_pct, state]
+      properties:
+        soc_pct:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: 5 s cadence (150 B frame).
+        state:
+          $ref: '#/components/schemas/BatteryState'
+        stored_energy_wh:
+          type: [integer, 'null']
+          description: Usable energy = SoC × capacity_wh (Wh). Null until the first SoC reading, and while the capacity is not set.
+        capacity_wh:
+          type: [integer, 'null']
+          description: The pack's usable energy across SoC 0–100 % (the battery.capacity_wh setting — UI value, else config file). Null while not set (no built-in default).
+        pack_voltage_v:
+          type: [number, 'null']
+          description: Snapshot-burst cadence; candidate 0.01 V scale (scale pending a concurrent Modbus read). Null until the first burst.
+        bms_charge_limit_a:
+          type: [number, 'null']
+          description: The BMS's charge-current limit (register 31025), A — set by the battery from its coldest cell's temperature (temperatures.cell_min_c) and its SoC. Null until the first register reading.
+    BatteryState:
+      type: string
+      enum: [charging, discharging, idle, unknown]
+    WorkMode:
+      type: string
+      description: Immediate work mode (register 41000). Force charge / force discharge are scheduler windows.
+      enum: [self-use, feed-in]
+    ScheduleWorkMode:
+      type: string
+      description: Per-group work mode (wire enum 1..7).
+      enum: [self-use, feed-in, backup, peak-shaving, power-station, force-charge, force-discharge]
+    Limits:
+      type: object
+      required: [import_w, export_w]
+      properties:
+        import_w:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 30000
+          description: Registers 41021:41022 (U32, high word first).
+        export_w:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 30000
+          description: Registers 41023:41024 (U32, high word first).
+        import_current_a:
+          type: [number, 'null']
+          description: >-
+            Grid import current limit, A (register 41027, 0.1 A). Read-only
+            (not set by PUT /limits); `null` until the first settings read
+            and in the PUT /limits read-back.
+        export_current_a:
+          type: [number, 'null']
+          description: >-
+            Grid export current limit, A (register 41028, 0.1 A). Read-only;
+            `null` until the first settings read and in the PUT /limits
+            read-back.
+        load_limit_w:
+          type: [integer, 'null']
+          description: >-
+            LoadLimitPower (41200): caps the inverter's draw at its grid port
+            — battery charging plus EPS pass-through (measured 2026-11-17).
+            Read-only.
+        generation_limit_w:
+          type: [integer, 'null']
+          description: GenerationLimitPower (41201), presumably the grid-port output cap (untested). Read-only.
+        max_charge_current_a:
+          type: [number, 'null']
+          description: Battery-side charge current limit (41007, 0.1 A). Read-only.
+        max_discharge_current_a:
+          type: [number, 'null']
+          description: Battery-side discharge current limit (41008, 0.1 A). Read-only.
+        power_limit_pct:
+          type: [integer, 'null']
+          description: Output power limit, % of rating (41016). Read-only.
+    RegisterReadRequest:
+      type: object
+      required: [fn, addr, count]
+      properties:
+        fn: {type: integer, enum: [3, 4], description: 3 holding / 4 input}
+        addr: {type: integer, minimum: 0, maximum: 65535}
+        count: {type: integer, minimum: 1, maximum: 125}
+    RegisterReadResponse:
+      type: object
+      required: [fn, addr, registers]
+      properties:
+        fn: {type: integer}
+        addr: {type: integer}
+        registers:
+          type: array
+          items:
+            type: object
+            required: [addr, value]
+            properties:
+              addr: {type: integer}
+              value: {type: integer, minimum: 0, maximum: 65535, description: raw u16}
+    LimitsUpdate:
+      type: object
+      description: At least one field required.
+      properties:
+        import_w:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 30000
+        export_w:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 30000
+    WorkModeRequest:
+      type: object
+      required: [work_mode]
+      properties:
+        work_mode:
+          $ref: '#/components/schemas/WorkMode'
+    MeterCompensationRequest:
+      type: object
+      required: [w]
+      properties:
+        w:
+          type: integer
+          format: int32
+          minimum: -500
+          maximum: 500
+          description: Signed watts.
+    ForwardMode:
+      type: string
+      enum: [off, telemetry_only, full]
+    ForwardModeState:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          $ref: '#/components/schemas/ForwardMode'
+    Schedule:
+      type: object
+      required: [enabled, groups]
+      properties:
+        enabled:
+          type: boolean
+          description: Scheduler master flag (register 48000 r0).
+        groups:
+          type: array
+          minItems: 8
+          maxItems: 8
+          items:
+            $ref: '#/components/schemas/ScheduleGroup'
+    ScheduleGroup:
+      type: object
+      required: [index, enabled, start, end, work_mode, max_soc_pct, min_soc_on_grid_pct, fd_soc_pct, fd_pwr_w]
+      properties:
+        index:
+          type: integer
+          minimum: 1
+          maximum: 8
+        enabled:
+          type: boolean
+        start:
+          type: string
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          description: Window start, HH:MM.
+        end:
+          type: string
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          description: Window end, HH:MM. Must be after start.
+        work_mode:
+          $ref: '#/components/schemas/ScheduleWorkMode'
+        max_soc_pct:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Max SoC from grid. 10..100 on an enabled group.
+        min_soc_on_grid_pct:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Min SoC on grid. 10..100 on an enabled group.
+        fd_soc_pct:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >-
+            Force-charge/force-discharge cut-off SOC. 10..100 on an enabled
+            group.
+        fd_pwr_w:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10500
+          description: >-
+            Force-charge/force-discharge power limit, watts. On a force-charge
+            group, 0 means no charging from the grid (the FoxESS app's "charge
+            from grid" off writes 0; on writes the power back).
+        default:
+          type: boolean
+          readOnly: true
+          description: >-
+            The default group (GET only): the enabled 00:00–23:59 group, the
+            FoxESS app's "remaining time" mode — what runs outside every other
+            window.
+        after_cutoff:
+          type: string
+          enum: [standby, self-use]
+          readOnly: true
+          description: >-
+            GET only, force groups: the action once the group reaches its
+            cut-off SoC (the group's +8 register; 1 standby, 3 self-use).
+            Absent for other groups or an unknown value. PUT /schedule keeps it.
+        import_limit_w:
+          type: integer
+          readOnly: true
+          description: >-
+            GET only: the group's grid import limit, W, from its parameter
+            block (57000 + 50·(index−1); groups 1–3 are read). 99999 / 100000
+            is the app's "no limit". Absent until read. PUT /schedule keeps it.
+        export_limit_w:
+          type: integer
+          readOnly: true
+          description: >-
+            GET only: the group's grid export limit, W (as import_limit_w).
+        pv:
+          type: boolean
+          readOnly: true
+          description: >-
+            GET only: whether the group charges (force charge) or discharges
+            with solar. Absent until read. PUT /schedule keeps it.
+    FrameDirection:
+      type: string
+      enum: [inverter-to-cloud, cloud-to-inverter]
+    FrameType:
+      type: string
+      enum:
+        - telemetry-150
+        - keepalive-135
+        - snap01
+        - snap02
+        - snap04
+        - snap60
+        - snap61
+        - snap65
+        - rssi
+        - modbus-read
+        - modbus-write
+        - modbus-read-response
+        - write-ack
+        - registration
+        - firmware-metadata
+        - firmware-chunk
+        - unknown
+    AuditAction:
+      type: string
+      enum: [allow, drop]
+    AuditEntry:
+      type: object
+      required: [ts, source, action, summary]
+      properties:
+        ts:
+          type: string
+          format: date-time
+        source:
+          type: string
+          description: Token name for local commands; `cloud` for upstream-originated messages.
+        source_role:
+          type: [Role, 'null']
+          description: Token role; null for cloud.
+        action:
+          $ref: '#/components/schemas/AuditAction'
+        summary:
+          type: string
+          description: Human-readable operation (e.g. "work-mode feed-in (41000=1)", "upstream Modbus write dropped (mode telemetry_only)").
+        confirmed:
+          type: string
+          enum: [yes, no, unknown, not-applicable]
+          description: Whether the inverter confirmed (read-back) an allowed write.
+    MessageEntry:
+      type: object
+      required: [ts, dir, frame, length, hex]
+      properties:
+        ts:
+          type: string
+          format: date-time
+        dir:
+          $ref: '#/components/schemas/FrameDirection'
+        frame:
+          $ref: '#/components/schemas/FrameType'
+        length:
+          type: integer
+          description: Payload bytes.
+        hex:
+          type: string
+        summary:
+          type: [string, 'null']
+          description: Decoded summary where available.
+        decision:
+          type: string
+          enum: [forwarded, dropped, injected, residue]
+          description: >-
+            What happened to the frame. `forwarded`: passed on (to the
+            inverter for cloud frames; for inverter frames, to the cloud
+            unless `reason` says it was kept from it). `dropped`: blocked by
+            the policy (C-001). `injected`: written by this app.
+            `residue`: a partial frame left when the connection closed.
+        reason:
+          type: [string, 'null']
+          description: >-
+            The policy verdict or routing note, e.g.
+            `mode:telemetry_only read:…` (a cloud read relayed),
+            `mode:telemetry_only deny:…` (blocked), or
+            `answer to this app's request: kept from the cloud`.
+        origin:
+          type: [string, 'null']
+          description: Who wrote an injected frame (gateway, bootstrap, trigread).
+    MaintenanceState:
+      type: object
+      description: Maintenance window state (the null fields are set only while active)
+      required: [active, remaining_s, rearms]
+      properties:
+        active:
+          type: boolean
+        opened_at:
+          type: [string, 'null']
+          format: date-time
+        expires_at:
+          type: [string, 'null']
+          format: date-time
+        remaining_s:
+          type: integer
+          description: Seconds until expiry (0 while inactive)
+        rearms:
+          type: integer
+          description: Deadline re-arms since the window opened
+        overridden_from:
+          type: [string, 'null']
+          description: The forward mode in force while the window is active
+        capturing:
+          type: boolean
+          description: The window's traffic is being recorded (opened with `capture`)
+    CaptureInfo:
+      type: object
+      required: [id, started, bytes, connections, capped, active, version]
+      properties:
+        id: {type: string, description: 'The window''s start, UTC (20261118T013500Z)'}
+        started: {type: string, format: date-time}
+        stopped: {type: string, format: date-time}
+        bytes: {type: integer, description: Bytes recorded, both directions}
+        connections: {type: integer}
+        capped: {type: boolean, description: Recording stopped at the size cap}
+        active: {type: boolean, description: Still recording}
+        version: {type: string, description: The foxess-local build that recorded it}
+    TokenInfo:
+      type: object
+      required: [id, name, role, created]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+        created:
+          type: string
+          format: date-time
+        last_used:
+          type: [string, 'null']
+          format: date-time
+    TokenCreate:
+      type: object
+      required: [name, role]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Unique display name (also the audit `source` identity).
+        role:
+          $ref: '#/components/schemas/Role'
+    TokenCreated:
+      type: object
+      required: [token, id, name, role, created]
+      properties:
+        token:
+          type: string
+          description: Plaintext token; returned exactly once.
+        id:
+          type: string
+        name:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+        created:
+          type: string
+          format: date-time
+    Config:
+      type: object
+      required: [raw_hours, bucket_days, version, public_access]
+      properties:
+        raw_hours:
+          type: integer
+          description: Dense raw telemetry retention (hours).
+        bucket_days:
+          type: integer
+          description: 15-minute rollup retention (days).
+        version:
+          type: string
+          description: Software version.
+        public_access:
+          type: boolean
+          default: true
+          description: >-
+            Unauthenticated read-only access (config-file-only). Limited to
+            the dashboard's endpoints (state, history, power/average, config,
+            forward-mode, events) unless public_all_pages is true.
+        public_all_pages:
+          type: boolean
+          default: false
+          description: >-
+            Unauthenticated sessions may also read the other pages'
+            endpoints (config-file-only; needs public_access).
+        issue_url:
+          type: string
+          description: >-
+            Where to file a problem report (the release repository's
+            new-issue page). Absent when no repository is known (a source
+            build without `[update] repo`).
+        time_zone:
+          type: string
+          description: >-
+            The host time zone the schedule windows are evaluated in
+            (name and abbreviation, e.g. "Australia/Sydney (AEDT)").
+        utc_offset_s:
+          type: integer
+          description: The host zone's current offset from UTC (seconds).
+        inverter_clock_offset_s:
+          type: number
+          nullable: true
+          description: >-
+            The inverter's clock (0x9C40 ×6, read with the settings) minus
+            the host's at the last read, in seconds; positive when the
+            inverter is ahead. Null before the first read.
+    Settings:
+      type: object
+      required: [settings]
+      properties:
+        settings:
+          type: array
+          items:
+            type: object
+            required: [key, value, source]
+            properties:
+              key:
+                type: string
+                enum: [battery.capacity_wh, access.public_read_only, access.public_all_pages, forward.mode]
+              value:
+                description: integer (Wh) or null for battery.capacity_wh; boolean for the access keys; the mode name for forward.mode.
+              source:
+                type: string
+                enum: [ui, config, default]
+    Setup:
+      type: object
+      required: [completed, checks, battery]
+      properties:
+        completed: { type: boolean }
+        checks:
+          type: array
+          items:
+            type: object
+            required: [id, title, status, detail]
+            properties:
+              id: { type: string, enum: [inverter_connected, identified, verified, clock, battery_capacity] }
+              title: { type: string }
+              status: { type: string, enum: [ok, warn, fail, pending] }
+              detail: { type: string }
+              fix: { type: string, description: 'What to do; present whenever status is not ok (except some pending checks, which only need time).' }
+        battery:
+          type: object
+          properties:
+            modules: { type: [integer, 'null'], description: 'Battery modules reported by the inverter; null until its module snapshot arrives.' }
+            capacity_wh: { type: [integer, 'null'] }
+    CurrentLimits:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        import_current_a: { type: number, minimum: 2, maximum: 100, description: 'Import current limit, A (0.1 A resolution).' }
+        export_current_a: { type: number, minimum: 2, maximum: 100, description: 'Export current limit, A (0.1 A resolution).' }
+    PortLimits:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        load_limit_w: { type: integer, minimum: 0, maximum: 65535, description: 'LoadLimitPower: max draw from the switchboard, W.' }
+        generation_limit_w: { type: integer, minimum: 0, maximum: 65535, description: 'GenerationLimitPower: presumed max output, W.' }
+    BatteryCurrents:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        max_charge_current_a: { type: number, minimum: 0, maximum: 50, description: 'Battery-side charge current limit, A (0.1 A resolution).' }
+        max_discharge_current_a: { type: number, minimum: 0, maximum: 50, description: 'Battery-side discharge current limit, A (0.1 A resolution).' }
+    PowerLimit:
+      type: object
+      required: [power_limit_pct]
+      additionalProperties: false
+      properties:
+        power_limit_pct: { type: integer, minimum: 0, maximum: 100, description: 'Inverter output, % of rating.' }
+    EpsModeRequest:
+      type: object
+      required: [eps_mode]
+      additionalProperties: false
+      properties:
+        eps_mode: { type: string, enum: [ups, eps] }
+    DeviceScanStatus:
+      type: object
+      required: [state, blocks_total, blocks_done, blocks_ok, blocks_failed]
+      properties:
+        state: { type: string, enum: [idle, running, done] }
+        model: { type: string }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        blocks_total: { type: integer }
+        blocks_done: { type: integer }
+        blocks_ok: { type: integer }
+        blocks_failed: { type: integer, description: 'Blocks the inverter refused (e.g. a Modbus exception for registers it does not have).' }
+    History:
+      type: object
+      required: [range, step, ts, sol, grid, haus, batt, soc, totals]
+      properties:
+        range: { type: string, enum: [1h, 6h, 24h, 72h, 7d, 30d] }
+        step: { type: string, enum: [1m, 5m, 15m, 1h] }
+        ts:
+          type: array
+          items: { type: integer }
+        sol:
+          type: array
+          items: { type: [integer, 'null'] }
+        grid:
+          type: array
+          items: { type: [integer, 'null'] }
+        haus:
+          type: array
+          items: { type: [integer, 'null'] }
+        batt:
+          type: array
+          items: { type: [integer, 'null'] }
+        soc:
+          type: array
+          items: { type: [integer, 'null'] }
+        t_batt:
+          type: array
+          description: Battery temperature as the inverter reads it (register 31023), °C, mean per step. Null where no sample carried it (before 2026-11-18, and the cloud-era 150 B frame).
+          items: { type: [number, 'null'] }
+        t_inv:
+          type: array
+          description: Inverter temperature (31018), °C, mean per step.
+          items: { type: [number, 'null'] }
+        t_amb:
+          type: array
+          description: Ambient temperature at the inverter (31019), °C, mean per step.
+          items: { type: [number, 'null'] }
+        bms_chg_a:
+          type: array
+          description: The BMS's charge-current limit (31025), A, mean per step — set by the battery from its coldest cell's temperature and its SoC.
+          items: { type: [number, 'null'] }
+        t_cell_min:
+          type: array
+          description: The BMS's coldest cell temperature, °C, mean per step (the FoxESS portal's "BMS battery temperature"). From the battery snapshot the inverter pushes about every 5 minutes; null where none arrived in the previous 15 minutes.
+          items: { type: [number, 'null'] }
+        t_cell_max:
+          type: array
+          description: The BMS's warmest cell temperature, °C, mean per step (same source and nulls as t_cell_min).
+          items: { type: [number, 'null'] }
+        totals:
+          type: object
+          required: [sol_wh, haus_wh, grid_import_wh, grid_export_wh, batt_charged_wh, batt_discharged_wh, stored_delta_wh]
+          properties:
+            sol_wh: { type: integer }
+            haus_wh: { type: integer }
+            grid_import_wh: { type: integer }
+            grid_export_wh: { type: integer }
+            batt_charged_wh: { type: integer }
+            batt_discharged_wh: { type: integer }
+            stored_delta_wh: { type: [integer, 'null'], description: 'SoC first→last × capacity_wh; null while the capacity is not set.' }
+    Event:
+      type: object
+      description: One server-sent event. `event` selects the `data` payload (see `x-event-map`).
+      required: [id, event, data]
+      properties:
+        id:
+          type: integer
+          description: Monotonic per connection epoch; send back as Last-Event-ID.
+        event:
+          type: string
+          enum: [snapshot, config, connection, system, resync, gap]
+        data:
+          $ref: '#/components/schemas/EventData'
+      x-event-map:
+        snapshot: SnapshotEvent
+        config: ConfigEvent
+        connection: ConnectionEvent
+        system: SystemEvent
+        resync: ResyncEvent
+        gap: GapEvent
+    EventData:
+      description: One payload per event type (discriminated by the SSE `event` field).
+      oneOf:
+        - $ref: '#/components/schemas/SnapshotEvent'
+        - $ref: '#/components/schemas/ConfigEvent'
+        - $ref: '#/components/schemas/ConnectionEvent'
+        - $ref: '#/components/schemas/SystemEvent'
+        - $ref: '#/components/schemas/ResyncEvent'
+        - $ref: '#/components/schemas/GapEvent'
+    SnapshotEvent:
+      type: object
+      description: Every 150 B telemetry frame (~5 s) — the immediate sensor feed.
+      required: [ts, power, soc_pct, battery_state]
+      properties:
+        ts:
+          type: string
+          format: date-time
+        power:
+          $ref: '#/components/schemas/Power'
+        soc_pct:
+          type: integer
+          minimum: 0
+          maximum: 100
+        battery_state:
+          $ref: '#/components/schemas/BatteryState'
+    ConfigEvent:
+      type: object
+      description: >-
+        Any confirmed register change: an own command, an observed cloud
+        push, or a setting the periodic settings read found changed on the
+        inverter itself (its panel). `state` is the full new snapshot; the
+        client diffs on `changed`.
+      required: [changed, state]
+      properties:
+        changed:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [work-mode, limits, meter-compensation, schedule, forward-mode, identity]
+        state:
+          $ref: '#/components/schemas/State'
+    ConnectionEvent:
+      type: object
+      required: [state]
+      description: >-
+        Liveness transition, server-computed: session down, or data-silent
+        for >15 s (the same threshold as State.online).
+      properties:
+        state:
+          type: string
+          enum: [online, offline]
+    SystemEvent:
+      type: object
+      required: [type, detail]
+      properties:
+        type:
+          type: string
+          enum: [forward-mode-changed, maintenance-opened, maintenance-extended, maintenance-expired, maintenance-closed, alert, gate-rule-loss, upgrade-rolled-back, grid-lost, grid-restored, unclean-restart]
+        detail:
+          type: string
+    ResyncEvent:
+      type: object
+      description: Replay window exceeded. Do GET /state, then continue the stream.
+    GapEvent:
+      type: object
+      description: Events were dropped for this client (queue overflow). Do GET /state.
+      properties:
+        missed:
+          type: integer
+          description: Number of events dropped.
+    UpdateView:
+      type: object
+      required: [current, available, checks_enabled, can_apply]
+      properties:
+        current: { type: string, description: The running version. }
+        latest: { type: string, description: The newest release (absent until a check). }
+        url: { type: string, description: Its release notes. }
+        available: { type: boolean, description: A newer release exists. }
+        checked_at: { type: [string, 'null'], format: date-time }
+        error: { type: string, description: The last check's failure. }
+        checks_enabled: { type: boolean, description: "[update] check (the daily release check)." }
+        can_apply: { type: boolean, description: Available and installable here. }
+        reason: { type: string, description: Why it cannot be applied here. }
+        rolled_back: { $ref: '#/components/schemas/UpgradeMarker' }
+        pending: { $ref: '#/components/schemas/UpgradeMarker' }
+    UpgradeMarker:
+      type: object
+      description: An upgrade in flight (pending) or one the guard rolled back.
+      properties:
+        from: { type: string }
+        to: { type: string }
+        attempts: { type: integer, description: Starts the new version has had. }
+        online_before: { type: boolean, description: The inverter was online when it was applied (the new version must bring it back). }
+    Problem:
+      type: object
+      description: RFC 7807 problem details with stable machine-readable `code`.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        code:
+          type: string
+          enum:
+            - unauthorized
+            - insufficient_role
+            - not_found
+            - invalid_value
+            - schedule_overlap
+            - command_in_flight
+            - conflict
+            - inverter_offline
+            - command_failed
+            - internal
+            - write_unsupported
+            - write_unverified
+            - device_not_identified
+            - checks_failing
+        reason:
+          type: string
+          enum: [unmapped, not_supported]
+          description: >-
+            Present on write_unsupported: `unmapped` = no known register or
+            encoding for this inverter; `not_supported` = the inverter
+            lacks the feature.
+        required_role:
+          type: [Role, 'null']
+          description: Present on insufficient_role.
+        token_role:
+          type: [Role, 'null']
+          description: Present on insufficient_role.
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+          description: Present on invalid_value.
+        applied:
+          type: string
+          enum: [yes, no, unknown]
+          description: Present on command_failed — whether the write landed.

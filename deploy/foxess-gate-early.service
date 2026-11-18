@@ -1,0 +1,21 @@
+[Unit]
+Description=Foxess egress gate - boot-time drop (before the network)
+# Blocks everything the inverter would forward through this machine from
+# the moment the kernel can route until the real gate (foxess-gate.service,
+# which needs the network) replaces it — and keeps blocking if the real
+# gate fails to apply: the gate fails closed (audit S3). After
+# nftables.service: a distribution ruleset that begins "flush ruleset"
+# would otherwise wipe it.
+DefaultDependencies=no
+Wants=network-pre.target
+Before=network-pre.target foxess-gate.service shutdown.target
+After=local-fs.target systemd-modules-load.service nftables.service
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/foxess-local/apply-gate.sh early
+
+[Install]
+WantedBy=multi-user.target

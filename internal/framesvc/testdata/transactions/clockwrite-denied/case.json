@@ -1,0 +1,35 @@
+{
+  "session": "20261115/1794729390376-1",
+  "policy": "telemetry_only",
+  "epoch_ms": 1794729390384,
+  "inputs": [
+    {
+      "leg": "c2s",
+      "file": "in1.bin",
+      "at_us": 0
+    },
+    {
+      "leg": "s2c",
+      "file": "in2.bin",
+      "at_us": 10000
+    }
+  ],
+  "want": [],
+  "audit": [
+    {
+      "decision": "forwarded",
+      "dir": "c2s",
+      "class": "keepalive",
+      "rel_to": 0
+    },
+    {
+      "decision": "dropped",
+      "dir": "s2c",
+      "reason_prefix": "mode:telemetry_only deny:",
+      "rel_to": 1
+    }
+  ],
+  "silence_ms": 2000,
+  "note": "C-002: cloud-initiated inverter modification (the fn10 clock write) is deny-all in telemetry_only \u2014 one dropped audit row, client-leg silence.",
+  "extract": "python3 /tmp/extract_golden_tx.py; session 20261115/1794729390376-1; first c2s dev0 0x06 (opens the flow); the s2c frame whose Modbus PDU fn is 0x10 (32 B, plen 19)"
+}

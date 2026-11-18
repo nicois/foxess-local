@@ -1,0 +1,39 @@
+# Builds the multi-arch container image from a PUBLISHED, SIGNED release
+# (design D-023): the release binary itself verifies the downloaded
+# assets against the key built into it before anything is packaged.
+# Actions are pinned to commit SHAs (update a SHA and its tag comment together).
+name: image
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+  packages: write
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: download the signed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ github.event.release.tag_name }}" --dir dist
+      - name: verify (signature + hashes) with the release's own binary
+        run: chmod +x dist/foxess-local_linux_amd64 && dist/foxess-local_linux_amd64 verify-release dist
+      - run: deploy/container/prepare.sh dist ctx
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: ctx
+          file: ctx/Containerfile
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.event.release.tag_name }}
+            ghcr.io/${{ github.repository }}:latest

@@ -1,0 +1,149 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - gocyclo
+    - gocognit
+    - cyclop
+    - funlen
+    - nestif
+    - maintidx
+    - revive
+    - mnd
+    - goconst
+    - exhaustive
+    - dupl
+    - dupword
+    - unused
+    - unparam
+    - ineffassign
+    - wastedassign
+    - godox
+    - godot
+    - predeclared
+    - gocritic
+    - errcheck
+    - staticcheck
+    - govet
+    - gosec
+    # 2026-11-18 tightening (measured first; each found little or nothing
+    # to fix, so they guard rather than churn)
+    - nolintlint       # a //nolint must name its linter, say why, and still be needed
+    - errorlint        # %w, errors.Is / As
+    - nilnil
+    - nilerr
+    - forcetypeassert
+    - errchkjson
+    - rowserrcheck
+    - contextcheck
+    - containedctx
+    - recvcheck
+    - canonicalheader
+    - unconvert
+    - usestdlibvars
+    - bodyclose
+    - musttag          # no Go field name leaks into JSON untagged
+    - modernize        # keeps the shape `go fix` leaves
+    - intrange
+    - copyloopvar
+    - tagliatelle      # the API's JSON is snake_case
+    - testifylint
+  exclusions:
+    rules:
+      # Tests seed math/rand/v2 deliberately for determinism; crypto/rand
+      # would be the wrong tool there.
+      - path: _test\.go
+        linters:
+          - gosec
+        text: G404
+      # tools/devui seeds a demo store: its numbers are illustrative
+      # inverter readings and register addresses, not tunables.
+      - path: tools/devui/
+        linters:
+          - mnd
+      # internal/sim mimics the FoxESS cloud API, whose JSON is camelCase
+      # (C-005 keeps it out of our own API).
+      - path: internal/sim/
+        linters:
+          - tagliatelle
+      # internal/mcp speaks the Model Context Protocol, whose JSON is
+      # camelCase (protocolVersion, inputSchema).
+      - path: internal/mcp/
+        linters:
+          - tagliatelle
+      # tools/synthdb and tools/loadgen model the device's rates, frame
+      # sizes and the UI's request mix: illustrative numbers, not tunables.
+      - path: tools/(synthdb|loadgen)/
+        linters:
+          - mnd
+      # tools/mon150/ holds single-file recon scratch tools (mon150,
+      # cfgscan): capture decoders full of protocol-magic offsets. Product
+      # lint thresholds (mnd, complexity) don't fit decode code; the
+      # product binary (C-006) is cmd/foxess-local.
+      - path: tools/mon150/
+        linters:
+          - cyclop
+          - dupl
+          - dupword
+          - errcheck
+          - exhaustive
+          - funlen
+          - gocognit
+          - gocritic
+          - goconst
+          - gocyclo
+          - godot
+          - godox
+          - gofumpt
+          - gosec
+          - govet
+          - ineffassign
+          - maintidx
+          - mnd
+          - nestif
+          - predeclared
+          - revive
+          - staticcheck
+          - unparam
+          - unused
+          - wastedassign
+
+  settings:
+    nolintlint:
+      require-specific: true
+      require-explanation: true
+      allow-unused: false
+    tagliatelle:
+      case:
+        rules:
+          json: snake
+    errchkjson:
+      report-no-exported: false
+    gocyclo:
+      min-complexity: 15
+    gocognit:
+      min-complexity: 15
+    cyclop:
+      max-complexity: 15
+    funlen:
+      lines: 80
+      statements: 40
+    nestif:
+      min-complexity: 5
+    dupl:
+      threshold: 100
+    mnd:
+      checks:
+        - argument
+        - return
+        - assign
+
+formatters:
+  enable:
+    - gofumpt
+  settings:
+    gofumpt:
+      # Keep main-module imports in their own group; without it gofumpt
+      # merges them into the stdlib group.
+      module-path: foxesslocal

@@ -1,0 +1,29 @@
+# Vendored JS assets (C-006: no npm at build or runtime — the binary
+# embeds everything). The SHA-256 pin is asserted in server_test.go
+# (TestVendorPin) so this file is load-bearing, not a comment.
+#
+# Re-derive: fetch the source tarball, extract the two dist files into
+# static/vendor/, and verify the hashes:
+#   curl -fsSL https://registry.npmjs.org/htmx.org/-/htmx.org-4.0.1.tgz | tar -xz
+#   sha256sum package/dist/htmx.min.js package/dist/ext/hx-sse.min.js
+#
+# hx-sse is the htmx 4 SSE extension (a rewrite of htmx 2's
+# htmx-ext-sse; the majors are not interchangeable — never mix).
+package: htmx.org
+version: 4.0.1
+source: https://registry.npmjs.org/htmx.org/-/htmx.org-4.0.1.tgz
+static/vendor/htmx.min.js: a0abb04f2f45a1f89d1d4844023245537e5e6014c87b144553e0607b4cc32130
+static/vendor/hx-sse.min.js: 18ef2761356ec1fe0bb6d92612315b37517a7c1e9856b661c5ae81fef239d103
+#
+# apexcharts (dashboard history charts, 2026-11-12). Fetched as the
+# minified dist bundle + the dist CSS; at vendor time the JS must pass
+# the CSP gate (zero occurrences of eval( / new Function( ) — see the
+# spec §5.3 and the Task 4 step in the implementation plan). The CSS is
+# linked statically because the CSP (style-src 'self') blocks apex's
+# runtime <style> injection — the charts init with injectStyleSheet:false.
+package: apexcharts
+version: 8.8.1
+source: https://registry.npmjs.org/apexcharts/-/apexcharts-8.8.1.tgz
+static/vendor/apexcharts.min.js: db4a86c86da615c3850749ce9f40f2ac36e8982f768708ef3f891c17857fd11d
+static/vendor/apexcharts.css: 429be1ee92dbccfd2e1515e09263bb0879c2db9a368d212aad69e0cee5435402
+static/vendor/apexcharts-legend.css: 7095018503c45be3bbf8f0195078b09b5f8e764983d1b58c52afe49cd4065a69

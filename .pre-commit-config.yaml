@@ -1,0 +1,37 @@
+# The checks run on every commit AND in CI (the ci.yml lint job runs
+# `prek run --all-files`), from the versions pinned here — one place.
+#
+# Install:  prek install        (or: pre-commit install)
+# Run all:  prek run --all-files
+# Update:   prek autoupdate     (bumps every rev; review and commit)
+#
+# Hook environments are built by prek/pre-commit from the pinned revs
+# (golangci-lint is compiled with the local Go, so it always matches the
+# toolchain); nothing depends on a binary installed by hand.
+---
+repos:
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v2.15.0
+    hooks:
+      # the whole module, not only the changed files: unused, dupl and
+      # the cross-package checks need it (and CI must match)
+      - id: golangci-lint-full
+      - id: golangci-lint-config-verify
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      # the scripts that run as root (the gate, the guard, the generator)
+      - id: shellcheck
+        files: ^deploy/.*\.sh$
+
+  - repo: local
+    hooks:
+      # the generated installer is not tracked: generate it and check the
+      # result (it is the file users run as root)
+      - id: installer-shellcheck
+        name: shellcheck (generated installer.sh)
+        entry: bash -c 'out=$(mktemp) && trap "rm -f $out" EXIT && bash deploy/gen-installer.sh > "$out" && shellcheck "$out"'
+        language: system
+        pass_filenames: false
+        files: ^deploy/

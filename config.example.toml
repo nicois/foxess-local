@@ -1,0 +1,138 @@
+# foxess-local configuration.
+#
+# Nothing here is required: an empty file is a complete config. Every
+# setting below is shown commented out at its default — uncomment only
+# what you need to change. The installer seeds /etc/foxess-local/config.toml
+# from this file on first install and keeps it on re-runs.
+#
+# Unknown keys are an error (typos fail loudly); keys retired by a
+# release still load but log a "retired and ignored" warning.
+#
+# Which inverter to intercept is NOT configured here — that is the
+# gate's job (/etc/foxess-local/gate.env + gate.nft). The app serves
+# whatever the gate hands it.
+
+# state_dir: root of every persistent file the app owns — the SQLite
+# store (foxess.db), the REST token store (tokens.json) and the cert
+# material (certs/). Must be absolute.
+# state_dir = "/var/lib/foxess-local"
+
+[forward]
+# mode: the cloud-forward ladder (C-001/C-002) — the one setting most
+# installs will want to choose.
+#   off            — no cloud leg at all; the app answers the inverter
+#                    locally (the default: nothing reaches the vendor's
+#                    cloud without a choice)
+#   telemetry_only — inverter→cloud mirrored; cloud→inverter only the
+#                    cloud's read requests (no write ever reaches the
+#                    inverter; the FoxESS app keeps getting answers)
+#   full           — the cloud reconnected: it can read and change settings;
+#                    a firmware push (anything it is not known to send) is
+#                    held until a maintenance window is open
+# The installer asks on the first install; it can also be changed at
+# runtime (More → Cloud, or PUT /api/v1/forward-mode).
+# mode = "off"
+#
+# upstream_cas: PEM files trusted on the upstream (real cloud) leg.
+# Default: the vendor's self-signed cloud root embedded in the binary.
+# upstream_cas = []
+
+[server]
+# inverter_listen: the TPROXY listener. Its port MUST equal the gate's
+# tproxy target (gate.env TPROXY_PORT, 14431).
+# inverter_listen = "0.0.0.0:14431"
+# http_listen: REST API + web UI.
+# http_listen = "0.0.0.0:18080"
+
+[access]
+# public_read_only: unauthenticated reads (dashboard + GET API). Writes
+# always need a token. Mint the first installer token with the service
+# STOPPED:
+#   sudo -u foxess /var/lib/foxess-local/bin/foxess-local tokens create -name installer -role installer
+# public_read_only = true
+# public_all_pages: tokenless sessions may also open the other pages
+# (schedule, control, activity, device, cloud, settings — read-only).
+# Off: they see the dashboard alone, without the page tabs.
+# public_all_pages = false
+
+[notify]
+# Outbound notifications (each optional; also settable in the web UI,
+# More → Settings, where a value wins over this file): the inverter
+# offline for 10 minutes and back, the gate losing its rules, a failed
+# command or schedule, a write refused by the hourly budget, low disk,
+# an upgrade rolled back, and maintenance-window / forward-mode changes.
+# webhook_url: a JSON POST per notice — e.g. a Home Assistant webhook
+# trigger. The body: {"source", "event", "severity", "title",
+# "message", "ts"}.
+# webhook_url = "http://homeassistant.local:8123/api/webhook/foxess-local-<random>"
+# ntfy_url: an ntfy topic (a phone push); pick a hard-to-guess topic.
+# ntfy_url = "https://ntfy.sh/foxess-<random>"
+
+[net]
+# allow_public: accept clients from non-local sources (default: LAN only
+# — loopback, RFC1918, link-local, ULA).
+# allow_public = false
+# extra_allowed: extra CIDRs to treat as local (e.g. Tailscale).
+# extra_allowed = ["100.64.0.0/10"]
+# host_names: extra names the web UI may be reached by. Requests for any
+# other name are refused (they are how a hostile web page reaches a LAN
+# service — DNS rebinding). IP addresses, localhost, this machine's own
+# name and .local / .lan / .home.arpa / .internal names always work.
+# host_names = ["solar.example.org"]
+
+[retention]
+# min_free_mb: the disk guard's critical free-space level (MB; capped at
+# 10 % of the filesystem for small devices). Checked hourly: below it,
+# the oldest raw data is discarded (the history stays, as 15-minute
+# averages; the newest 6 hours are always kept) and the web UI alerts.
+# An upgrade also refuses to download when it would leave less free.
+# min_free_mb = 200
+# raw_hours = 72          # dense raw frames, measured from connection close
+# buckets_days = 365      # 15-minute rollups
+# chunk_bytes_hours = 0   # captured payload bytes; 0 = off (dev/trace only)
+# capture_max_mb = 256   # one maintenance window's capture (when opened with
+#                        # "capture"): recording stops at this size
+
+[battery]
+# capacity_wh: usable energy across SoC 0–100 % (Wh). No default: until it
+# is set (here, or in the web UI's setup / Settings — the UI value wins)
+# the stored energy is shown as unknown. Example: 9 × 4.66 kWh modules
+# (EQ4800) = 41930.
+# capacity_wh = 41930
+
+[update]
+# check: look for a new release once a day (one HTTPS request to the
+# GitHub releases API carrying only the app version). Nothing is
+# installed without an installer clicking "update" (or running
+# `foxess-local upgrade`); releases are signature-checked first.
+# check = true
+# repo: the release repository (default: the one this build came from).
+# repo = "owner/foxess-local"
+
+# Per-path overrides of the state_dir layout (rarely needed):
+# [store]
+# path = "/var/lib/foxess-local/foxess.db"
+# [tokens]
+# path = "/var/lib/foxess-local/tokens.json"
+# [certs]
+# manifest = "/var/lib/foxess-local/certs/cert-manifest.json"
+
+# Force-charge windows (the scheduler): each writes the slot's charging
+# window + fd values on the device at the start of the window.
+# [[scheduler.windows]]
+# name = "off-peak"
+# slot = 1          # device time group 1..8
+# start = 2200      # HHMM
+# end = 600         # HHMM (may cross midnight)
+# fd_soc = 90
+# fd_pwr = 0
+
+# [sim] — cloud-API stand-in for development; off unless enabled.
+# When enabled, api_key, station_id and capacity_kw (>= 1) are required.
+
+[debug]
+# pprof_listen: serve the Go profiler (CPU, heap, goroutines) on a
+# loopback address; off by default. From another machine, tunnel it:
+#   ssh -L 6060:127.0.0.1:6060 <this machine>
+#   go tool pprof http://127.0.0.1:6060/debug/pprof/profile?seconds=300
+# pprof_listen = "127.0.0.1:6060"

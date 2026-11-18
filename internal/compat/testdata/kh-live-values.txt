@@ -1,0 +1,48 @@
+# probe 2026-11-16T14:52:57+11:00 url=http://127.0.0.1:18080
+# also record now: snap61 SoC/energy + pack voltage (GET /api/v1/state)
+{"ts":"2026-11-16T14:52:57.796682928+11:00","as_of":"2026-11-16T03:51:41.673806279Z","online":false,"power":{"pv_w":0,"grid_w":0,"load_w":0,"ac_port_w":0,"battery_w":0},"battery":{"soc_pct":99,"state":"unknown","stored_energy_wh":49350,"pack_voltage_v":537.73},"work_mode":"self-use","meter_compensation_w":0,"limits":{"import_w":0,"export_w":0},"schedule":{"enabled":false,"groups":[{"index":1,"enab
+
+## version-KH_PRE119 fn=4 addr=10016 count=3
+{"fn":4,"addr":10016,"registers":[{"addr":10016,"value":0},{"addr":10017,"value":0},{"addr":10018,"value":0}]}
+
+http=200
+## version-KH_PRE133 fn=3 addr=30016 count=3
+{"fn":3,"addr":30016,"registers":[{"addr":30016,"value":371},{"addr":30017,"value":259},{"addr":30018,"value":369}]}
+
+http=200
+## version-KH_133 fn=3 addr=36001 count=3
+{"type":"about:blank","title":"Command failed","status":502,"detail":"gateway: modbus exception 2 (fn 0x03)","code":"command_failed","applied":"no"}
+
+http=502
+## realtime-31000-31028 fn=3 addr=31000 count=29
+{"fn":3,"addr":31000,"registers":[{"addr":31000,"value":1261},{"addr":31001,"value":158},{"addr":31002,"value":2003},{"addr":31003,"value":2958},{"addr":31004,"value":92},{"addr":31005,"value":2723},{"addr":31006,"value":2426},{"addr":31007,"value":181},{"addr":31008,"value":4398},{"addr":31009,"value":4999},{"addr":31010,"value":2418},{"addr":31011,"value":5},{"addr":31012,"value":0},{"addr":31013,"value":5000},{"addr":31014,"value":65},{"addr":31015,"value":0},{"addr":31016,"value":0},{"addr":31017,"value":0},{"addr":31018,"value":418},{"addr":31019,"value":446},{"addr":31020,"value":4221},{"addr":31021,"value":0},{"addr":31022,"value":65508},{"addr":31023,"value":276},{"addr":31024,"value":100},{"addr":31025,"value":0},{"addr":31026,"value":500},{"addr":31027,"value":3},{"addr":31028,"value":1}]}
+
+http=200
+## realtime-31039-31054 fn=3 addr=31039 count=16
+{"fn":3,"addr":31039,"registers":[{"addr":31039,"value":13},{"addr":31040,"value":0},{"addr":31041,"value":0},{"addr":31042,"value":11},{"addr":31043,"value":0},{"addr":31044,"value":0},{"addr":31045,"value":0},{"addr":31046,"value":4398},{"addr":31047,"value":0},{"addr":31048,"value":0},{"addr":31049,"value":65535},{"addr":31050,"value":65460},{"addr":31051,"value":0},{"addr":31052,"value":0},{"addr":31053,"value":0},{"addr":31054,"value":4326}]}
+
+http=200
+## realtime-PRE119-11000-11058 fn=4 addr=11000 count=59
+{"type":"about:blank","title":"Command failed","status":502,"detail":"gateway: modbus exception 2 (fn 0x04)","code":"command_failed","applied":"no"}
+
+http=502
+## realtime-PRE119-11096-11104 fn=4 addr=11096 count=9
+{"type":"about:blank","title":"Command failed","status":502,"detail":"gateway: modbus exception 2 (fn 0x04)","code":"command_failed","applied":"no"}
+
+http=502
+## pv-strings-39070-39077 fn=3 addr=39070 count=8
+{"type":"about:blank","title":"Command failed","status":502,"detail":"gateway: modbus exception 2 (fn 0x03)","code":"command_failed","applied":"no"}
+
+http=502
+## grid-ct-39168-39169 fn=3 addr=39168 count=2
+{"type":"about:blank","title":"Command failed","status":502,"detail":"gateway: modbus exception 2 (fn 0x03)","code":"command_failed","applied":"no"}
+
+http=502
+## pv-power-39279-39286 fn=3 addr=39279 count=8
+{"type":"about:blank","title":"Command failed","status":502,"detail":"gateway: modbus exception 2 (fn 0x03)","code":"command_failed","applied":"no"}
+
+http=502
+## bms-37617-37632 fn=3 addr=37617 count=16
+{"type":"about:blank","title":"Command failed","status":502,"detail":"gateway: modbus exception 2 (fn 0x03)","code":"command_failed","applied":"no"}
+
+http=502

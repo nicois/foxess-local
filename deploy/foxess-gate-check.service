@@ -1,0 +1,6 @@
+[Unit]
+Description=Foxess gate rule-loss check
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/foxess-local/check-gate.sh

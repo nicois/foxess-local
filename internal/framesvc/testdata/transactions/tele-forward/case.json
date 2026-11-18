@@ -1,0 +1,23 @@
+{
+  "session": "20261105/1793875087573-1",
+  "policy": "telemetry_only",
+  "epoch_ms": 1793875087576,
+  "inputs": [
+    {
+      "leg": "c2s",
+      "file": "in1.bin",
+      "at_us": 0
+    }
+  ],
+  "want": [],
+  "audit": [
+    {
+      "decision": "forwarded",
+      "dir": "c2s",
+      "class": "tele",
+      "rel_to": 0
+    }
+  ],
+  "note": "telemetry_only mirrors the c2s uplink: the 150 B power telemetry frame reaches the cloud leg byte-exact (the mirror-identity expectation is computed from the input, the audit row pins its class).",
+  "extract": "python3 /tmp/extract_golden_tx.py; session 20261105/1793875087573-1; first c2s frame with plen 150"
+}

@@ -1,0 +1,32 @@
+# foxess-local as a container (design D-023). The host keeps the egress
+# gate and seeds /etc/foxess-local/config.toml (it asks what the cloud
+# may receive):
+#   sudo ./installer.sh install --gate-only --inverter-ip IP
+#
+# The image: set FOXESS_IMAGE, pinned by digest from the release notes
+# (the digest is in the signed release metadata), e.g.
+#   FOXESS_IMAGE=ghcr.io/<owner>/foxess-local@sha256:<digest> docker compose up -d
+# or a local build (make image): FOXESS_IMAGE=foxess-local:<version>.
+#
+# First token (the app will not start without one):
+#   docker compose run --rm foxess-local tokens create \
+#     -config /etc/foxess-local/config.toml -name installer -role installer
+# Upgrade: docker compose pull && docker compose up -d
+services:
+  foxess-local:
+    image: ${FOXESS_IMAGE:?set FOXESS_IMAGE (see the comment at the top)}
+    network_mode: host          # the gate hands the inverter's channel to host :14431
+    restart: unless-stopped
+    # TPROXY needs a real CAP_NET_ADMIN in the host network namespace, so
+    # the container runs rootful; everything else is dropped.
+    user: "0:0"
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
+    volumes:
+      - /etc/foxess-local:/etc/foxess-local:ro   # config.toml
+      - foxess-data:/var/lib/foxess-local        # store, tokens, certs
+volumes:
+  foxess-data: {}

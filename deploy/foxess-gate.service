@@ -1,0 +1,15 @@
+[Unit]
+Description=Foxess egress gate (nftables default-deny)
+# apply-gate.sh needs the LAN route (ip -4 route get) to compute the
+# tproxy target — order after the network is actually up .
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/foxess-local/apply-gate.sh up
+ExecStop=/usr/local/lib/foxess-local/apply-gate.sh down
+
+[Install]
+WantedBy=multi-user.target

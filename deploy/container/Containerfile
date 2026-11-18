@@ -1,0 +1,18 @@
+# foxess-local container image (design D-023).
+#
+# Built only from verified release binaries: deploy/container/prepare.sh
+# lays out bin/<TARGETARCH> from a release directory whose signature has
+# been checked (`foxess-local verify-release`); see INSTALL.md.
+#
+# Runtime requirements (compose.yaml): host networking and CAP_NET_ADMIN
+# (the TPROXY listener) — the egress gate itself stays on the host
+# (`installer.sh install --gate-only`). The image cannot update itself:
+# pull the new image instead.
+FROM gcr.io/distroless/static-debian12
+ARG TARGETARCH
+COPY bin/${TARGETARCH} /usr/local/bin/foxess-local
+ENV FOXESS_CONTAINER=1
+VOLUME ["/var/lib/foxess-local"]
+EXPOSE 18080
+ENTRYPOINT ["/usr/local/bin/foxess-local"]
+CMD ["run", "-config", "/etc/foxess-local/config.toml"]

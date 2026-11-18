@@ -1,0 +1,23 @@
+/foxess-local
+/installer.sh
+cmd/foxess-local/foxess-local
+bin/
+/config.toml
+*.pem
+*.key
+!testdata/**/*.pem
+# the embedded public G3C intermediate (no key material)
+!internal/emudhra/*.pem
+# the captured public FoxESS vendor upstream anchor (no key material)
+!deploy/cloud-root.pem
+/data/
+.worktrees/
+
+# recon tooling build artifacts
+/mon150
+tools/mon150/mon150
+__pycache__/
+.cache/
+
+# installation-specific agent notes (never committed)
+CLAUDE.local.md

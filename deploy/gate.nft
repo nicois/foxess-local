@@ -1,0 +1,68 @@
+#!/usr/sbin/nft -f
+# foxess egress gate — C-007: default-deny the inverter's egress.
+#
+# Live since stage 1a (2026-11-15); hardened 2026-11-17 (audit S2, S10).
+# Apply with deploy/apply-gate.sh, which renders the @VARS@ below and
+# loads the tables as one atomic nft transaction (replacing a previous
+# gate and the boot-time drop, foxess_gate_boot — see apply-gate.sh
+# early).
+#
+# The TPROXY mark pairs with the iproute2 fwmark routing managed by
+# apply-gate.sh (mark 1 / table 100).
+#
+# Scope: the inverter only — by source IP, and by the dongle's MAC
+# (@INVERTER_MAC@) when gate.env sets INVERTER_MAC, so a changed address
+# stays inside the gate (lines naming the MAC are dropped when it is
+# unset). Chain policies are accept: the rest of the LAN is untouched.
+#
+# Allowed from the inverter (everything else: drop; logged at most
+# 10/minute with prefix "foxess-gate: "):
+#   TCP 14431 -> TPROXY to the local listener @GATEWAY_IP@:@TPROXY_PORT@
+#   UDP/TCP 53 -> local resolver (observation only — the inverter dials
+#               raw IPs)
+#   UDP 123    -> NTP
+#
+# IPv6: the dongle shows no IPv6 address (the gateway host's neighbour table,
+# 2026-11-17). foxess_gate6 drops anything the dongle would route through
+# this machine over IPv6 — defence in depth only: an IPv6 default route
+# learnt from the home router would bypass this machine entirely; that
+# can only be closed on the router (or on a dedicated inverter network).
+
+table ip foxess_gate {
+	chain tproxy_mark {
+		type filter hook prerouting priority mangle
+		ip saddr @INVERTER_IP@ tcp dport 14431 tproxy ip to @GATEWAY_IP@:@TPROXY_PORT@ mark set 0x1
+		ether saddr @INVERTER_MAC@ tcp dport 14431 tproxy ip to @GATEWAY_IP@:@TPROXY_PORT@ mark set 0x1
+	}
+
+	chain input_deny {
+		type filter hook input priority filter
+		meta mark 0x1 accept
+		ip saddr @INVERTER_IP@ udp dport 53 counter accept
+		ip saddr @INVERTER_IP@ tcp dport 53 counter accept
+		ether saddr @INVERTER_MAC@ udp dport 53 counter accept
+		ether saddr @INVERTER_MAC@ tcp dport 53 counter accept
+		ip saddr @INVERTER_IP@ limit rate 10/minute log prefix "foxess-gate: drop-in "
+		ip saddr @INVERTER_IP@ counter drop
+		ether saddr @INVERTER_MAC@ limit rate 10/minute log prefix "foxess-gate: drop-in "
+		ether saddr @INVERTER_MAC@ counter drop
+	}
+
+	chain forward_deny {
+		type filter hook forward priority filter
+		ip saddr @INVERTER_IP@ udp dport 123 counter accept
+		ether saddr @INVERTER_MAC@ udp dport 123 counter accept
+		ip saddr @INVERTER_IP@ limit rate 10/minute log prefix "foxess-gate: drop-fwd "
+		ip saddr @INVERTER_IP@ counter drop
+		ether saddr @INVERTER_MAC@ limit rate 10/minute log prefix "foxess-gate: drop-fwd "
+		ether saddr @INVERTER_MAC@ counter drop
+	}
+}
+
+table ip6 foxess_gate6 {
+	chain forward_deny {
+		type filter hook forward priority filter
+		ether saddr @INVERTER_MAC@ limit rate 10/minute log prefix "foxess-gate: drop6-fwd "
+		ether saddr @INVERTER_MAC@ counter drop
+	}
+}

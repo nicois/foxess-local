@@ -1,0 +1,36 @@
+# Builds a release on a version tag and opens an UNSIGNED draft (design
+# D-023, RELEASING.md). CI never holds the signing key: the owner checks
+# the draft by rebuilding it (the builds are reproducible), signs
+# SHA256SUMS locally with minisign, uploads the .minisig and publishes.
+# Actions are pinned to commit SHAs (update the SHA and its tag comment together).
+name: release
+on:
+  push:
+    tags: ["v*.*.*"]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - run: make release VERSION="${GITHUB_REF_NAME}" REPO="${GITHUB_REPOSITORY}"
+      - name: draft release (unsigned)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          key="$(sed -n 2p deploy/release-key.pub)"
+          cat >notes.md <<EOF
+          Verify the download (INSTALL.md, step 2) with this release's signing key:
+
+              minisign -Vm SHA256SUMS -P ${key}
+              sha256sum -c --ignore-missing SHA256SUMS
+
+          <!-- owner: rebuild and compare (make release), sign (make sign), upload SHA256SUMS.minisig, edit the notes, publish -->
+          EOF
+          gh release create "${GITHUB_REF_NAME}" --draft --title "${GITHUB_REF_NAME}" \
+            --notes-file notes.md dist/*

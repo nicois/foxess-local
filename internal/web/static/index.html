@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<title>foxesslocal</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/css/app.css">
+<script src="/static/vendor/htmx.min.js" defer></script>
+<script src="/static/vendor/hx-sse.min.js" defer></script>
+<script type="module" src="/static/js/app.js"></script>
+</head>
+<body>
+
+<!-- the sign-out gate: visible (with the shell inert) while no token
+     is accepted; signing in opens the modal dialog -->
+<div id="gate" hidden>
+  <div class="card">
+    <h1>foxesslocal</h1>
+    <p class="muted">Local monitoring and control for your FoxESS inverter.
+       Everything runs on this network; the cloud is optional.</p>
+    <p id="gate-msg" role="status"></p>
+    <button id="gate-signin" type="button" class="cmd">sign in</button>
+  </div>
+</div>
+
+<!-- the shell: inert until a token is accepted (login <dialog> is the
+     modal entry) -->
+<div id="app" hidden inert>
+  <a class="skip" href="#view" data-action="skip">Skip to content</a>
+  <header class="top">
+    <span class="brand"><svg class="ico brand-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3 5 13h6l-1 8 8-10h-6z"/></svg>foxesslocal</span>
+    <nav id="tabs" class="tabs-top" aria-label="Main">
+      <a href="#/dashboard" data-route="dashboard"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span>Home</span></a>
+      <a href="#/schedule" data-route="schedule"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span>Schedule</span></a>
+      <a href="#/control" data-route="control"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h9M18 7h1M5 17h1M10 17h9"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span>Control</span></a>
+      <a href="#/activity" data-route="activity"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h3.5l2.5-6 4 12 2.5-6H20"/></svg><span>Activity</span></a>
+      <a href="#/more" data-route="more"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18" cy="12" r="1.3"/></svg><span>More</span></a>
+    </nav>
+    <div class="status">
+      <span id="conn" class="conn" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="conn-text">connecting…</span></span>
+      <span id="forward-badge" class="badge" title="cloud forwarding mode">cloud: —</span>
+      <span id="public-badge" class="badge" hidden>read-only</span>
+      <button id="signout" type="button" class="ghost small-btn" data-action="sign-out">sign out</button>
+    </div>
+  </header>
+
+  <!-- distinct banners: inverter offline (commands fail at the API), the
+       live feed degraded (values are last known), and an unverified
+       inverter model (monitoring works; some settings unavailable) -->
+  <div id="banner-inverter" class="banner err" hidden role="alert"></div>
+  <div id="banner-feed" class="banner warn" hidden role="status"></div>
+  <div id="banner-device" class="banner info" hidden role="status"></div>
+
+  <main id="view" class="wrap" tabindex="-1"></main>
+
+  <footer class="muted">foxesslocal · local control, no cloud required ·
+    <span id="ver">—</span></footer>
+
+  <!-- phones: the primary navigation as a bottom tab bar -->
+  <nav id="tabbar" class="tabbar" aria-label="Main (bottom)">
+      <a href="#/dashboard" data-route="dashboard"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span>Home</span></a>
+      <a href="#/schedule" data-route="schedule"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span>Schedule</span></a>
+      <a href="#/control" data-route="control"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h9M18 7h1M5 17h1M10 17h9"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span>Control</span></a>
+      <a href="#/activity" data-route="activity"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h3.5l2.5-6 4 12 2.5-6H20"/></svg><span>Activity</span></a>
+      <a href="#/more" data-route="more"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18" cy="12" r="1.3"/></svg><span>More</span></a>
+  </nav>
+</div>
+
+<!-- toasts: a fixed reserved region (nothing reflows on notify) -->
+<div id="toasts" aria-live="polite"></div>
+
+<!-- sign in (modal; only a valid token leaves the gate) -->
+<dialog id="dlg-login" class="dlg" aria-label="sign in">
+  <form id="login-form">
+    <h2>sign in</h2>
+    <p class="muted small">API token (created under settings → tokens,
+       installer role). Roles: read-only &lt; standard &lt; expert &lt; installer.</p>
+    <label for="login-token">token</label>
+    <input id="login-token" name="token" type="password"
+           autocomplete="current-password" required>
+    <label class="radio-row"><input id="login-remember" type="checkbox" checked>
+      <span>Keep me signed in on this device <span class="muted small">(until you sign out; leave off on a shared computer)</span></span></label>
+    <p id="login-error" class="error" role="alert"></p>
+    <menu>
+      <button type="button" class="ghost" data-action="login-cancel">cancel</button>
+      <button type="submit" class="cmd">sign in</button>
+    </menu>
+  </form>
+</dialog>
+
+<!-- command confirmation (release/discard/release-all/token-revoke/
+     forward-to-off) -->
+<dialog id="dlg-confirm" class="dlg" closedby="cancel" aria-label="confirm">
+  <form method="dialog">
+    <h2 id="confirm-title">confirm</h2>
+    <p id="confirm-body"></p>
+    <menu>
+      <button type="button" data-action="confirm-cancel" class="ghost">cancel</button>
+      <button type="submit" value="ok" id="confirm-ok" class="cmd">confirm</button>
+    </menu>
+  </form>
+</dialog>
+
+<!-- one-time token reveal (the plaintext never appears again) -->
+<dialog id="dlg-token" class="dlg" closedby="cancel" aria-label="token created">
+  <form method="dialog">
+    <h2>token created</h2>
+    <p class="error">This token will not be shown again — copy it now.</p>
+    <output id="token-plaintext" class="token" tabindex="0"></output>
+    <menu>
+      <button type="button" class="ghost" data-action="token-copy">copy</button>
+      <button type="submit" value="done" class="cmd">done</button>
+    </menu>
+  </form>
+</dialog>
+
+</body>
+</html>
