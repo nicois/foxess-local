@@ -69,6 +69,9 @@ version; anything else bumps the patch version.
   the tag. Each draft release's notes are its changelog section.
 
 ### Fixed
+- The web UI did not load at all (a syntax error in the translated
+  More page, unreleased). A test now checks every UI script as an ES
+  module; `node --check` on a `.js` file had silently passed it.
 - A write whose frame could not be sent no longer counts against the
   write budget.
 - The API description now lists every problem code the API returns

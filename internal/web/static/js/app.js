@@ -2063,7 +2063,7 @@ async function renderMore() {
   ${pageHead(tr("More"))}
   <ul class="hub">
     ${link("device", tr("Device"), devSub, '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6"/>')}
-    ${link("cloud", tr("Cloud & maintenance"), esc(tr("cloud forwarding: {mode}", { mode: FORWARD_NAME()[S.forwardMode?.mode] ?? "—" }))), '<path d="M7 18a4 4 0 0 1-.5-8 6 6 0 0 1 11.5 1.5A3.5 3.5 0 0 1 17.5 18z"/>')}
+    ${link("cloud", tr("Cloud & maintenance"), esc(tr("cloud forwarding: {mode}", { mode: FORWARD_NAME()[S.forwardMode?.mode] ?? "—" })), '<path d="M7 18a4 4 0 0 1-.5-8 6 6 0 0 1 11.5 1.5A3.5 3.5 0 0 1 17.5 18z"/>')}
     ${link("setup", tr("Setup"), esc(tr("checks, battery capacity, cloud and access choices")), '<path d="m5 12 4 4 10-10"/>')}
     ${link("settings", tr("Settings"), esc(tr("language, access tokens, notifications, tuning, diagnostics")), '<circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>')}
     ${link("report", tr("Report a problem"), esc(tr("one file for the developers, plus a prefilled issue")), '<path d="M12 3 2 21h20zM12 9v5M12 17.5v.5"/>')}
