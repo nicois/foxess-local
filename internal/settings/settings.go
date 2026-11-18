@@ -34,6 +34,10 @@ const (
 	KeySocPValue      = "alerts.soc_p_value"
 	KeySocWindow      = "alerts.soc_window_min"
 
+	KeyUpdateInterval   = "update.check_interval_h"
+	KeyUpdatePrerelease = "update.prerelease"
+	KeyUpdateAutoApply  = "update.auto_apply"
+
 	keySetupCompleted = "setup.completed_at"
 	dbPrefix          = "ui."     // database keys: ui.<key>
 	auditKind         = "setting" // one audit row per change
@@ -60,22 +64,26 @@ type numRange struct {
 	min, max float64
 	float    bool // a decimal (else a whole number)
 	what     string
+	expert   bool // an expert may set it (else an installer)
 }
 
 // numeric are the numeric tuning settings and their ranges.
 var numeric = map[string]numRange{
-	KeyWriteDelay:   {0, 900, false, "seconds from 0 (at once) to 900 (15 minutes)"},
-	KeySocThreshold: {0, 95, false, "a percentage from 0 (off) to 95"},
-	KeySocHorizon:   {10, 1440, false, "minutes from 10 to 1440 (a day)"},
-	KeySocPValue:    {0.001, 0.5, true, "a p-value from 0.001 to 0.5 (0.05 = 95 % confident)"},
-	KeySocWindow:    {5, 240, false, "minutes from 5 to 240"},
+	KeyWriteDelay:     {0, 900, false, "seconds from 0 (at once) to 900 (15 minutes)", true},
+	KeySocThreshold:   {0, 95, false, "a percentage from 0 (off) to 95", true},
+	KeySocHorizon:     {10, 1440, false, "minutes from 10 to 1440 (a day)", true},
+	KeySocPValue:      {0.001, 0.5, true, "a p-value from 0.001 to 0.5 (0.05 = 95 % confident)", true},
+	KeySocWindow:      {5, 240, false, "minutes from 5 to 240", true},
+	KeyUpdateInterval: {0, maxIntervalH, false, "hours from 0 (never) to 720 (30 days)", false},
 }
+
+// maxIntervalH bounds the release-check interval (30 days).
+const maxIntervalH = 720
 
 // Expert reports whether a setting is an expert-level tuning knob (an
 // expert may change it; the other settings need an installer).
 func Expert(key string) bool {
-	_, ok := numeric[key]
-	return ok
+	return numeric[key].expert
 }
 
 // Secret reports whether a key's value is a secret (a notification
@@ -97,6 +105,10 @@ type Values struct {
 	SocHorizon      time.Duration
 	SocPValue       float64
 	SocWindow       time.Duration
+
+	UpdateInterval   time.Duration // 0 = no scheduled release checks
+	UpdatePrerelease bool
+	UpdateAutoApply  bool
 }
 
 // Store is the persistence the settings need (internal/store.Store).
@@ -143,23 +155,26 @@ func New(st Store, cfg *config.Config, clock func() time.Time) (*Settings, error
 	s := &Settings{
 		st: st, clock: clock,
 		file: map[string]string{
-			KeyCapacityWh:     strconv.Itoa(cfg.Battery.CapacityWh),
-			KeyPublicReadOnly: strconv.FormatBool(cfg.Access.PublicReadOnly),
-			KeyPublicAllPages: strconv.FormatBool(cfg.Access.PublicAllPages),
-			KeyForwardMode:    string(cfg.Forward.Mode),
-			KeyNotifyWebhook:  cfg.Notify.WebhookURL,
-			KeyNotifyNtfy:     cfg.Notify.NtfyURL,
-			KeyWriteDelay:     strconv.Itoa(cfg.Store.WriteDelay()),
-			KeySocThreshold:   strconv.Itoa(cfg.Alerts.Threshold()),
-			KeySocHorizon:     strconv.Itoa(cfg.Alerts.HorizonMin()),
-			KeySocPValue:      strconv.FormatFloat(cfg.Alerts.PValue(), 'g', -1, 64),
-			KeySocWindow:      strconv.Itoa(cfg.Alerts.WindowMin()),
+			KeyCapacityWh:       strconv.Itoa(cfg.Battery.CapacityWh),
+			KeyPublicReadOnly:   strconv.FormatBool(cfg.Access.PublicReadOnly),
+			KeyPublicAllPages:   strconv.FormatBool(cfg.Access.PublicAllPages),
+			KeyForwardMode:      string(cfg.Forward.Mode),
+			KeyNotifyWebhook:    cfg.Notify.WebhookURL,
+			KeyNotifyNtfy:       cfg.Notify.NtfyURL,
+			KeyWriteDelay:       strconv.Itoa(cfg.Store.WriteDelay()),
+			KeySocThreshold:     strconv.Itoa(cfg.Alerts.Threshold()),
+			KeySocHorizon:       strconv.Itoa(cfg.Alerts.HorizonMin()),
+			KeySocPValue:        strconv.FormatFloat(cfg.Alerts.PValue(), 'g', -1, 64),
+			KeySocWindow:        strconv.Itoa(cfg.Alerts.WindowMin()),
+			KeyUpdateInterval:   strconv.Itoa(cfg.Update.IntervalHours()),
+			KeyUpdatePrerelease: strconv.FormatBool(cfg.Update.Prerelease),
+			KeyUpdateAutoApply:  strconv.FormatBool(cfg.Update.AutoApply),
 		},
 		src: map[string]Source{},
 		ui:  map[string]string{},
 	}
 	for k := range s.file {
-		if Expert(k) { // the file's tuning values: range-checked like the UI's
+		if _, ok := numeric[k]; ok { // the file's numbers: range-checked like the UI's
 			if err := validate(k, s.file[k]); err != nil {
 				return nil, fmt.Errorf("config: %w", err)
 			}
@@ -312,14 +327,18 @@ func (s *Settings) recomputeLocked() {
 	capWh, _ := strconv.Atoi(get(KeyCapacityWh))
 	pro, _ := strconv.ParseBool(get(KeyPublicReadOnly))
 	pap, _ := strconv.ParseBool(get(KeyPublicAllPages))
+	upre, _ := strconv.ParseBool(get(KeyUpdatePrerelease))
+	uauto, _ := strconv.ParseBool(get(KeyUpdateAutoApply))
 	s.val = Values{
 		CapacityWh: capWh, PublicReadOnly: pro, PublicAllPages: pap, ForwardMode: policy.ForwardMode(get(KeyForwardMode)),
 		NotifyWebhook: get(KeyNotifyWebhook), NotifyNtfy: get(KeyNotifyNtfy),
-		WriteDelay:      time.Duration(num(get(KeyWriteDelay)) * float64(time.Second)),
-		SocThresholdPct: int(num(get(KeySocThreshold))),
-		SocHorizon:      time.Duration(num(get(KeySocHorizon)) * float64(time.Minute)),
-		SocPValue:       num(get(KeySocPValue)),
-		SocWindow:       time.Duration(num(get(KeySocWindow)) * float64(time.Minute)),
+		WriteDelay:       time.Duration(num(get(KeyWriteDelay)) * float64(time.Second)),
+		SocThresholdPct:  int(num(get(KeySocThreshold))),
+		SocHorizon:       time.Duration(num(get(KeySocHorizon)) * float64(time.Minute)),
+		SocPValue:        num(get(KeySocPValue)),
+		SocWindow:        time.Duration(num(get(KeySocWindow)) * float64(time.Minute)),
+		UpdateInterval:   time.Duration(num(get(KeyUpdateInterval)) * float64(time.Hour)),
+		UpdatePrerelease: upre, UpdateAutoApply: uauto,
 	}
 }
 
@@ -331,7 +350,7 @@ func validate(key, value string) error {
 		if err != nil || n < 1 || n > MaxCapacityWh {
 			return fmt.Errorf("settings: %s must be a whole number of Wh from 1 to %d, got %q", key, MaxCapacityWh, value)
 		}
-	case KeyPublicReadOnly, KeyPublicAllPages:
+	case KeyPublicReadOnly, KeyPublicAllPages, KeyUpdatePrerelease, KeyUpdateAutoApply:
 		if _, err := strconv.ParseBool(value); err != nil {
 			return fmt.Errorf("settings: %s must be true or false, got %q", key, value)
 		}

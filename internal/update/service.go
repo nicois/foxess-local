@@ -12,7 +12,7 @@ import (
 // Service timing.
 const (
 	firstCheckAfter = time.Minute            // after start: let the session settle first
-	checkEvery      = 24 * time.Hour         // then daily
+	scheduleEvery   = time.Minute            // how often Run looks whether a check is due
 	healthyAfter    = 2 * time.Minute        // a pending upgrade is not confirmed before this much uptime
 	healthEvery     = 15 * time.Second       // then health is re-checked this often
 	healthTimeout   = 15 * time.Minute       // online before, not healthy by now: the upgrade failed
@@ -24,8 +24,16 @@ const (
 // upgrade once the new binary has run healthily, and applies updates on
 // request.
 type Service struct {
-	U            *Updater
-	CheckEnabled bool
+	U *Updater
+	// Interval is how often to check for releases (read live: the
+	// installer's setting; 0 or nil = never on its own).
+	Interval func() time.Duration
+	// AutoApply: apply each new eligible release once, on its own (read
+	// live; nil = never). Attempted / SetAttempted persist the last
+	// version tried, so a restart or a rollback does not retry it.
+	AutoApply    func() bool
+	Attempted    func() string
+	SetAttempted func(tag string)
 	Container    bool   // running in a container: upgrades are image pulls
 	Restart      func() // exits the process so systemd starts the new binary
 	// Healthy reports the running system is well: the inverter session up
@@ -38,6 +46,15 @@ type Service struct {
 	mu      sync.Mutex
 	last    *Status
 	lastErr string
+	lastAt  time.Time // the last check (scheduled or on request)
+}
+
+// interval is the check interval now (0: off).
+func (s *Service) interval() time.Duration {
+	if s.Interval == nil || s.U.Repo == "" {
+		return 0
+	}
+	return max(0, s.Interval())
 }
 
 // View is what the API shows.
@@ -53,6 +70,15 @@ type View struct {
 	Reason    string     `json:"reason,omitempty"` // why it cannot be applied
 	Failed    *Marker    `json:"rolled_back,omitempty"`
 	Pending   *Marker    `json:"pending,omitempty"`
+	// LatestPrerelease: Latest is a prerelease (offered by the opt-in).
+	LatestPrerelease bool `json:"latest_prerelease"`
+	// The installer's choices: the check interval in hours (0 = off),
+	// prereleases offered, and updates applied on their own.
+	CheckIntervalH int  `json:"check_interval_h"`
+	Prerelease     bool `json:"prerelease"`
+	AutoApply      bool `json:"auto_apply"`
+	// NextCheckAt is when the next scheduled check is due (null: off).
+	NextCheckAt *time.Time `json:"next_check_at"`
 }
 
 func (s *Service) dir() string { return filepath.Dir(s.U.Exe) }
@@ -76,11 +102,20 @@ func (s *Service) reason() string {
 func (s *Service) View() View {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	v := View{Current: s.U.Current, Checks: s.CheckEnabled, Error: s.lastErr, Reason: s.reason()}
+	iv := s.interval()
+	v := View{
+		Current: s.U.Current, Checks: iv > 0, Error: s.lastErr, Reason: s.reason(),
+		CheckIntervalH: int(iv / time.Hour), Prerelease: s.U.allowPre(),
+		AutoApply: s.AutoApply != nil && s.AutoApply(),
+	}
 	if s.last != nil {
-		v.Latest, v.URL, v.Available = s.last.Latest, s.last.URL, s.last.Available
+		v.Latest, v.URL, v.Available, v.LatestPrerelease = s.last.Latest, s.last.URL, s.last.Available, s.last.Prerelease
 		at := s.last.CheckedAt
 		v.CheckedAt = &at
+	}
+	if iv > 0 && !s.lastAt.IsZero() {
+		next := s.lastAt.Add(iv)
+		v.NextCheckAt = &next
 	}
 	v.CanApply = v.Reason == "" && v.Available
 	if s.U.Exe != "" {
@@ -98,6 +133,7 @@ func (s *Service) View() View {
 func (s *Service) CheckNow(ctx context.Context) View {
 	st, err := s.U.Check(ctx)
 	s.mu.Lock()
+	s.lastAt = time.Now()
 	if err != nil {
 		s.lastErr = err.Error()
 	} else {
@@ -181,15 +217,15 @@ type ReasonError struct{ Reason string }
 func (e *ReasonError) Error() string { return "update: " + e.Reason }
 
 // Run confirms a pending upgrade to this version after healthyAfter, and
-// checks for releases (first after firstCheckAfter, then daily) when
-// enabled. It returns when ctx is done.
+// checks for releases when due (the first a minute after start, then
+// every Interval; a changed interval applies within a minute). With
+// AutoApply, a check that finds a new eligible release applies it — once
+// per version. It returns when ctx is done.
 func (s *Service) Run(ctx context.Context) {
 	start := time.Now()
 	confirm := time.After(healthyAfter)
-	var check <-chan time.Time
-	if s.CheckEnabled && s.U.Repo != "" {
-		check = time.After(firstCheckAfter)
-	}
+	tick := time.NewTicker(scheduleEvery)
+	defer tick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -200,9 +236,67 @@ func (s *Service) Run(ctx context.Context) {
 			} else {
 				confirm = nil
 			}
-		case <-check:
-			s.CheckNow(ctx)
-			check = time.After(checkEvery)
+		case <-tick.C:
+			s.mu.Lock()
+			last := s.lastAt
+			s.mu.Unlock()
+			if checkDue(time.Now(), start, last, s.interval()) {
+				s.autoApply(ctx, s.CheckNow(ctx))
+			}
 		}
+	}
+}
+
+// checkDue: a scheduled check is due — never with interval 0; the first
+// firstCheckAfter after start; then interval after the last (a last check
+// in the future means the clock moved back: check).
+func checkDue(now, start, last time.Time, interval time.Duration) bool {
+	switch {
+	case interval <= 0:
+		return false
+	case last.IsZero():
+		return now.Sub(start) >= firstCheckAfter
+	case last.After(now):
+		return true
+	}
+	return now.Sub(last) >= interval
+}
+
+// autoApplyTarget is the release auto-apply should try now, if any: an
+// available release that can be applied here, not already attempted, and
+// not the version that rolled back.
+func autoApplyTarget(v View, attempted string) (string, bool) {
+	switch {
+	case !v.Available || !v.CanApply || v.Latest == "":
+		return "", false
+	case v.Latest == attempted:
+		return "", false
+	case v.Failed != nil && v.Failed.To == v.Latest:
+		return "", false
+	}
+	return v.Latest, true
+}
+
+// autoApply applies the release a scheduled check found, when the
+// installer asked for that. The attempt is recorded before applying, so
+// it is made once even when it fails or rolls back.
+func (s *Service) autoApply(ctx context.Context, v View) {
+	if s.AutoApply == nil || !s.AutoApply() {
+		return
+	}
+	attempted := ""
+	if s.Attempted != nil {
+		attempted = s.Attempted()
+	}
+	tag, ok := autoApplyTarget(v, attempted)
+	if !ok {
+		return
+	}
+	if s.SetAttempted != nil {
+		s.SetAttempted(tag)
+	}
+	slog.Info("update: applying a new release on its own (auto-apply)", "from", s.U.Current, "to", tag)
+	if err := s.Apply(ctx); err != nil {
+		slog.Error("update: auto-apply failed", "to", tag, "err", err)
 	}
 }

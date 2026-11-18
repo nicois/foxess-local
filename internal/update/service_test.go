@@ -37,7 +37,7 @@ func TestServiceReasons(t *testing.T) {
 func TestServiceApplyRestarts(t *testing.T) {
 	u, _ := setup(t, nil)
 	restarted := make(chan struct{}, 1)
-	svc := &Service{U: u, CheckEnabled: true, Restart: func() { restarted <- struct{}{} }}
+	svc := &Service{U: u, Interval: func() time.Duration { return time.Hour }, Restart: func() { restarted <- struct{}{} }}
 	if v := svc.CheckNow(context.Background()); !v.Available || !v.CanApply || v.Latest != vNew {
 		t.Fatalf("view after check: %+v", v)
 	}
@@ -221,4 +221,41 @@ func TestServiceRetriesConfirm(t *testing.T) {
 			t.Fatal("not confirmed once the marker can be removed: the retry was dropped")
 		}
 	})
+}
+
+// TestServiceAutoApply (2026-11-19): with auto-apply on, a check that
+// finds a new release applies it and records the attempt first; the
+// same version is not tried again; off, nothing is applied.
+func TestServiceAutoApply(t *testing.T) {
+	u, _ := setup(t, nil)
+	restarted := make(chan struct{}, 2)
+	attempted := ""
+	auto := false
+	svc := &Service{
+		U: u, Restart: func() { restarted <- struct{}{} },
+		AutoApply: func() bool { return auto },
+		Attempted: func() string { return attempted }, SetAttempted: func(tag string) { attempted = tag },
+	}
+	ctx := context.Background()
+	svc.autoApply(ctx, svc.CheckNow(ctx))
+	if attempted != "" {
+		t.Fatal("applied with auto-apply off")
+	}
+	auto = true
+	svc.autoApply(ctx, svc.CheckNow(ctx))
+	if attempted != vNew {
+		t.Fatalf("attempt not recorded: %q", attempted)
+	}
+	select {
+	case <-restarted:
+	case <-time.After(5 * time.Second): // the restart goroutine, not timing logic
+		t.Fatal("no restart after the auto-apply")
+	}
+	u.Current = vOld // as if the new binary had rolled back without a marker
+	svc.autoApply(ctx, svc.CheckNow(ctx))
+	select {
+	case <-restarted:
+		t.Fatal("the same version was applied twice")
+	case <-time.After(time.Second):
+	}
 }

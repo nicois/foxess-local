@@ -30,6 +30,7 @@ var settingsOrder = []string{
 	settings.KeyNotifyWebhook, settings.KeyNotifyNtfy,
 	settings.KeyWriteDelay,
 	settings.KeySocThreshold, settings.KeySocHorizon, settings.KeySocPValue, settings.KeySocWindow,
+	settings.KeyUpdateInterval, settings.KeyUpdatePrerelease, settings.KeyUpdateAutoApply,
 }
 
 // secretShown stands in for a secret setting's value below installer.
@@ -90,17 +91,20 @@ func (s *Server) settingsBody(a SettingsAdmin, tk Token) settingsView {
 	}
 	installer := roleLevel[tk.Role] >= roleLevel[RoleInstaller]
 	vals := map[string]any{
-		settings.KeyCapacityWh:     capWh,
-		settings.KeyPublicReadOnly: v.PublicReadOnly,
-		settings.KeyPublicAllPages: v.PublicAllPages,
-		settings.KeyForwardMode:    string(v.ForwardMode),
-		settings.KeyNotifyWebhook:  secretValue(v.NotifyWebhook, installer),
-		settings.KeyNotifyNtfy:     secretValue(v.NotifyNtfy, installer),
-		settings.KeyWriteDelay:     int(v.WriteDelay / time.Second),
-		settings.KeySocThreshold:   v.SocThresholdPct,
-		settings.KeySocHorizon:     int(v.SocHorizon / time.Minute),
-		settings.KeySocPValue:      v.SocPValue,
-		settings.KeySocWindow:      int(v.SocWindow / time.Minute),
+		settings.KeyCapacityWh:       capWh,
+		settings.KeyPublicReadOnly:   v.PublicReadOnly,
+		settings.KeyPublicAllPages:   v.PublicAllPages,
+		settings.KeyForwardMode:      string(v.ForwardMode),
+		settings.KeyNotifyWebhook:    secretValue(v.NotifyWebhook, installer),
+		settings.KeyNotifyNtfy:       secretValue(v.NotifyNtfy, installer),
+		settings.KeyWriteDelay:       int(v.WriteDelay / time.Second),
+		settings.KeySocThreshold:     v.SocThresholdPct,
+		settings.KeySocHorizon:       int(v.SocHorizon / time.Minute),
+		settings.KeySocPValue:        v.SocPValue,
+		settings.KeySocWindow:        int(v.SocWindow / time.Minute),
+		settings.KeyUpdateInterval:   int(v.UpdateInterval / time.Hour),
+		settings.KeyUpdatePrerelease: v.UpdatePrerelease,
+		settings.KeyUpdateAutoApply:  v.UpdateAutoApply,
 	}
 	out := settingsView{}
 	for _, k := range settingsOrder {
@@ -220,7 +224,8 @@ func settingValue(key string, raw json.RawMessage) (string, error) {
 			return "", fmt.Errorf("must be a whole number of Wh from 1 to %d, or null", settings.MaxCapacityWh)
 		}
 		return strconv.Itoa(n), nil
-	case settings.KeyWriteDelay, settings.KeySocThreshold, settings.KeySocHorizon, settings.KeySocPValue, settings.KeySocWindow:
+	case settings.KeyWriteDelay, settings.KeySocThreshold, settings.KeySocHorizon, settings.KeySocPValue, settings.KeySocWindow,
+		settings.KeyUpdateInterval:
 		var f float64
 		if err := json.Unmarshal(raw, &f); err != nil {
 			return "", errors.New("must be a number, or null")

@@ -7,7 +7,7 @@
 name: release
 on:
   push:
-    tags: ["v*.*.*"]
+    tags: ["v*.*.*"] # releases and prereleases (vX.Y.Z-rc.N)
 permissions:
   contents: write
 jobs:
@@ -20,8 +20,13 @@ jobs:
           go-version-file: go.mod
       # the notes are the tag's CHANGELOG.md section (make tag writes it):
       # a tag without one fails here, before any build or draft
+      # a prerelease (vX.Y.Z-rc.N) has no section of its own: its notes
+      # are what is Unreleased at the tagged commit
       - name: changelog section
-        run: go run ./tools/changelog notes -version "${GITHUB_REF_NAME}" >changes.md
+        run: |
+          section="${GITHUB_REF_NAME}"
+          case "${GITHUB_REF_NAME}" in *-*) section=Unreleased ;; esac
+          go run ./tools/changelog notes -version "$section" >changes.md
       - run: go test ./...
       - run: make release VERSION="${GITHUB_REF_NAME}" REPO="${GITHUB_REPOSITORY}"
       - name: draft release (unsigned)
@@ -43,5 +48,7 @@ jobs:
           EOF
           # the release files by name: dist/ also holds the empty signature
           # placeholder (make release), which GitHub refuses to upload
-          gh release create "${GITHUB_REF_NAME}" --draft --title "${GITHUB_REF_NAME}" \
+          pre=""
+          case "${GITHUB_REF_NAME}" in *-*) pre=--prerelease ;; esac
+          gh release create "${GITHUB_REF_NAME}" --draft $pre --title "${GITHUB_REF_NAME}" \
             --notes-file notes.md dist/foxess-local_linux_* dist/installer.sh dist/SHA256SUMS

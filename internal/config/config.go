@@ -32,6 +32,7 @@ var UISettable = []string{
 	"battery.capacity_wh", "access.public_read_only", "access.public_all_pages", "forward.mode",
 	"notify.webhook_url", "notify.ntfy_url",
 	"store.write_delay_s",
+	"update.check_interval_h", "update.prerelease", "update.auto_apply",
 	"alerts.soc_threshold_pct", "alerts.soc_horizon_min", "alerts.soc_p_value", "alerts.soc_window_min",
 }
 
@@ -116,13 +117,37 @@ type Battery struct {
 
 // Update is the self-upgrade channel (design D-023).
 type Update struct {
-	// Check enables the daily release check (default true): one HTTPS
-	// GET to the GitHub releases API carrying only the app version.
-	// Updates are never applied without an installer's action.
+	// Check = false turns the scheduled release check off (the older
+	// switch; CheckIntervalH is the newer one). A check is one HTTPS GET
+	// to the GitHub releases API carrying only the app version. Updates
+	// are applied only by an installer, or by AutoApply when they set it.
 	Check *bool `toml:"check"`
 	// Repo is the release repository "owner/name" (default: the one this
 	// binary was built for; empty in a source build).
 	Repo string `toml:"repo"`
+	// CheckIntervalH is how often to check, in hours (default
+	// DefaultCheckIntervalH; 0 = never; check = false also means never).
+	CheckIntervalH *int `toml:"check_interval_h"`
+	// Prerelease offers prereleases too (default off).
+	Prerelease bool `toml:"prerelease"`
+	// AutoApply applies each new eligible release once, on its own
+	// (default off).
+	AutoApply bool `toml:"auto_apply"`
+}
+
+// DefaultCheckIntervalH is the default release-check interval: a week
+// (owner, 2026-11-19).
+const DefaultCheckIntervalH = 7 * 24
+
+// IntervalHours is the check interval in hours (0 = never).
+func (u Update) IntervalHours() int {
+	switch {
+	case u.CheckIntervalH != nil:
+		return *u.CheckIntervalH
+	case !u.CheckEnabled():
+		return 0
+	}
+	return DefaultCheckIntervalH
 }
 
 // CheckEnabled resolves Check's default (on).

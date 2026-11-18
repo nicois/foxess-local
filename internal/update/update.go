@@ -79,15 +79,29 @@ type Updater struct {
 	// MinFree is the critical free-space level kept after the download
 	// ([retention] min_free_mb; diskspace.Threshold caps it).
 	MinFree uint64
+	// Prerelease reports whether prereleases may be offered (the
+	// installer's opt-in, read at every check; nil: never).
+	Prerelease func() bool
+}
+
+// allowPre is the prerelease opt-in now.
+func (u *Updater) allowPre() bool { return u.Prerelease != nil && u.Prerelease() }
+
+// eligible: a release this installation may be offered (not a draft; a
+// prerelease only when opted in; a version tag newer than this one).
+func (u *Updater) eligible(r release) bool {
+	return !r.Draft && (!r.Prerelease || u.allowPre()) && Newer(r.Tag, u.Current)
 }
 
 // Status is the result of a check.
 type Status struct {
-	Current   string    `json:"current"`
-	Latest    string    `json:"latest"`
-	URL       string    `json:"url"`
-	Available bool      `json:"available"`
-	CheckedAt time.Time `json:"checked_at"`
+	Current   string `json:"current"`
+	Latest    string `json:"latest"`
+	URL       string `json:"url"`
+	Available bool   `json:"available"`
+	// Prerelease: Latest is a prerelease (offered because of the opt-in).
+	Prerelease bool      `json:"prerelease"`
+	CheckedAt  time.Time `json:"checked_at"`
 }
 
 type release struct {
@@ -117,11 +131,20 @@ func (r release) assetSized(name string) (string, uint64, bool) {
 	return "", 0, false
 }
 
-var semver = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)$`)
+// semver is a release tag: vMAJOR.MINOR.PATCH with an optional
+// prerelease (-rc.1, -beta, …; dot-separated alphanumeric identifiers).
+var semver = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$`)
 
-// Newer reports whether latest is a newer stable release than current.
-// A current version that is not a release tag (a source build) is never
-// offered an update.
+// IsPrerelease reports whether a release tag is a prerelease.
+func IsPrerelease(tag string) bool {
+	m := semver.FindStringSubmatch(tag)
+	return m != nil && m[4] != ""
+}
+
+// Newer reports whether latest is a newer release than current, in
+// semver order (a prerelease comes before its release). A current
+// version that is not a release tag (a source build) is never offered an
+// update. Whether a prerelease may be offered at all is the caller's.
 func Newer(latest, current string) bool {
 	l, c := semver.FindStringSubmatch(latest), semver.FindStringSubmatch(current)
 	if l == nil || c == nil {
@@ -134,7 +157,42 @@ func Newer(latest, current string) bool {
 			return a > b
 		}
 	}
-	return false
+	return comparePre(l[4], c[4]) > 0
+}
+
+// comparePre orders two prerelease strings ("" = a release, which comes
+// after any prerelease of the same version): identifier by identifier,
+// numbers numerically and before words, a longer list after its prefix.
+func comparePre(a, b string) int {
+	switch {
+	case a == b:
+		return 0
+	case a == "":
+		return 1
+	case b == "":
+		return -1
+	}
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+	for i := range min(len(as), len(bs)) {
+		if c := compareIdent(as[i], bs[i]); c != 0 {
+			return c
+		}
+	}
+	return len(as) - len(bs)
+}
+
+func compareIdent(a, b string) int {
+	na, ea := strconv.Atoi(a)
+	nb, eb := strconv.Atoi(b)
+	switch {
+	case ea == nil && eb == nil:
+		return na - nb
+	case ea == nil:
+		return -1
+	case eb == nil:
+		return 1
+	}
+	return strings.Compare(a, b)
 }
 
 func (u *Updater) api() string {
@@ -175,6 +233,9 @@ func (u *Updater) latest(ctx context.Context) (release, error) {
 	if u.Repo == "" {
 		return r, ErrNoRepo
 	}
+	if u.allowPre() {
+		return u.newestListed(ctx)
+	}
 	b, err := u.get(ctx, u.api()+"/repos/"+u.Repo+"/releases/latest", maxMetadata)
 	if err != nil {
 		return r, err
@@ -185,6 +246,34 @@ func (u *Updater) latest(ctx context.Context) (release, error) {
 	return r, nil
 }
 
+// listedReleases is how many recent releases the prerelease channel looks
+// at (GitHub lists newest first).
+const listedReleases = 30
+
+// newestListed is the newest release by version among the recent ones
+// (GitHub's "latest" never names a prerelease): drafts and malformed tags
+// skipped. An empty listing is the zero release (nothing to offer).
+func (u *Updater) newestListed(ctx context.Context) (release, error) {
+	b, err := u.get(ctx, fmt.Sprintf("%s/repos/%s/releases?per_page=%d", u.api(), u.Repo, listedReleases), maxMetadata)
+	if err != nil {
+		return release{}, err
+	}
+	var list []release
+	if err := json.Unmarshal(b, &list); err != nil {
+		return release{}, fmt.Errorf("update: release list: %w", err)
+	}
+	var best release
+	for _, r := range list {
+		if r.Draft || !semver.MatchString(r.Tag) {
+			continue
+		}
+		if best.Tag == "" || Newer(r.Tag, best.Tag) {
+			best = r
+		}
+	}
+	return best, nil
+}
+
 // Check asks for the latest release.
 func (u *Updater) Check(ctx context.Context) (Status, error) {
 	st := Status{Current: u.Current, CheckedAt: time.Now()}
@@ -192,8 +281,8 @@ func (u *Updater) Check(ctx context.Context) (Status, error) {
 	if err != nil {
 		return st, err
 	}
-	st.Latest, st.URL = r.Tag, r.URL
-	st.Available = !r.Draft && !r.Prerelease && Newer(r.Tag, u.Current)
+	st.Latest, st.URL, st.Prerelease = r.Tag, r.URL, r.Prerelease
+	st.Available = u.eligible(r)
 	return st, nil
 }
 
@@ -207,7 +296,7 @@ func (u *Updater) Apply(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if r.Draft || r.Prerelease || !Newer(r.Tag, u.Current) {
+	if !u.eligible(r) {
 		return ErrUpToDate
 	}
 	want, err := u.signedHash(ctx, r)

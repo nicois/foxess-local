@@ -2748,7 +2748,7 @@ function updatesPanel(u) {
   const checked = esc(u.checked_at ? tr("checked {when}", { when: fmtAgo(u.checked_at) }) : tr("not checked yet"));
   let status;
   if (u.available) {
-    status = `<p class="note ok">${esc(tr("{latest} is available (you have {current}).", { latest: u.latest, current: u.current }))} ${u.url ? `<a href="${esc(u.url)}" target="_blank" rel="noopener">${esc(tr("Release notes"))}</a>` : ""}</p>
+    status = `<p class="note ok">${esc(tr("{latest} is available (you have {current}).", { latest: u.latest, current: u.current }))}${u.latest_prerelease ? ` <span class="chip warn">${esc(tr("prerelease"))}</span>` : ""} ${u.url ? `<a href="${esc(u.url)}" target="_blank" rel="noopener">${esc(tr("Release notes"))}</a>` : ""}</p>
       ${u.can_apply
         ? `<button type="button" class="cmd" data-cmd="update-apply" data-confirm="updateApply" data-to="${esc(u.latest)}" hx-post="${API}/update/apply" hx-swap="none">${esc(tr("Update now"))}</button>`
         : `<p class="muted small">${esc(u.reason ?? "")}</p>`}`;
@@ -2757,7 +2757,7 @@ function updatesPanel(u) {
   } else {
     const why = u.checks_enabled ? tr("No release information yet.")
       : u.reason ? u.reason.charAt(0).toUpperCase() + u.reason.slice(1) + "."
-      : tr("Release checks are off ([update] check = false).");
+      : tr("Scheduled checks are off.");
     status = `<p class="muted small">${esc(why)}</p>`;
   }
   const rolled = u.rolled_back
@@ -2768,10 +2768,42 @@ function updatesPanel(u) {
   return `<article class="panel">
       <div class="card-head"><h3>${esc(tr("Updates"))}</h3><span class="chip">${esc(u.current)}</span></div>
       ${rolled}${status}${pending}
-      <p class="muted small">${checked}${u.error ? " · " + esc(tr("last check failed: {err}", { err: u.error })) : ""} ·
+      <p class="muted small">${checked}${u.next_check_at ? " · " + esc(tr("next check {when}", { when: fmtTime(u.next_check_at) })) : ""}${u.error ? " · " + esc(tr("last check failed: {err}", { err: u.error })) : ""} ·
         <button type="button" class="linkbtn" data-cmd="update-check" hx-post="${API}/update/check" hx-swap="none">${esc(tr("check now"))}</button></p>
+      ${updateChoices(u)}
       <p class="muted small">${esc(tr("Updates are signature-checked before they are installed, and the app restarts itself (installer role). If the new version fails to start, the previous one is restored automatically."))}</p>
     </article>`;
+}
+
+// UPDATE_INTERVALS: the check-interval choices, in hours.
+const UPDATE_INTERVALS = [[0, tr("Never")], [6, tr("Every 6 hours")], [24, tr("Daily")], [168, tr("Weekly")], [720, tr("Every 30 days")]];
+
+// updateChoices: the installer's update settings (saving needs an
+// installer token; the API refuses otherwise and the toast says so).
+function updateChoices(u) {
+  const iv = u.check_interval_h ?? 168;
+  const opts = UPDATE_INTERVALS.some(([h]) => h === iv) ? UPDATE_INTERVALS : [...UPDATE_INTERVALS, [iv, tr("Every {n} hours", { n: iv })]];
+  return `<details class="sub">
+      <summary>${esc(tr("Update choices"))}</summary>
+      <label>${esc(tr("Check for updates"))}<select id="upd-interval">
+        ${opts.map(([h, l]) => `<option value="${h}" ${h === iv ? "selected" : ""}>${esc(l)}</option>`).join("")}
+      </select></label>
+      <label class="radio-row"><input type="checkbox" id="upd-pre" ${u.prerelease ? "checked" : ""}>
+        <span>${esc(tr("Offer prereleases"))}<span class="desc muted small">${esc(tr("Test versions before a release. They may have bugs."))}</span></span></label>
+      <label class="radio-row"><input type="checkbox" id="upd-auto" ${u.auto_apply ? "checked" : ""}>
+        <span>${esc(tr("Install updates automatically"))}<span class="desc muted small">${esc(tr("Each new update is tried once, when a check finds it. If it fails to start, the previous version comes back and that update is not tried again."))}</span></span></label>
+      <button type="button" class="cmd" data-action="update-choices">${esc(tr("Save"))}</button>
+    </details>`;
+}
+
+// updateChoicesSave stores the three update settings.
+async function updateChoicesSave() {
+  const body = {
+    "update.check_interval_h": Number(byId("upd-interval").value),
+    "update.prerelease": byId("upd-pre").checked,
+    "update.auto_apply": byId("upd-auto").checked,
+  };
+  if (await setupSave("/settings", "PUT", body, tr("update choices saved"))) render();
 }
 
 // bundleDownload fetches the archive with the token header and saves it.
@@ -3002,6 +3034,9 @@ document.addEventListener("click", async (e) => {
       break;
     case "tuning-save":
       tuningSave();
+      break;
+    case "update-choices":
+      updateChoicesSave();
       break;
     case "notify-test":
       notifyTest();

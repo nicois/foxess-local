@@ -47,6 +47,17 @@ version; anything else bumps the patch version.
   with a `Retry-After` header. The limits are configurable
   (`[writes] per_hour`, `[writes.per_setting]`).
 - `/config.time_zone_name`: the host's IANA time zone.
+- Prereleases: `make tag PRE=1` tags `vX.Y.Z-rc.N`, and CI drafts it as
+  a GitHub prerelease. Installations are offered prereleases only when
+  an installer opts in, and an installation on a prerelease is offered
+  the release that follows it.
+- Update choices (installer, More → Settings → Updates, and `[update]`
+  in the config file): how often to check (default a week; never is a
+  choice), prereleases, and installing updates automatically — each new
+  update tried once, never again after a rollback.
+
+### Changed
+- Release checks run weekly by default (they were daily).
 - The web UI in German, French, Italian, Spanish and Simplified Chinese.
   It follows the browser's language, with a picker under More →
   Settings → Language that is remembered on the device. Dates follow the

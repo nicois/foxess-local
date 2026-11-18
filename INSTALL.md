@@ -141,9 +141,16 @@ over the file.
 
 ## Updates
 
-foxess-local checks GitHub once a day for a new release (one HTTPS
-request carrying only the version; turn it off with `[update] check =
-false`). When one exists, **More → Settings → Updates** offers it:
+foxess-local checks GitHub for a new release once a week (one HTTPS
+request carrying only the version). When one exists, **More → Settings
+→ Updates** offers it. Under **Update choices** an installer can set
+how often to check (or never), opt in to **prereleases** (test versions
+ahead of a release, which may have bugs), and turn on **installing
+updates automatically**: each new update is then applied once, when a
+check finds it, and one that fails to start is rolled back and not tried
+again. The same three are `[update]` settings in the config file.
+
+Applying an update, by hand or automatically:
 
 - the new binary is downloaded, its **signature** (made offline by the
   release owner) and checksum are verified against the key built into

@@ -1025,6 +1025,9 @@ paths:
                 alerts.soc_horizon_min: { type: [integer, 'null'], minimum: 10, maximum: 1440 }
                 alerts.soc_p_value: { type: [number, 'null'], minimum: 0.001, maximum: 0.5 }
                 alerts.soc_window_min: { type: [integer, 'null'], minimum: 5, maximum: 240 }
+                update.check_interval_h: { type: [integer, 'null'], minimum: 0, maximum: 720 }
+                update.prerelease: { type: [boolean, 'null'] }
+                update.auto_apply: { type: [boolean, 'null'] }
               additionalProperties: false
       responses:
         '200':
@@ -2736,12 +2739,17 @@ components:
       required: [current, available, checks_enabled, can_apply]
       properties:
         current: { type: string, description: The running version. }
-        latest: { type: string, description: The newest release (absent until a check). }
+        latest: { type: string, description: "The newest eligible release (absent until a check): a prerelease only when prereleases are offered." }
+        latest_prerelease: { type: boolean, description: latest is a prerelease. }
         url: { type: string, description: Its release notes. }
         available: { type: boolean, description: A newer release exists. }
         checked_at: { type: [string, 'null'], format: date-time }
         error: { type: string, description: The last check's failure. }
-        checks_enabled: { type: boolean, description: "[update] check (the daily release check)." }
+        checks_enabled: { type: boolean, description: Scheduled release checks are on (check_interval_h > 0). }
+        check_interval_h: { type: integer, description: "Hours between scheduled checks (update.check_interval_h; default 168, a week; 0 = never)." }
+        next_check_at: { type: [string, 'null'], format: date-time, description: When the next scheduled check is due. }
+        prerelease: { type: boolean, description: "Prereleases (vX.Y.Z-rc.N) are offered (update.prerelease)." }
+        auto_apply: { type: boolean, description: "Each new eligible release is applied once, on its own, when a scheduled check finds it (update.auto_apply). Not retried after a failure or a rollback." }
         can_apply: { type: boolean, description: Available and installable here. }
         reason: { type: string, description: Why it cannot be applied here. }
         rolled_back: { $ref: '#/components/schemas/UpgradeMarker' }

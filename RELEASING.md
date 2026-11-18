@@ -71,6 +71,16 @@ only accept binaries signed by the key built into them.
 
    Between releases, add an entry under `## [Unreleased]` with each
    notable change. `make tag` refuses an empty Unreleased section.
+
+   **A prerelease** first, to try a release on your own installation:
+   `make tag PRE=1` tags `vX.Y.Z-rc.N` (the next version, the next free
+   rc number) without touching `CHANGELOG.md`; its notes are the
+   Unreleased section as it stands. Push the tag alone
+   (`git push origin vX.Y.Z-rc.N`). CI builds the draft and marks it a
+   prerelease. Check, sign and publish it as below. Only installations
+   that opted in to prereleases (More → Settings → Updates → Update
+   choices) are offered it, and its container image is never tagged
+   `latest`. When it holds up, `make tag` makes the release.
 2. Check the draft by rebuilding locally from the same tag:
 
    ```bash

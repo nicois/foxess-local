@@ -282,9 +282,39 @@ func buildUpdate(cfg *config.Config) *update.Service {
 			Repo: repo, API: os.Getenv("FOXESS_UPDATE_API"), Client: &http.Client{Timeout: updateHTTPTimeout}, Key: key,
 			Current: version, Arch: runtime.GOARCH, Exe: exe,
 			FreeSpace: diskspace.Free, MinFree: minFreeBytes(cfg),
+			// the config file's choice; the service reads the live
+			// setting instead (useUpdateSettings)
+			Prerelease: func() bool { return cfg.Update.Prerelease },
 		},
-		CheckEnabled: cfg.Update.CheckEnabled(),
-		Container:    os.Getenv("FOXESS_CONTAINER") != "",
+		Interval:  func() time.Duration { return time.Duration(cfg.Update.IntervalHours()) * time.Hour },
+		Container: os.Getenv("FOXESS_CONTAINER") != "",
+	}
+}
+
+// updateAttemptedKey is the last version auto-apply tried (a store
+// setting: a restart or a rollback must not retry it).
+const updateAttemptedKey = "update.auto_attempted"
+
+// useUpdateSettings makes the update service follow the installer's
+// settings live (channel, interval, auto-apply).
+func (h *handle) useUpdateSettings() {
+	if h.set == nil {
+		return
+	}
+	h.upd.U.Prerelease = func() bool { return h.set.Get().UpdatePrerelease }
+	h.upd.Interval = func() time.Duration { return h.set.Get().UpdateInterval }
+	h.upd.AutoApply = func() bool { return h.set.Get().UpdateAutoApply }
+	h.upd.Attempted = func() string {
+		v, _, err := h.st.Setting(updateAttemptedKey)
+		if err != nil {
+			return ""
+		}
+		return v
+	}
+	h.upd.SetAttempted = func(tag string) {
+		if err := h.st.SetSetting(updateAttemptedKey, tag); err != nil {
+			slog.Warn("update: the auto-apply attempt was not recorded", "err", err)
+		}
 	}
 }
 
@@ -424,6 +454,7 @@ func (h *handle) buildService(p *prox.Prox) error {
 // matched mux keeps the specific routes winning over it.
 func (h *handle) buildMux(cfg *config.Config, tok *api.TokenStore) http.Handler {
 	h.upd = buildUpdate(cfg)
+	h.useUpdateSettings()
 	// an upgrade is confirmed once the inverter session is back with data
 	// stored, and fails the process if it never comes (install review G2)
 	h.upd.Healthy = func() bool { return h.live != nil && h.live.Online() && h.st.Err() == nil }

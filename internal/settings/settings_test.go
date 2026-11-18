@@ -159,3 +159,29 @@ func TestOnChange(t *testing.T) {
 	require.NoError(t, s.Reset(KeyWriteDelay, "expert"))
 	assert.Equal(t, []time.Duration{15 * time.Minute, time.Minute}, got)
 }
+
+// TestUpdateSettings (2026-11-19): the update channel, the check interval
+// (default a week; 0 = off; the old [update] check = false still means
+// off) and auto-apply — installer settings, not expert ones.
+func TestUpdateSettings(t *testing.T) {
+	st, cfg := setup(t, "")
+	s, err := New(st, cfg, clock)
+	require.NoError(t, err)
+	v := s.Get()
+	assert.Equal(t, 7*24*time.Hour, v.UpdateInterval)
+	assert.False(t, v.UpdatePrerelease)
+	assert.False(t, v.UpdateAutoApply)
+	require.NoError(t, s.Set(KeyUpdateInterval, "6", "installer"))
+	require.NoError(t, s.Set(KeyUpdatePrerelease, "true", "installer"))
+	require.NoError(t, s.Set(KeyUpdateAutoApply, "true", "installer"))
+	v = s.Get()
+	assert.Equal(t, 6*time.Hour, v.UpdateInterval)
+	assert.True(t, v.UpdatePrerelease && v.UpdateAutoApply)
+	require.Error(t, s.Set(KeyUpdateInterval, "721", "installer"))
+	assert.False(t, Expert(KeyUpdateInterval), "an installer setting")
+
+	st2, cfgOff := setup(t, "[update]\ncheck = false\n")
+	off, err := New(st2, cfgOff, clock)
+	require.NoError(t, err)
+	assert.Equal(t, time.Duration(0), off.Get().UpdateInterval)
+}

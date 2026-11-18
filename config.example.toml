@@ -127,11 +127,20 @@
 # capacity_wh = 41930
 
 [update]
-# check: look for a new release once a day (one HTTPS request to the
-# GitHub releases API carrying only the app version). Nothing is
-# installed without an installer clicking "update" (or running
-# `foxess-local upgrade`); releases are signature-checked first.
-# check = true
+# Release checks: one HTTPS request to the GitHub releases API carrying
+# only the app version. Releases are signature-checked before anything is
+# installed. All three are also settable in the web UI (More → Settings →
+# Updates → Update choices, installer); a value set there wins.
+# check_interval_h: hours between checks; 0 = never (check = false, the
+# older switch, also means never).
+# check_interval_h = 168   # a week
+# prerelease: also offer prereleases (vX.Y.Z-rc.N: test versions).
+# prerelease = false
+# auto_apply: apply each new eligible release once, on its own, when a
+# check finds it (otherwise an installer clicks "update", or runs
+# `foxess-local upgrade`). A release that fails to start is rolled back
+# and not tried again.
+# auto_apply = false
 # repo: the release repository (default: the one this build came from).
 # repo = "owner/foxess-local"
 

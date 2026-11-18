@@ -31,6 +31,7 @@ fmdata:
 # ---- releases (design D-023; RELEASING.md) ----
 #   make tag             # next version from CHANGELOG.md's Unreleased entries;
 #                        # commits and tags locally (BUMP=minor|major raises it)
+#   make tag PRE=1       # a prerelease of it (vX.Y.Z-rc.N), changelog untouched
 #   make release VERSION=v0.2.0 REPO=owner/foxess-local
 #   make sign VERSION=v0.2.0  # as the key's account: minisign with SIGN_KEY
 #   make verify-release  # the new binary verifies its own release
@@ -41,8 +42,9 @@ DIST ?= dist
 # (e.g. make -C <this checkout> sign VERSION=…). Override per run.
 SIGN_KEY ?= /home/nfarrell/foxess-key/foxess-local.key
 BUMP ?=
+PRE ?=
 tag:
-	BUMP="$(BUMP)" deploy/tag.sh
+	BUMP="$(BUMP)" PRE="$(PRE)" deploy/tag.sh
 
 release:
 	deploy/release.sh "$(VERSION)" "$(REPO)" "$(DIST)"

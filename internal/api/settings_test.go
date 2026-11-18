@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"foxesslocal/internal/config"
 	"foxesslocal/internal/policy"
@@ -272,5 +273,25 @@ func TestSettingsExpertTuning(t *testing.T) {
 			!strings.Contains(rr.Body.String(), k) {
 			t.Errorf("%s=%v: %d %s", k, bad, rr.Code, rr.Body.String())
 		}
+	}
+}
+
+// TestSettingsUpdateChoices (2026-11-19): the update channel, interval and
+// auto-apply are installer settings.
+func TestSettingsUpdateChoices(t *testing.T) {
+	h := newHarness(t)
+	set := withSettings(t, h)
+	body := map[string]any{settings.KeyUpdateInterval: 6, settings.KeyUpdatePrerelease: true, settings.KeyUpdateAutoApply: true}
+	if rr := h.do(t, httpPut, pathSettings, RoleExpert, body); rr.Code != http.StatusForbidden {
+		t.Fatalf("expert: %d", rr.Code)
+	}
+	if rr := h.do(t, httpPut, pathSettings, RoleInstaller, body); rr.Code != http.StatusOK {
+		t.Fatalf("installer: %d %s", rr.Code, rr.Body.String())
+	}
+	if v := set.Get(); v.UpdateInterval != 6*time.Hour || !v.UpdatePrerelease || !v.UpdateAutoApply {
+		t.Fatalf("not applied: %+v", v)
+	}
+	if rr := h.do(t, httpPut, pathSettings, RoleInstaller, map[string]any{settings.KeyUpdateInterval: 721}); rr.Code != http.StatusBadRequest {
+		t.Fatalf("721 h: %d", rr.Code)
 	}
 }

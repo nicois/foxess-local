@@ -18,6 +18,8 @@ import (
 const (
 	vOld     = "v0.1.0"
 	vNew     = "v0.2.0"
+	vPrev    = "v0.1.1"
+	vRC1     = "v0.2.0-rc.1"
 	testRepo = "o/r"
 	dlKey    = "browser_download_url"
 )
@@ -31,8 +33,17 @@ func TestNewer(t *testing.T) {
 		{"v0.10.0", "v0.9.3", true},
 		{"v1.0.0", "v1.0.0", false},
 		{vOld, vNew, false},
-		{vNew, "92ca87b", false},     // a source build: no comparison
-		{vNew + "-rc1", vOld, false}, // pre-releases are not offered
+		{vNew, "92ca87b", false}, // a source build: no comparison
+		// prereleases (2026-11-19) order by semver: before their release,
+		// after the one before; eligibility (the opt-in) is separate
+		{vRC1, vPrev, true},
+		{vNew, "v0.2.0-rc.2", true},
+		{"v0.2.0-rc.2", vRC1, true},
+		{"v0.2.0-rc.10", "v0.2.0-rc.9", true}, // numeric identifiers compare as numbers
+		{vRC1, vNew, false},
+		{vRC1, vRC1, false},
+		{"v0.2.0-beta", "v0.2.0-alpha", true},
+		{"v0.2.0-rc..1", "v0.1.0", false}, // malformed: never offered
 	}
 	for _, c := range cases {
 		if got := Newer(c.latest, c.current); got != c.want {
@@ -49,22 +60,39 @@ type fakeGitHub struct {
 	tag       string
 	bin, sums []byte
 	sig       string
+	// more releases for the list endpoint (newest first, like GitHub's):
+	// the prerelease channel reads it
+	more []fakeRelease
+}
+
+type fakeRelease struct {
+	tag               string
+	prerelease, draft bool
 }
 
 func (f *fakeGitHub) server(t *testing.T) *httptest.Server {
 	t.Helper()
 	var srv *httptest.Server
+	rel := func(tag string, pre, draft bool) map[string]any {
+		return map[string]any{
+			"tag_name": tag, "html_url": "https://example.invalid/release", "draft": draft, "prerelease": pre,
+			"assets": []map[string]string{
+				asset(AssetName("arm64"), srv.URL+"/dl/bin"),
+				asset(SumsName, srv.URL+"/dl/sums"),
+				asset(SigName, srv.URL+"/dl/sig"),
+			},
+		}
+	}
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/repos/owner/foxess-local/releases/latest":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"tag_name": f.tag, "html_url": "https://example.invalid/release", "draft": false, "prerelease": false,
-				"assets": []map[string]string{
-					asset(AssetName("arm64"), srv.URL+"/dl/bin"),
-					asset(SumsName, srv.URL+"/dl/sums"),
-					asset(SigName, srv.URL+"/dl/sig"),
-				},
-			})
+			_ = json.NewEncoder(w).Encode(rel(f.tag, false, false))
+		case "/repos/owner/foxess-local/releases":
+			list := []map[string]any{}
+			for _, m := range f.more {
+				list = append(list, rel(m.tag, m.prerelease, m.draft))
+			}
+			_ = json.NewEncoder(w).Encode(append(list, rel(f.tag, false, false)))
 		case "/dl/bin":
 			_, _ = w.Write(f.bin)
 		case "/dl/sums":
@@ -232,3 +260,33 @@ func TestApplyNeedsFreeSpace(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// TestPrereleaseChannel (2026-11-19): opted in, the newest eligible
+// release is offered — a prerelease included, a draft never; opted out,
+// only stable releases; an installation on a prerelease is offered the
+// release that follows it.
+func TestPrereleaseChannel(t *testing.T) {
+	const rc = "v0.3.0-rc.1"
+	u, _ := setup(t, func(f *fakeGitHub) {
+		f.more = []fakeRelease{{tag: "v0.4.0", draft: true}, {tag: rc, prerelease: true}}
+	})
+	ctx := context.Background()
+	st, err := u.Check(ctx)
+	if err != nil || st.Latest != vNew || !st.Available {
+		t.Fatalf("stable channel: %+v %v", st, err)
+	}
+	u.Prerelease = func() bool { return true }
+	st, err = u.Check(ctx)
+	if err != nil || st.Latest != rc || !st.Available || !st.Prerelease {
+		t.Fatalf("prerelease channel: %+v %v", st, err)
+	}
+	u.Current = rc
+	u.Prerelease = func() bool { return false }
+	if st, _ := u.Check(ctx); st.Available {
+		t.Fatalf("on %s, stable %s offered: %+v", rc, vNew, st)
+	}
+	u.Current = "v0.2.0-rc.4"
+	if st, _ := u.Check(ctx); !st.Available || st.Latest != vNew {
+		t.Fatalf("an rc is offered its release: %+v", st)
+	}
+}
