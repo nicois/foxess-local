@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
@@ -30,6 +31,16 @@ const (
 type PublicKey struct {
 	ID  [keyIDLen]byte
 	Key ed25519.PublicKey
+}
+
+// IDString is the key ID as minisign prints it (e.g. 553C34FE26291351).
+func (pk PublicKey) IDString() string { return keyIDString(pk.ID[:]) }
+
+// keyIDString formats a key ID as minisign does: the 8 bytes are a
+// little-endian number, printed in upper-case hex (byte order reversed
+// from the wire).
+func keyIDString(id []byte) string {
+	return fmt.Sprintf("%016X", binary.LittleEndian.Uint64(id))
 }
 
 // ParsePublicKey reads a minisign .pub file (or its bare base64 line).
@@ -65,7 +76,7 @@ func (pk PublicKey) Verify(msg, sigFile []byte) error {
 	}
 	alg, id, sig := string(raw[:algLen]), raw[algLen:algLen+keyIDLen], raw[algLen+keyIDLen:]
 	if !bytes.Equal(id, pk.ID[:]) {
-		return fmt.Errorf("%w: signed by another key (id %x)", ErrBadSignature, id)
+		return fmt.Errorf("%w: signed by another key (%s, not %s)", ErrBadSignature, keyIDString(id), pk.IDString())
 	}
 	data := msg
 	switch alg {

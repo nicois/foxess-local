@@ -99,6 +99,6 @@ func verifyReleaseCmd(args []string) int {
 	for _, f := range files {
 		fmt.Println("ok", f)
 	}
-	fmt.Printf("verified: %d files signed by key %x\n", len(files), pk.ID)
+	fmt.Printf("verified: %d files signed by key %s\n", len(files), pk.IDString())
 	return 0
 }

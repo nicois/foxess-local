@@ -80,3 +80,17 @@ func replaceLine(s string, n int, with string) string {
 	}
 	return out
 }
+
+// TestKeyIDString (v0.1.0 release, 2026-11-18): a key ID reads as minisign
+// prints it — the 8 ID bytes as a little-endian number, upper-case hex —
+// so it matches INSTALL.md and `minisign -G` output. Printing the bytes in
+// order showed 51132926fe343c55 for key 553C34FE26291351.
+func TestKeyIDString(t *testing.T) {
+	pk, err := ParsePublicKey("RWRREykm/jQ8VVPcIxLpOEKOVyXC6B4/XP6i9qdkHRbDVlOTlm8vcIb3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pk.IDString(); got != "553C34FE26291351" {
+		t.Fatalf("IDString = %s, want 553C34FE26291351", got)
+	}
+}
