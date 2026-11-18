@@ -13,7 +13,9 @@ Maybe you don't trust VPP operators or your installer. Maybe you're worried abou
 - view current and historical data
 - manage mode scheduler, current/power limits, meter compensation and more.
 - validated on a KH10 inverter, leveraging HA's foxess-modbus integration to provide a starting point for other inverter models. Care has been taken to not write to other models until safe.
-- push notifications (nfty, webhooks) when critical events occur
+- push notifications (ntfy, webhooks) when critical events occur, including a lost grid, a restart after a power cut and a low or falling battery (with a configurable forecast)
+- a web UI in English, German, French, Italian, Spanish and Simplified Chinese (the non-English translations are machine-made; corrections welcome)
+- gentle on SD cards and eMMC: readings can be held in memory and written in batches (configurable)
 - access to review and record the data frames being sent back and forth, either for personal use or to provide diagnostics to the developers for incorporation into future releases
 - fully open source (GPL). Make your own copy, audit it, have complete confidence it does what it says.
 

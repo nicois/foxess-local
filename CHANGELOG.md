@@ -35,11 +35,19 @@ version; anything else bumps the patch version.
   `[alerts]` and under Tuning (expert); a level of 0 turns them off.
 - Expert tokens can change the tuning settings; the other settings
   still need an installer.
+- The web UI in German, French, Italian, Spanish and Simplified Chinese.
+  It follows the browser's language, with a picker under More →
+  Settings → Language that is remembered on the device. Dates follow the
+  chosen language. The translations are machine-made (one JSON file per
+  language; corrections welcome). The API, logs and notifications stay
+  English.
 - `CHANGELOG.md`, and `make tag`. `make tag` picks the next version
   from the entries under Unreleased, dates them, commits and creates
   the tag. Each draft release's notes are its changelog section.
 
 ### Fixed
+- Two garbled sentences on the Device page (the register scan's
+  description).
 - The release workflow uploads the release files by name. It used to
   upload everything in `dist/`, including the empty signature
   placeholder, which GitHub refused. That left the v0.1.1 draft with

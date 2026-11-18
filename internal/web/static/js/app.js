@@ -16,6 +16,7 @@
 //     the collected values into the typed JSON body (htmx 4 has no
 //     built-in JSON encoding — its default body is URLSearchParams).
 
+import { tr, locale, LANGS, currentLang, setLang } from "./i18n.js";
 import { smallMultiples } from "./charts.js";
 
 const API = "/api/v1";
@@ -92,8 +93,8 @@ const fmtW = (v) => (v == null ? "—" : (v > 0 ? "+" : "") + v + " W");
 const fmtV = (v) => (v == null ? "—" : v.toFixed(2) + " V");
 const fmtWh = (v) => (v == null ? "—" : (v / 1000).toFixed(2) + " kWh");
 const fmtBytes = (n) => (n == null ? "—" : n + " B");
-const fmtTime = (s) => (s ? new Date(s).toLocaleString() : "—");
-const fmtRole = (r) => (r == null ? "cloud" : r);
+const fmtTime = (s) => (s ? new Date(s).toLocaleString(locale()) : "—");
+const fmtRole = (r) => (r == null ? tr("cloud") : r);
 
 async function apiFetch(path, init = {}) {
   const headers = { ...(init.headers || {}) };
@@ -172,7 +173,7 @@ function gate(msg) {
   setBusy(false);
   S.feed = "—";
   paintConn();
-  byId("forward-badge").textContent = "cloud: —";
+  byId("forward-badge").textContent = tr("cloud: {mode}", { mode: "—" });
   byId("forward-badge").className = "badge";
   byId("public-badge").hidden = true;
   byId("banner-inverter").hidden = true;
@@ -195,7 +196,7 @@ async function signOut() {
   setToken("");
   S.roleLocked.clear();
   if (await probePublic()) return;
-  gate("signed out — sign in to continue");
+  gate(tr("signed out — sign in to continue"));
 }
 
 // probePublic: check unauthenticated read-only access (spec §5.5 — the
@@ -234,7 +235,7 @@ function enterApp() {
   renderForwardBadge();
   byId("public-badge").hidden = !S.public;
   const sb = byId("signout");
-  sb.textContent = S.public ? "sign in" : "sign out";
+  sb.textContent = S.public ? tr("sign in") : tr("sign out");
   sb.dataset.action = S.public ? "sign-in" : "sign-out";
   paintNav();
   if (!location.hash || dashOnly()) history.replaceState(null, "", "#/dashboard");
@@ -274,14 +275,14 @@ async function tryLogin(t) {
 async function loginSubmit() {
   const t = byId("login-token").value.trim();
   const errEl = byId("login-error");
-  if (!t) { errEl.textContent = "enter a token"; return; }
+  if (!t) { errEl.textContent = tr("enter a token"); return; }
   errEl.textContent = "";
   let ok = false;
   try { ok = await tryLogin(t); }
   catch { ok = false; }
   if (!ok) {
     setToken("");
-    errEl.textContent = "that token was rejected — create one under settings → tokens (installer role)";
+    errEl.textContent = tr("that token was rejected — create one under More → Settings → Access tokens (installer role)");
     byId("login-token").select();
   }
 }
@@ -409,7 +410,7 @@ function applyRoleLocks(root) {
     const need = S.roleLocked.get(b.dataset.cmd);
     if (need) {
       b.disabled = true;
-      b.title = "requires role: " + need;
+      b.title = tr("requires role: {role}", { role: need });
     }
   }
 }
@@ -417,37 +418,37 @@ function applyRoleLocks(root) {
 // ---------- errors (RFC 7807) ----------
 
 const CODE_TEXT = {
-  unauthorized: () => "the token was rejected",
-  write_budget: (p) => "too many changes to this setting in the last hour — protecting the inverter's memory; try again later" + (p.detail?.includes("next allowed at") ? ` (${p.detail.replace(/.*next allowed at /, "after ").replace(/\)$/, "")})` : ""),
-  insufficient_space: (p) => "not enough free disk space for the update" + (p.detail ? ` (${p.detail.replace(/^update: [^:]*: /, "")})` : ""),
-  insufficient_role: (p) => `requires role ${p.required_role} (your token: ${p.token_role})`,
-  not_found: () => "not found",
-  invalid_value: (p) => (p.errors?.length ? p.errors.map((er) => er.field + ": " + er.message).join(" · ") : "invalid value"),
-  schedule_overlap: () => "partially overlapping enabled windows (containment and adjacency are legal)",
-  command_in_flight: () => "a command is already in flight — wait for it to complete",
-  conflict: () => "conflict — the state no longer matches; the list was refreshed",
-  inverter_offline: () => "the inverter is offline — the command was not sent",
-  command_failed: (p) => `no read-back from the inverter (applied: ${p.applied == null ? "unknown" : p.applied})`,
-  internal: () => "internal server error",
-  update_not_possible: (p) => "this installation cannot update itself: " + (p.detail ?? ""),
-  update_not_available: () => "already on the latest release",
-  update_verification_failed: (p) => "the download failed verification and was not installed: " + (p.detail ?? ""),
-  update_failed: (p) => "update failed: " + (p.detail ?? ""),
+  unauthorized: () => tr("the token was rejected"),
+  write_budget: (p) => tr("too many changes to this setting in the last hour — protecting the inverter's memory; try again later") + (p.detail?.includes("next allowed at") ? ` (${tr("after {time}", { time: p.detail.replace(/.*next allowed at /, "").replace(/\)$/, "") })})` : ""),
+  insufficient_space: (p) => tr("not enough free disk space for the update") + (p.detail ? ` (${p.detail.replace(/^update: [^:]*: /, "")})` : ""),
+  insufficient_role: (p) => tr("requires role {need} (your token: {have})", { need: p.required_role, have: p.token_role }),
+  not_found: () => tr("not found"),
+  invalid_value: (p) => (p.errors?.length ? p.errors.map((er) => er.field + ": " + er.message).join(" · ") : tr("invalid value")),
+  schedule_overlap: () => tr("partially overlapping enabled windows (containment and adjacency are legal)"),
+  command_in_flight: () => tr("a command is already in flight — wait for it to complete"),
+  conflict: () => tr("conflict — the state no longer matches; the list was refreshed"),
+  inverter_offline: () => tr("the inverter is offline — the command was not sent"),
+  command_failed: (p) => tr("no read-back from the inverter (applied: {applied})", { applied: p.applied == null ? tr("unknown") : p.applied }),
+  internal: () => tr("internal server error"),
+  update_not_possible: (p) => tr("this installation cannot update itself:") + " " + (p.detail ?? ""),
+  update_not_available: () => tr("already on the latest release"),
+  update_verification_failed: (p) => tr("the download failed verification and was not installed:") + " " + (p.detail ?? ""),
+  update_failed: (p) => tr("update failed:") + " " + (p.detail ?? ""),
   write_unsupported: (p) => p.reason === "not_supported"
-    ? "this inverter does not support that setting"
-    : "this setting is not mapped for this inverter model yet — sharing a diagnostic bundle helps us add it",
-  write_unverified: () => "untested on this inverter model / firmware — an installer can enable untested writes on the control tab",
-  device_not_identified: () => "the inverter has not been identified yet — try again in a minute",
-  checks_failing: () => "a plausibility check is failing for this setting — the register map looks wrong, so writes are blocked",
+    ? tr("this inverter does not support that setting")
+    : tr("this setting is not mapped for this inverter model yet — sharing a diagnostic bundle helps us add it"),
+  write_unverified: () => tr("untested on this inverter model / firmware — an installer can enable untested writes on the control tab"),
+  device_not_identified: () => tr("the inverter has not been identified yet — try again in a minute"),
+  checks_failing: () => tr("a plausibility check is failing for this setting — the register map looks wrong, so writes are blocked"),
 };
 
 document.body.addEventListener("htmx:response:error", (e) => {
   const ctx = e.detail.ctx;
-  let p = { code: "unknown", title: "request failed", status: ctx.response.status };
+  let p = { code: "unknown", title: tr("request failed"), status: ctx.response.status };
   try { p = JSON.parse(ctx.text); }
   catch { /* non-JSON error body */ }
   if (ctx.response.status === 401) {
-    gate("unauthorized — the token was rejected; sign in again");
+    gate(tr("unauthorized — the token was rejected; sign in again"));
     return;
   }
   const cmd = ctx.sourceElement?.dataset?.cmd;
@@ -471,35 +472,35 @@ document.body.addEventListener("htmx:after:request", (e) => {
 
   if (path === API + "/work-mode" && body) {
     S.state.work_mode = body.work_mode;
-    toast("work mode confirmed: " + body.work_mode);
+    toast(tr("work mode confirmed: {mode}", { mode: body.work_mode }));
   } else if (path === API + "/limits" && body) {
     S.state.limits = { ...S.state.limits, ...body }; // keep the read-only current limits
-    toast(`limits confirmed: import ${body.import_w} W · export ${body.export_w} W`);
+    toast(tr("limits confirmed: import {imp} W · export {exp} W", { imp: body.import_w, exp: body.export_w }));
   } else if (SETTING_PATHS.includes(path.slice(API.length)) && body) {
     if (body.eps_mode) S.state.eps_mode = body.eps_mode;
     S.state.limits = { ...S.state.limits, ...body };
-    toast("confirmed: " + Object.entries(body).map(([k, v]) => `${SETTING_LABEL[k] ?? k} ${v}`).join(" · "));
+    toast(tr("confirmed:") + " " + Object.entries(body).map(([k, v]) => `${SETTING_LABEL[k] ?? k} ${v}`).join(" · "));
   } else if (path === API + "/meter-compensation" && body) {
     S.state.meter_compensation_w = body.w;
-    toast("meter compensation confirmed: " + body.w + " W");
+    toast(tr("meter compensation confirmed: {w} W", { w: body.w }));
   } else if (path === API + "/schedule" && body) {
     S.state.schedule = body;
-    toast("schedule confirmed (read-back)");
+    toast(tr("schedule confirmed (read-back)"));
   } else if (path === API + "/forward-mode" && body) {
     S.forwardMode = body;
     if (S.state) S.state.forward_mode = body.mode;
     renderForwardBadge();
-    toast("forward mode: " + body.mode + " — the inverter reconnects under it within seconds");
+    toast(tr("cloud forwarding: {mode} — the inverter reconnects under it within seconds", { mode: body.mode }));
   } else if (path === API + "/maintenance" && body) {
     toast(body.active
-      ? "maintenance window open (until " + fmtTime(body.expires_at) + ")"
-      : "maintenance window closed");
+      ? tr("maintenance window open (until {time})", { time: fmtTime(body.expires_at) })
+      : tr("maintenance window closed"));
   } else if (path === API + "/update/apply") {
-    toast("updating to " + (body?.to ?? "the new release") + " — the app restarts; this page reconnects by itself");
+    toast(tr("updating to {to} — the app restarts; this page reconnects by itself", { to: body?.to ?? tr("the new release") }));
   } else if (path === API + "/update/check") {
-    toast(body?.available ? "update available: " + body.latest : "no newer release");
+    toast(body?.available ? tr("update available: {v}", { v: body.latest }) : tr("no newer release"));
   } else if (path === API + "/write-override") {
-    toast(body?.granted ? "untested writes enabled for this exact inverter" : "untested writes disabled");
+    toast(body?.granted ? tr("untested writes enabled for this exact inverter") : tr("untested writes disabled"));
   } else if (path === API + "/config/tokens" && body) {
     if (body.token) openTokenReveal(body.token);
   }
@@ -512,7 +513,7 @@ document.body.addEventListener("htmx:after:request", (e) => {
 // htmx-triggered request, show the dialog, then re-dispatch the
 // action (with a skip flag) to let htmx issue it.
 
-function confirmDlg(title, body, okLabel = "confirm") {
+function confirmDlg(title, body, okLabel = tr("confirm")) {
   return new Promise((resolve) => {
     byId("confirm-title").textContent = title;
     byId("confirm-body").textContent = body;
@@ -534,44 +535,44 @@ const CONFIRMS = {
     const mode = document.querySelector('#forward-form input[name="mode"]:checked')?.value;
     if (mode !== "off") return Promise.resolve(true);
     return confirmDlg(
-      "switch cloud forward to off?",
-      "The egress gate blocks the inverter's cloud channel entirely (the cloud goes dark; local telemetry and control continue).",
-      "switch to off");
+      tr("switch cloud forwarding to off?"),
+      tr("The egress gate blocks the inverter's cloud channel entirely (the cloud goes dark; local telemetry and control continue)."),
+      tr("switch to off"));
   },
   maintOpen: () => confirmDlg(
-    "open the maintenance window?",
-    "Unfettered bidirectional comms until the deadline: the cloud may do anything, including firmware pushes. The configured mode is restored at the deadline.",
-    "open"),
+    tr("open the maintenance window?"),
+    tr("Unfettered bidirectional comms until the deadline: the cloud may do anything, including firmware pushes. The configured mode is restored at the deadline."),
+    tr("open")),
   maintClose: () => confirmDlg(
-    "close the maintenance window?",
-    "The configured forward mode is restored immediately.",
-    "close"),
+    tr("close the maintenance window?"),
+    tr("The configured cloud-forwarding mode is restored immediately."),
+    tr("close")),
   writeOverride: () => confirmDlg(
-    "enable UNTESTED writes on this inverter?",
-    "The settings this app writes have not been verified on this inverter model and firmware. A write could go to a register that means something different here and misconfigure the inverter: limits, battery or grid behaviour. Only continue if you can watch the inverter and undo a change from its own app or display. The permission applies to this exact model and firmware only; any firmware change withdraws it. Every change is audited.",
-    "I accept the risk — enable"),
+    tr("enable UNTESTED writes on this inverter?"),
+    tr("The settings this app writes have not been verified on this inverter model and firmware. A write could go to a register that means something different here and misconfigure the inverter: limits, battery or grid behaviour. Only continue if you can watch the inverter and undo a change from its own app or display. The permission applies to this exact model and firmware only; any firmware change withdraws it. Every change is audited."),
+    tr("I accept the risk — enable")),
   updateApply: (elt) => confirmDlg(
-    "update to " + (elt.dataset.to ?? "the latest release") + "?",
-    "The new version is downloaded, its signature checked, and the app restarts into it (about a minute without live data). If it fails to start, the previous version is restored automatically.",
-    "update"),
+    tr("update to {to}?", { to: elt.dataset.to ?? tr("the latest release") }),
+    tr("The new version is downloaded, its signature checked, and the app restarts into it (about a minute without live data). If it fails to start, the previous version is restored automatically."),
+    tr("update")),
   writeOverrideRevoke: () => confirmDlg(
-    "disable untested writes?",
-    "Writes return to verified-only for this inverter.",
-    "disable"),
+    tr("disable untested writes?"),
+    tr("Writes return to verified-only for this inverter."),
+    tr("disable")),
   epsMode: () => {
     const m = document.querySelector('#eps-form input[name="eps_mode"]:checked')?.value;
     return confirmDlg(
-      "switch the backup port to " + (m === "ups" ? "UPS" : "EPS") + " mode?",
-      "The circuits on the backup (EPS) port may lose power briefly while the inverter changes over. " +
+      tr("switch the backup port to {mode} mode?", { mode: m === "ups" ? "UPS" : "EPS" }),
+      tr("The circuits on the backup (EPS) port may lose power briefly while the inverter changes over.") + " " +
       (m === "ups"
-        ? "UPS mode switches them to the battery within milliseconds when the grid fails."
-        : "EPS mode switches them over more slowly (about a second or more) when the grid fails — sensitive equipment may restart."),
-      "switch");
+        ? tr("UPS mode switches them to the battery within milliseconds when the grid fails.")
+        : tr("EPS mode switches them over more slowly (about a second or more) when the grid fails — sensitive equipment may restart.")),
+      tr("switch"));
   },
   tokenRevoke: (elt) => confirmDlg(
-    "revoke this token?",
-    `Token "${elt.dataset.name ?? "?"}" (${elt.dataset.role ?? "?"}) is rejected from its next request.`,
-    "revoke"),
+    tr("revoke this token?"),
+    tr("Token \"{name}\" ({role}) is rejected from its next request.", { name: elt.dataset.name ?? "?", role: elt.dataset.role ?? "?" }),
+    tr("revoke")),
 };
 
 async function confirmGate(kind, elt, redo) {
@@ -663,36 +664,40 @@ function paintConn() {
   let title = "";
   if (S.feed && S.feed !== "connected" && S.feed !== "—") {
     cls = "warn";
-    label = S.feed.startsWith("connecting") ? "connecting…" : "reconnecting…";
-    title = "live feed " + S.feed;
+    label = S.feed.startsWith("connecting") ? tr("connecting…") : tr("reconnecting…");
+    title = tr("live feed: {state}", { state: S.feedLabel ?? S.feed });
   } else if (online === false) {
     cls = "err";
-    label = "inverter offline";
-    title = S.offlineSince ? "no inverter data since " + fmtTime(S.offlineSince) : "no recent inverter data";
+    label = tr("inverter offline");
+    title = S.offlineSince ? tr("no inverter data since {time}", { time: fmtTime(S.offlineSince) }) : tr("no recent inverter data");
   } else if (online === true && S.feed === "connected") {
     cls = "ok";
-    label = "live";
-    title = "receiving inverter data";
+    label = tr("live");
+    title = tr("receiving inverter data");
   }
   el.className = "conn " + cls;
   txt.textContent = label;
   el.title = title;
 }
 
-function setFeed(text) {
+// setFeed: text is the state the code compares ("connected", …); label
+// is what the page shows (translated).
+function setFeed(text, label = text) {
   S.feed = text;
+  S.feedLabel = label;
   paintConn();
   const banner = byId("banner-feed");
   const degraded = text !== "connected" && text !== "—" && authed();
   banner.hidden = !degraded;
   if (degraded) {
-    banner.textContent = "live feed " + text + " — values shown are last known until the stream recovers.";
+    banner.textContent = tr("live feed: {state} — values shown are last known until the stream recovers.", { state: label });
   }
 }
 
 document.body.addEventListener("htmx:sse:before:connection", (e) => {
   const c = e.detail.connection;
-  setFeed(c.attempt === 0 ? "connecting…" : `reconnecting (attempt ${c.attempt})…`);
+  if (c.attempt === 0) setFeed("connecting…", tr("connecting…"));
+  else setFeed("reconnecting…", tr("reconnecting (attempt {n})…", { n: c.attempt }));
 });
 
 document.body.addEventListener("htmx:sse:after:connection", () => {
@@ -702,15 +707,15 @@ document.body.addEventListener("htmx:sse:after:connection", () => {
 document.body.addEventListener("htmx:sse:error", (e) => {
   if (!e.detail?.connection) return; // orphaned in-flight fetch from a torn-down stream
   if (e.detail.status === 401) {
-    gate("unauthorized — the event stream rejected the token; sign in again");
+    gate(tr("unauthorized — the event stream rejected the token; sign in again"));
     return;
   }
-  setFeed("disconnected (retrying)");
+  setFeed("disconnected", tr("disconnected (retrying)"));
 });
 
 document.body.addEventListener("htmx:sse:close", (e) => {
   if (!e.detail?.connection) return; // orphaned stream already torn down
-  if (authed()) setFeed("disconnected (" + (e.detail.reason || "closed") + ")");
+  if (authed()) setFeed("disconnected", tr("disconnected ({reason})", { reason: e.detail.reason || tr("closed") }));
 });
 
 // Named SSE events arrive as DOM events of the same name (the hx-sse
@@ -785,10 +790,28 @@ onSSE("config", (d) => {
 
 onSSE("connection", (d) => setOnline(d.state === "online"));
 
+// SYSTEM_TITLE: the system events' titles (the detail is the server's
+// own text, which stays English).
+const SYSTEM_TITLE = {
+  "forward-mode-changed": tr("Cloud forwarding changed"),
+  "maintenance-opened": tr("Maintenance window opened"),
+  "maintenance-extended": tr("Maintenance window extended"),
+  "maintenance-expired": tr("Maintenance window expired"),
+  "maintenance-closed": tr("Maintenance window closed"),
+  "alert": tr("Alert"),
+  "gate-rule-loss": tr("Gate rules missing"),
+  "upgrade-rolled-back": tr("Upgrade rolled back"),
+  "grid-lost": tr("Grid down"),
+  "grid-restored": tr("Grid back"),
+  "unclean-restart": tr("Restarted after an unexpected stop"),
+  "battery-low": tr("Battery low"),
+  "battery-forecast-low": tr("Battery running low"),
+};
+
 onSSE("system", (d) => {
   const bad = d.type.includes("failed") || d.type.includes("error");
   const warn = d.type.startsWith("battery-") || d.type === "grid-lost" || d.type === "unclean-restart";
-  toast(d.type + (d.detail ? ": " + d.detail : ""), bad ? "error" : warn ? "warn" : "info");
+  toast(SYSTEM_TITLE[d.type] ?? d.type, bad ? "error" : warn ? "warn" : "info", d.detail || undefined);
   if (routeName() === "maintenance" &&
       ["maintenance-opened", "maintenance-extended", "maintenance-expired", "maintenance-closed"].includes(d.type)) {
     render();
@@ -805,7 +828,7 @@ onSSE("system", (d) => {
 
 // gap/resync: the stream skipped — re-sync from the full snapshot.
 onSSE("gap", (d) => {
-  toast(`missed ${d.missed} event(s) — re-syncing from /state`, "warn");
+  toast(tr("missed {n} event(s) — re-syncing", { n: d.missed }), "warn");
   refreshState();
 });
 
@@ -813,7 +836,7 @@ onSSE("resync", () => refreshState());
 
 async function refreshState() {
   const resp = await apiFetch("/state");
-  if (resp.status === 401) { gate("the token was rejected — sign in again"); return; }
+  if (resp.status === 401) { gate(tr("the token was rejected — sign in again")); return; }
   if (!resp.ok) return;
   S.state = await resp.json();
   paintDeviceBanner();
@@ -832,8 +855,7 @@ function setOnline(online) {
     b.hidden = true;
   } else {
     b.hidden = false;
-    b.textContent = "Inverter offline since " + fmtTime(S.offlineSince) +
-      ". Showing the last known values; changes can't be sent until it reconnects.";
+    b.textContent = tr("Inverter offline since {time}. Showing the last known values; changes can't be sent until it reconnects.", { time: fmtTime(S.offlineSince) });
   }
 }
 
@@ -841,11 +863,11 @@ function renderForwardBadge() {
   const mode = S.forwardMode?.mode;
   const el = byId("forward-badge");
   if (!mode) {
-    el.textContent = "cloud: —";
+    el.textContent = tr("cloud: {mode}", { mode: "—" });
     el.className = "badge";
     return;
   }
-  el.textContent = "cloud: " + mode.replace("_", " ");
+  el.textContent = tr("cloud: {mode}", { mode: FORWARD_NAME()[mode] ?? mode.replace("_", " ") });
   el.className = "badge";
 }
 
@@ -879,11 +901,14 @@ const ROUTES = {
 const ROUTE_ALIASES = { "audit": "activity", "maintenance": "cloud" };
 
 const ROUTE_TITLES = {
-  "dashboard": "Home", "schedule": "Schedule", "control": "Control",
-  "activity": "Activity", "more": "More", "device": "Device",
-  "cloud": "Cloud & maintenance", "messages": "Frame messages", "settings": "Settings",
-  "setup": "Setup", "report": "Report a problem",
+  "dashboard": tr("Home"), "schedule": tr("Schedule"), "control": tr("Control"),
+  "activity": tr("Activity"), "more": tr("More"), "device": tr("Device"),
+  "cloud": tr("Cloud & maintenance"), "messages": tr("Frame messages"), "settings": tr("Settings"),
+  "setup": tr("Setup"), "report": tr("Report a problem"),
 };
+
+// FORWARD_NAME: the cloud-forwarding modes' display names.
+const FORWARD_NAME = () => ({ off: tr("off"), telemetry_only: tr("telemetry only"), full: tr("full") });
 
 // the primary nav item each route lives under
 const NAV_OF = { "device": "more", "cloud": "more", "messages": "more", "settings": "more", "setup": "more", "report": "more" };
@@ -990,7 +1015,7 @@ function fmtAxisW(v, tick) {
 }
 
 function fmtAmps(a) {
-  return a == null ? "not read yet" : a.toFixed(1) + " A";
+  return a == null ? tr("not read yet") : a.toFixed(1) + " A";
 }
 
 function fmtKWh(wh) {
@@ -1002,7 +1027,7 @@ function fmtKWh(wh) {
 function fmtDuration(h) {
   if (h < 1) return Math.max(1, Math.round(h * 60)) + " min";
   if (h < 48) return (h < 10 ? h.toFixed(1) : Math.round(h)) + " h";
-  return "more than 2 days";
+  return tr("more than 2 days");
 }
 
 // flowOf: per-entity direction + phrase for the current power reading.
@@ -1066,12 +1091,12 @@ function flowOf(p) {
       : w <= -ACTIVE_W ? { d: "rev", txt: neg }
       : { d: "idle", txt: idle };
   return {
-    solar: dir(p?.pv_w, "generating", "generating", "not generating"),
-    home: dir(p?.load_w, "using", "using", "idle"),
-    grid: dir(p?.grid_w, "importing", "exporting", "balanced"),
-    batt: dir(p?.battery_w, "charging", "discharging", "idle"),
-    ac: dir(splitEPS(p).toBoard, "out", "in", "idle"),
-    eps: dir(p?.eps_w, "EPS port", "EPS port", "EPS idle"),
+    solar: dir(p?.pv_w, tr("generating"), tr("generating"), tr("not generating")),
+    home: dir(p?.load_w, tr("using"), tr("using"), tr("idle")),
+    grid: dir(p?.grid_w, tr("importing"), tr("exporting"), tr("balanced")),
+    batt: dir(p?.battery_w, tr("charging"), tr("discharging"), tr("idle")),
+    ac: dir(splitEPS(p).toBoard, tr("out"), tr("in"), tr("idle")),
+    eps: dir(p?.eps_w, tr("EPS port"), tr("EPS port"), tr("EPS idle")),
   };
 }
 
@@ -1100,8 +1125,8 @@ function paintNow(st) {
   // caption carries the whole household
   const hp0 = byId("fp-home");
   if (hp0 && S.epsSeen && p?.load_w != null) {
-    hp0.textContent = "of " + fmtPower(p.load_w);
-    hp0.title = "main-board circuits, of " + fmtPower(p.load_w) + " for the whole household (backup circuits included)";
+    hp0.textContent = tr("of {total}", { total: fmtPower(p.load_w) });
+    hp0.title = tr("main-board circuits, of {total} for the whole household (backup circuits included)", { total: fmtPower(p.load_w) });
   }
   for (const [k] of FLOW_LINES) paintFlowLine(k, f[k].d);
   // the inverter: its AC output (in when charging from the grid) and its
@@ -1113,21 +1138,23 @@ function paintNow(st) {
   if (hp) {
     // the arrow shows the direction; "AC in" (charging from the grid)
     // is the case worth spelling out
-    const lossTxt = loss == null ? "" : "loss " + fmtPower(Math.max(0, loss));
-    hp.textContent = f.ac.d === "idle" ? "idle"
-      : f.ac.d === "rev" ? "AC in" + (lossTxt ? " · " + lossTxt : "")
-      : lossTxt || "AC out";
+    const lossTxt = loss == null ? "" : tr("loss {w}", { w: fmtPower(Math.max(0, loss)) });
+    hp.textContent = f.ac.d === "idle" ? tr("idle")
+      : f.ac.d === "rev" ? tr("AC in") + (lossTxt ? " · " + lossTxt : "")
+      : lossTxt || tr("AC out");
   }
   const flow = byId("flow");
   if (flow) {
     flow.classList.toggle("has-eps", S.epsSeen);
     flow.setAttribute("aria-label",
-      `Solar ${fmtPower(p?.pv_w)} ${f.solar.txt}; battery ${fmtPower(p?.battery_w)} ${f.batt.txt}; ` +
-      `inverter AC ${f.ac.txt} ${fmtPower(p?.ac_port_w)}` + (loss == null ? "" : `, loss ${fmtPower(Math.max(0, loss))}`) +
+      tr("Solar {w} {state}", { w: fmtPower(p?.pv_w), state: f.solar.txt }) + "; " +
+      tr("battery {w} {state}", { w: fmtPower(p?.battery_w), state: f.batt.txt }) + "; " +
+      tr("inverter AC {state} {w}", { state: f.ac.txt, w: fmtPower(p?.ac_port_w) }) +
+      (loss == null ? "" : ", " + tr("loss {w}", { w: fmtPower(Math.max(0, loss)) })) + "; " +
       (S.epsSeen
-        ? `; main-board circuits ${fmtPower(split.mainLoad)}; backup port ${fmtPower(p?.eps_w)}; household ${fmtPower(p?.load_w)}`
-        : `; home ${fmtPower(p?.load_w)}`) +
-      `; grid ${fmtPower(p?.grid_w)} ${f.grid.txt}`);
+        ? tr("main-board circuits {w}; backup port {eps}; household {total}", { w: fmtPower(split.mainLoad), eps: fmtPower(p?.eps_w), total: fmtPower(p?.load_w) })
+        : tr("home {w}", { w: fmtPower(p?.load_w) })) + "; " +
+      tr("grid {w} {state}", { w: fmtPower(p?.grid_w), state: f.grid.txt }));
   }
   paintBattery(st);
   paintFreshness();
@@ -1142,7 +1169,7 @@ function paintBattery(st) {
   const meter = byId("soc-meter");
   if (meter) {
     meter.setAttribute("aria-valuenow", soc == null ? 0 : Math.round(soc));
-    meter.setAttribute("aria-valuetext", soc == null ? "unknown" : Math.round(soc) + " percent");
+    meter.setAttribute("aria-valuetext", soc == null ? tr("unknown") : tr("{n} percent", { n: Math.round(soc) }));
   }
   const bar = byId("soc-bar");
   if (bar) {
@@ -1154,8 +1181,8 @@ function paintBattery(st) {
   const phrase = byId("batt-phrase");
   if (phrase) {
     phrase.textContent = w == null ? "—"
-      : f.d === "idle" ? "Idle"
-      : (f.d === "fwd" ? "Charging " : "Discharging ") + fmtPower(w);
+      : f.d === "idle" ? tr("Idle")
+      : f.d === "fwd" ? tr("Charging {w}", { w: fmtPower(w) }) : tr("Discharging {w}", { w: fmtPower(w) });
   }
   // usable energy = SoC × the configured capacity (the API's capacity_wh;
   // recomputed here because live snapshots carry only the SoC)
@@ -1165,15 +1192,15 @@ function paintBattery(st) {
   if (eta) {
     let txt = "";
     if (stored != null && w != null && Math.abs(w) >= 100) {
-      if (w < 0) txt = "≈ " + fmtDuration(stored / -w) + " of charge left at this rate";
-      else if (soc != null && soc < 100 && cap) txt = "≈ " + fmtDuration(Math.max(0, cap - stored) / w) + " to full at this rate";
+      if (w < 0) txt = tr("≈ {d} of charge left at this rate", { d: fmtDuration(stored / -w) });
+      else if (soc != null && soc < 100 && cap) txt = tr("≈ {d} to full at this rate", { d: fmtDuration(Math.max(0, cap - stored) / w) });
     }
     eta.textContent = txt;
     eta.hidden = txt === "";
   }
   const sw = byId("stored-wh");
   if (sw) sw.textContent = stored == null ? "—"
-    : (stored / 1000).toFixed(1) + (cap ? " of " + (cap / 1000).toFixed(2) + " kWh" : " kWh");
+    : cap ? tr("{stored} of {cap} kWh", { stored: (stored / 1000).toFixed(1), cap: (cap / 1000).toFixed(2) }) : (stored / 1000).toFixed(1) + " kWh";
   const pv = byId("pack-v");
   if (pv) pv.textContent = fmtV(b?.pack_voltage_v);
 }
@@ -1187,17 +1214,17 @@ function paintFreshness() {
     const a = S.avg;
     const label = S.nowWindow === "5m" ? "5 min" : "30 min";
     el.classList.toggle("stale", !!a && a.samples < a.expected_samples * 0.8);
-    el.textContent = !a ? `loading the ${label} average…`
-      : a.samples === 0 ? `no data in the last ${label}`
-      : `average of the last ${label} · ${a.samples} samples` +
-        (a.samples < a.expected_samples * 0.8 ? " (partial)" : "");
+    el.textContent = !a ? tr("loading the {window} average…", { window: label })
+      : a.samples === 0 ? tr("no data in the last {window}", { window: label })
+      : tr("average of the last {window} · {n} samples", { window: label, n: a.samples }) +
+        (a.samples < a.expected_samples * 0.8 ? " " + tr("(partial)") : "");
     return;
   }
   const ts = S.state?.as_of ? Date.parse(S.state.as_of) : NaN;
-  if (Number.isNaN(ts)) { el.textContent = "waiting for data"; return; }
+  if (Number.isNaN(ts)) { el.textContent = tr("waiting for data"); return; }
   const age = Math.max(0, Math.round((Date.now() - ts) / 1000));
-  el.textContent = age < 60 ? `updated ${age} s ago`
-    : `no new data for ${fmtDuration(age / 3600)}`;
+  el.textContent = age < 60 ? tr("updated {n} s ago", { n: age })
+    : tr("no new data for {d}", { d: fmtDuration(age / 3600) });
   el.classList.toggle("stale", age >= 30);
 }
 function startFreshTimer() {
@@ -1215,7 +1242,7 @@ async function fetchAverage() {
   if (win === "now") return;
   try {
     const resp = await apiFetch("/power/average?window=" + win);
-    if (resp.status === 401) { gate("the token was rejected — sign in again"); return; }
+    if (resp.status === 401) { gate(tr("the token was rejected — sign in again")); return; }
     if (!resp.ok || win !== S.nowWindow) return;
     S.avg = await resp.json();
   } catch {
@@ -1304,9 +1331,9 @@ function exportJSON(h) {
 // [range, button, label, wide]: phones get 1h/6h/24h/72h (60-100 points
 // fit a narrow chart); 7d and 30d are for wide screens only.
 const RANGES = [
-  ["1h", "1 h", "last hour"], ["6h", "6 h", "last 6 hours"],
-  ["24h", "24 h", "last 24 hours"], ["72h", "72 h", "last 72 hours"],
-  ["7d", "7 d", "last 7 days", true], ["30d", "30 d", "last 30 days", true],
+  ["1h", "1 h", tr("last hour")], ["6h", "6 h", tr("last 6 hours")],
+  ["24h", "24 h", tr("last 24 hours")], ["72h", "72 h", tr("last 72 hours")],
+  ["7d", "7 d", tr("last 7 days"), true], ["30d", "30 d", tr("last 30 days"), true],
 ];
 const STEP_S = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600 };
 const NARROW = window.matchMedia("(max-width: 720px)");
@@ -1338,29 +1365,29 @@ function renderKpis(h) {
   if (!el) return;
   if (!t) { el.innerHTML = ""; return; }
   el.innerHTML =
-    kpiTile("s-solar", "Solar", fmtKWh(t.sol_wh), "generated") +
-    kpiTile("s-home", "Home", fmtKWh(t.haus_wh), "used") +
-    dirTile("s-grid", "Grid", t.grid_import_wh, "imported", t.grid_export_wh, "exported") +
-    dirTile("s-batt", "Battery", t.batt_charged_wh, "charged", t.batt_discharged_wh, "discharged");
+    kpiTile("s-solar", tr("Solar"), fmtKWh(t.sol_wh), tr("generated")) +
+    kpiTile("s-home", tr("Home"), fmtKWh(t.haus_wh), tr("used")) +
+    dirTile("s-grid", tr("Grid"), t.grid_import_wh, tr("imported"), t.grid_export_wh, tr("exported")) +
+    dirTile("s-batt", tr("Battery"), t.batt_charged_wh, tr("charged"), t.batt_discharged_wh, tr("discharged"));
 }
 
 function histRows(h) {
   const w = (v, tick) => fmtAxisW(v, tick);
   return [
-    { key: "sol", title: "Solar", cls: "s-solar", values: h.sol, fmt: w },
-    { key: "haus", title: "Home", cls: "s-home", values: h.haus, fmt: w },
-    { key: "grid", title: "Grid", cls: "s-grid", values: h.grid, fmt: w, legend: "above 0 = importing · below 0 = exporting" },
-    { key: "batt", title: "Battery", cls: "s-batt", values: h.batt, fmt: w, legend: "above 0 = charging · below 0 = discharging" },
-    { key: "soc", title: "State of charge", cls: "s-batt", values: h.soc, fixed: [0, 100], area: false, fmt: (v) => Math.round(v) + " %" },
-    { key: "bms", title: "BMS charge limit", cls: "s-batt", values: h.bms_chg_a ?? [], area: false, fmt: fmtAxisA,
-      legend: "from battery temperature and charge" },
-    { key: "temp", title: "Temperature", cls: "s-tbatt", values: h.t_cell_min ?? [], zero: false, area: false, fmt: fmtAxisC,
+    { key: "sol", title: tr("Solar"), cls: "s-solar", values: h.sol, fmt: w },
+    { key: "haus", title: tr("Home"), cls: "s-home", values: h.haus, fmt: w },
+    { key: "grid", title: tr("Grid"), cls: "s-grid", values: h.grid, fmt: w, legend: tr("above 0 = importing · below 0 = exporting") },
+    { key: "batt", title: tr("Battery"), cls: "s-batt", values: h.batt, fmt: w, legend: tr("above 0 = charging · below 0 = discharging") },
+    { key: "soc", title: tr("State of charge"), cls: "s-batt", values: h.soc, fixed: [0, 100], area: false, fmt: (v) => Math.round(v) + " %" },
+    { key: "bms", title: tr("BMS charge limit"), cls: "s-batt", values: h.bms_chg_a ?? [], area: false, fmt: fmtAxisA,
+      legend: tr("from battery temperature and charge") },
+    { key: "temp", title: tr("Temperature"), cls: "s-tbatt", values: h.t_cell_min ?? [], zero: false, area: false, fmt: fmtAxisC,
       series: [
         // the BMS's coldest cell: what the charge limit follows
-        { title: "coldest cell", cls: "s-tbatt", values: h.t_cell_min ?? [] },
-        { title: "battery", cls: "s-tbatt", values: h.t_batt ?? [], dash: true },
-        { title: "inverter", cls: "s-tinv", values: h.t_inv ?? [] },
-        { title: "ambient", cls: "s-tamb", values: h.t_amb ?? [], dash: true },
+        { title: tr("coldest cell"), cls: "s-tbatt", values: h.t_cell_min ?? [] },
+        { title: tr("battery"), cls: "s-tbatt", values: h.t_batt ?? [], dash: true },
+        { title: tr("inverter"), cls: "s-tinv", values: h.t_inv ?? [] },
+        { title: tr("ambient"), cls: "s-tamb", values: h.t_amb ?? [], dash: true },
       ] },
   ];
 }
@@ -1377,14 +1404,15 @@ function renderHistTable(h) {
     if ([h.sol, h.haus, h.grid, h.batt, h.soc].every((s) => s[i] == null)) continue;
     const c = (v) => `<td class="num">${v == null ? "—" : esc(fmtAxisW(v, false))}</td>`;
     const u = (s, f) => `<td class="num">${s?.[i] == null ? "—" : esc(f(s[i], false))}</td>`;
-    rows.push(`<tr><td>${esc(new Date(h.ts[i] * 1000).toLocaleString())}</td>${c(h.sol[i])}${c(h.haus[i])}${c(h.grid[i])}${c(h.batt[i])}` +
+    rows.push(`<tr><td>${esc(new Date(h.ts[i] * 1000).toLocaleString(locale()))}</td>${c(h.sol[i])}${c(h.haus[i])}${c(h.grid[i])}${c(h.batt[i])}` +
       `<td class="num">${h.soc[i] == null ? "—" : h.soc[i] + " %"}</td>` +
       `${u(h.bms_chg_a, fmtAxisA)}${u(h.t_cell_min, fmtAxisC)}${u(h.t_batt, fmtAxisC)}${u(h.t_inv, fmtAxisC)}${u(h.t_amb, fmtAxisC)}</tr>`);
   }
-  el.innerHTML = rows.length === 0 ? `<p class="muted small">No data in this range yet.</p>` :
-    `<table><caption class="sr-only">History values, ${esc(RANGES.find(([r]) => r === S.histRange)?.[2] ?? "")}, newest first</caption>` +
-    `<thead><tr><th scope="col">time</th><th scope="col">solar</th><th scope="col">home</th><th scope="col">grid (+ import)</th><th scope="col">battery (+ charging)</th><th scope="col">SoC</th>` +
-    `<th scope="col">BMS charge limit</th><th scope="col">coldest cell</th><th scope="col">battery temp</th><th scope="col">inverter temp</th><th scope="col">ambient temp</th></tr></thead>` +
+  const th = (s) => `<th scope="col">${esc(s)}</th>`;
+  el.innerHTML = rows.length === 0 ? `<p class="muted small">${esc(tr("No data in this range yet."))}</p>` :
+    `<table><caption class="sr-only">${esc(tr("History values, {range}, newest first", { range: RANGES.find(([r]) => r === S.histRange)?.[2] ?? "" }))}</caption>` +
+    `<thead><tr>${th(tr("time"))}${th(tr("solar"))}${th(tr("home"))}${th(tr("grid (+ import)"))}${th(tr("battery (+ charging)"))}${th(tr("SoC"))}` +
+    `${th(tr("BMS charge limit"))}${th(tr("coldest cell"))}${th(tr("battery temp"))}${th(tr("inverter temp"))}${th(tr("ambient temp"))}</tr></thead>` +
     `<tbody>${rows.join("")}</tbody></table>`;
 }
 
@@ -1395,12 +1423,12 @@ async function renderHistory(range) {
   let h;
   try {
     const resp = await apiFetch("/history?range=" + range);
-    if (resp.status === 401) { gate("the token was rejected — sign in again"); return; }
+    if (resp.status === 401) { gate(tr("the token was rejected — sign in again")); return; }
     if (!resp.ok) throw new Error("status " + resp.status);
     h = await resp.json();
   } catch {
     root.classList.remove("loading");
-    if (!histData) root.textContent = "History unavailable.";
+    if (!histData) root.textContent = tr("History unavailable.");
     return;
   }
   if (!byId("sm") || range !== S.histRange) return; // route or range changed mid-fetch
@@ -1446,7 +1474,7 @@ function afterDashboard() {
 async function loadState() {
   if (S.state) return true;
   const resp = await apiFetch("/state");
-  if (resp.status === 401) { gate("the token was rejected — sign in again"); return false; }
+  if (resp.status === 401) { gate(tr("the token was rejected — sign in again")); return false; }
   if (!resp.ok) return false;
   S.state = await resp.json();
   S.forwardMode = { mode: S.state.forward_mode };
@@ -1474,13 +1502,13 @@ const FLOW_LIMITS = [
 
 const fmtKW = (w) => (w == null ? "—" : (w / 1000).toFixed(w % 1000 === 0 ? 0 : 1) + " kW");
 const fmtA = (a) => (a == null ? "—" : (Number.isInteger(a) ? a : a.toFixed(1)) + " A");
-const EPS_TEXT = { ups: "UPS mode", eps: "EPS mode", disabled: "disabled" };
+const EPS_TEXT = { ups: tr("UPS mode"), eps: tr("EPS mode"), disabled: tr("disabled") };
 
 // usage: a "now" line — the live value against its limit
 function usage(now, limit, verb) {
   if (now == null) return "";
   const pct = limit ? Math.round(100 * now / limit) : null;
-  return `now ${verb} ${fmtPower(now)}` + (pct == null ? "" : ` (${pct} %)`);
+  return tr("now {verb} {w}", { verb, w: fmtPower(now) }) + (pct == null ? "" : ` (${pct} %)`);
 }
 
 // limitRows: the legend's rows from the state (limits) and the power now.
@@ -1491,34 +1519,34 @@ function limitRows(st, p) {
   const g = p?.grid_w;
   return {
     grid: {
-      title: "Grid connection",
-      limits: `import ≤ ${fmtKW(l.import_w)} / ${fmtA(l.import_current_a)}, export ≤ ${fmtKW(l.export_w)} / ${fmtA(l.export_current_a)}`,
-      where: "Applied to the whole house at the CT clamp (as FoxESS describes it — not verified here).",
-      now: g == null ? "" : g >= 0 ? usage(g, l.import_w, "importing") : usage(-g, l.export_w, "exporting"),
+      title: tr("Grid connection"),
+      limits: tr("import ≤ {iw} / {ia}, export ≤ {ew} / {ea}", { iw: fmtKW(l.import_w), ia: fmtA(l.import_current_a), ew: fmtKW(l.export_w), ea: fmtA(l.export_current_a) }),
+      where: tr("Applied to the whole house at the CT clamp (as FoxESS describes it — not verified here)."),
+      now: g == null ? "" : g >= 0 ? usage(g, l.import_w, tr("importing")) : usage(-g, l.export_w, tr("exporting")),
     },
     port: {
-      title: "Inverter grid port",
-      limits: `draw ≤ ${fmtKW(l.load_limit_w)} (load limit), output ≤ ${fmtKW(l.generation_limit_w)} (generation limit)`,
-      where: "Between the inverter and the switchboard. The load limit covers battery charging plus backup pass-through (verified 17 Nov); the generation limit is presumed to cap output (untested).",
-      now: port == null ? "" : port < 0 ? usage(-port, l.load_limit_w, "drawing") : usage(port, l.generation_limit_w, "supplying"),
+      title: tr("Inverter grid port"),
+      limits: tr("draw ≤ {load} (load limit), output ≤ {gen} (generation limit)", { load: fmtKW(l.load_limit_w), gen: fmtKW(l.generation_limit_w) }),
+      where: tr("Between the inverter and the switchboard. The load limit covers battery charging plus backup pass-through (verified 17 Nov); the generation limit is presumed to cap output (untested)."),
+      now: port == null ? "" : port < 0 ? usage(-port, l.load_limit_w, tr("drawing")) : usage(port, l.generation_limit_w, tr("supplying")),
     },
     batt: {
-      title: "Battery",
-      limits: `charge ≤ ${fmtA(l.max_charge_current_a)}, discharge ≤ ${fmtA(l.max_discharge_current_a)}`,
-      where: "Battery-side (DC) current. At the pack's voltage this is far above the inverter's rating, so it does not bind.",
-      now: p?.battery_w == null ? "" : `now ${p.battery_w >= 0 ? "charging" : "discharging"} ${fmtPower(p.battery_w)}`,
+      title: tr("Battery"),
+      limits: tr("charge ≤ {c}, discharge ≤ {d}", { c: fmtA(l.max_charge_current_a), d: fmtA(l.max_discharge_current_a) }),
+      where: tr("Battery-side (DC) current. At the pack's voltage this is far above the inverter's rating, so it does not bind."),
+      now: p?.battery_w == null ? "" : tr("now {verb} {w}", { verb: p.battery_w >= 0 ? tr("charging") : tr("discharging"), w: fmtPower(p.battery_w) }),
     },
     inv: {
-      title: "Inverter output",
-      limits: l.power_limit_pct == null ? "—" : `power limit ${l.power_limit_pct} % of rating`,
-      where: "The inverter's total AC output (switchboard plus backup).",
-      now: p?.ac_port_w == null ? "" : `now ${p.ac_port_w >= 0 ? "output" : "input"} ${fmtPower(p.ac_port_w)}`,
+      title: tr("Inverter output"),
+      limits: l.power_limit_pct == null ? "—" : tr("power limit {pct} % of rating", { pct: l.power_limit_pct }),
+      where: tr("The inverter's total AC output (switchboard plus backup)."),
+      now: p?.ac_port_w == null ? "" : tr("now {verb} {w}", { verb: p.ac_port_w >= 0 ? tr("output") : tr("input"), w: fmtPower(p.ac_port_w) }),
     },
     eps: {
-      title: "Backup (EPS) port",
+      title: tr("Backup (EPS) port"),
       limits: EPS_TEXT[st?.eps_mode] ?? "—",
-      where: "No separate limit. While the grid is up, its load counts toward the inverter grid port (2) when the battery and solar can't cover it.",
-      now: p?.eps_w == null ? "" : `now ${fmtPower(p.eps_w)}`,
+      where: tr("No separate limit. While the grid is up, its load counts toward the inverter grid port (2) when the battery and solar can't cover it."),
+      now: p?.eps_w == null ? "" : tr("now {w}", { w: fmtPower(p.eps_w) }),
     },
   };
 }
@@ -1558,17 +1586,17 @@ function flowMarkup(withLimits) {
           <circle class="board-dot" cx="288" cy="150" r="5"/>
           ${marks}
         </svg>
-        <span class="board-label muted"><span class="wide">switch</span>board</span>
-        ${flowNode("solar", "Solar", "a-solar")}
-        ${flowNode("batt", "Battery", "a-batt")}
+        <span class="board-label muted">${esc(tr("switchboard"))}</span>
+        ${flowNode("solar", esc(tr("Solar")), "a-solar")}
+        ${flowNode("batt", esc(tr("Battery")), "a-batt")}
         <div class="node inv a-hub">
-          <div class="node-label">Inverter</div>
+          <div class="node-label">${esc(tr("Inverter"))}</div>
           <div id="fv-hub" class="node-value">—</div>
           <div id="fp-hub" class="node-phrase muted">—</div>
         </div>
-        ${flowNode("home", "Home", "a-home")}
-        ${flowNode("grid", "Grid", "a-grid")}
-        ${flowNode("eps", "Backup", "a-eps")}
+        ${flowNode("home", esc(tr("Home")), "a-home")}
+        ${flowNode("grid", esc(tr("Grid")), "a-grid")}
+        ${flowNode("eps", esc(tr("Backup")), "a-eps")}
       </div>`;
 }
 
@@ -1579,26 +1607,26 @@ async function renderDashboard() {
   return `
   <section class="panel now" aria-labelledby="now-h">
     <div class="sec-head">
-      <h2 id="now-h" class="sr-only">Power now</h2>
+      <h2 id="now-h" class="sr-only">${esc(tr("Power now"))}</h2>
       <span id="now-age" class="muted small grow" aria-live="off"></span>
-      <div class="seg" role="group" aria-label="Show power as">
-        ${[["now", "instant"], ["5m", "5 min avg"], ["30m", "30 min avg"]].map(([w, l]) =>
-          `<button type="button" data-window="${w}" aria-pressed="${S.nowWindow === w}">${l}</button>`).join("")}
+      <div class="seg" role="group" aria-label="${esc(tr("Show power as"))}">
+        ${[["now", tr("instant")], ["5m", tr("5 min avg")], ["30m", tr("30 min avg")]].map(([w, l]) =>
+          `<button type="button" data-window="${w}" aria-pressed="${S.nowWindow === w}">${esc(l)}</button>`).join("")}
       </div>
     </div>
     <div class="now-body">
       ${flowMarkup(false)}
       <div class="batt">
-        <h3 class="node-label"><span class="sm-key s-batt" aria-hidden="true"></span>Battery</h3>
+        <h3 class="node-label"><span class="sm-key s-batt" aria-hidden="true"></span>${esc(tr("Battery"))}</h3>
         <div id="soc" class="hero">—</div>
-        <div id="soc-meter" class="meter" role="meter" aria-label="state of charge" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="soc-meter" class="meter" role="meter" aria-label="${esc(tr("state of charge"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
           <div id="soc-bar" class="meter-fill"></div>
         </div>
         <p id="batt-phrase" class="batt-phrase">—</p>
         <p id="batt-eta" class="muted small" hidden></p>
         <dl class="kv small">
-          <div><dt>stored</dt><dd id="stored-wh">—</dd></div>
-          <div><dt>pack voltage</dt><dd id="pack-v">—</dd></div>
+          <div><dt>${esc(tr("stored"))}</dt><dd id="stored-wh">—</dd></div>
+          <div><dt>${esc(tr("pack voltage"))}</dt><dd id="pack-v">—</dd></div>
         </dl>
       </div>
     </div>
@@ -1606,8 +1634,8 @@ async function renderDashboard() {
 
   <section class="energy" aria-labelledby="energy-h">
     <div class="sec-head">
-      <h2 id="energy-h">Energy <span class="muted">· <span id="range-label">${esc(label)}</span></span></h2>
-      <div class="seg" role="group" aria-label="History range">
+      <h2 id="energy-h">${esc(tr("Energy"))} <span class="muted">· <span id="range-label">${esc(label)}</span></span></h2>
+      <div class="seg" role="group" aria-label="${esc(tr("History range"))}">
         ${RANGES.map(([r, short, , wide]) => `<button type="button" data-range="${r}" aria-pressed="${S.histRange === r}"${wide ? ' class="wide-only"' : ""}>${short}</button>`).join("")}
       </div>
     </div>
@@ -1615,9 +1643,9 @@ async function renderDashboard() {
     <div class="panel charts">
       <div id="sm" class="sm"></div>
       <div class="charts-foot">
-        <button type="button" class="ghost small-btn" data-action="export-csv">export CSV</button>
-        <button type="button" class="ghost small-btn" data-action="export-json">export JSON</button>
-        <button type="button" class="ghost small-btn" data-action="toggle-hist-table" aria-expanded="false" aria-controls="hist-table">show data table</button>
+        <button type="button" class="ghost small-btn" data-action="export-csv">${esc(tr("export CSV"))}</button>
+        <button type="button" class="ghost small-btn" data-action="export-json">${esc(tr("export JSON"))}</button>
+        <button type="button" class="ghost small-btn" data-action="toggle-hist-table" aria-expanded="false" aria-controls="hist-table">${esc(tr("show data table"))}</button>
       </div>
       <div id="hist-table" class="tablewrap" hidden></div>
     </div>
@@ -1631,7 +1659,7 @@ async function fetchAuditPage(before, replace) {
   if (f.action) params.set("action", f.action);
   if (before) params.set("before", before);
   const resp = await apiFetch("/audit?" + params);
-  if (resp.status === 401) { gate("the token was rejected — sign in again"); return false; }
+  if (resp.status === 401) { gate(tr("the token was rejected — sign in again")); return false; }
   if (!resp.ok) return false;
   const data = await resp.json();
   const items = data.items ?? [];
@@ -1648,7 +1676,7 @@ async function fetchMessagesPage(before, replace) {
   if (f.frame) params.set("frame", f.frame);
   if (before) params.set("before", before);
   const resp = await apiFetch("/messages?" + params);
-  if (resp.status === 401) { gate("the token was rejected — sign in again"); return false; }
+  if (resp.status === 401) { gate(tr("the token was rejected — sign in again")); return false; }
   if (!resp.ok) return false;
   const data = await resp.json();
   const items = data.items ?? [];
@@ -1668,9 +1696,9 @@ function writeSupport(feature) {
 
 function writeNote(feature) {
   const s = writeSupport(feature);
-  if (s === "unmapped") return `<p class="note warn">Not available on this inverter model yet — the setting is not mapped. Sharing a diagnostic bundle (More → Settings) helps add it.</p>`;
-  if (s === "not_supported") return `<p class="note warn">This inverter does not support this setting.</p>`;
-  if (s === "untested") return `<p class="note warn">Untested on this inverter model. An installer can enable untested writes under More → Device.</p>`;
+  if (s === "unmapped") return `<p class="note warn">${esc(tr("Not available on this inverter model yet — the setting is not mapped. Sharing a diagnostic bundle (More → Settings) helps add it."))}</p>`;
+  if (s === "not_supported") return `<p class="note warn">${esc(tr("This inverter does not support this setting."))}</p>`;
+  if (s === "untested") return `<p class="note warn">${esc(tr("Untested on this inverter model. An installer can enable untested writes under More → Device."))}</p>`;
   return "";
 }
 
@@ -1687,26 +1715,26 @@ function pageHead(title, sub) {
 function fmtAgo(ts) {
   if (!ts) return "—";
   const s = (Date.now() - new Date(ts).getTime()) / 1000;
-  if (s < 45) return "just now";
-  if (s < 3600) return Math.round(s / 60) + " min ago";
-  if (s < 86400) return Math.round(s / 3600) + " h ago";
-  return Math.round(s / 86400) + " d ago";
+  if (s < 45) return tr("just now");
+  if (s < 3600) return tr("{n} min ago", { n: Math.round(s / 60) });
+  if (s < 86400) return tr("{n} h ago", { n: Math.round(s / 3600) });
+  return tr("{n} d ago", { n: Math.round(s / 86400) });
 }
 
 function dayLabel(ts) {
   const d = new Date(ts);
   const today = new Date();
   const y = new Date(); y.setDate(today.getDate() - 1);
-  if (d.toDateString() === today.toDateString()) return "Today";
-  if (d.toDateString() === y.toDateString()) return "Yesterday";
-  return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  if (d.toDateString() === today.toDateString()) return tr("Today");
+  if (d.toDateString() === y.toDateString()) return tr("Yesterday");
+  return d.toLocaleDateString(locale(), { weekday: "short", day: "numeric", month: "short" });
 }
 
 // ---------- control ----------
 
 const WORK_MODE_TEXT = {
-  "self-use": ["Self-use", "Solar and battery power the house first; surplus charges the battery, then exports."],
-  "feed-in": ["Feed-in first", "Solar is exported first; the battery charges from what is left."],
+  "self-use": [tr("Self-use"), tr("Solar and battery power the house first; surplus charges the battery, then exports.")],
+  "feed-in": [tr("Feed-in first"), tr("Solar is exported first; the battery charges from what is left.")],
 };
 
 async function renderControl() {
@@ -1719,35 +1747,35 @@ async function renderControl() {
     // static JSON hx-vals (htmx parses it — no eval, CSP-safe)
     return `<button data-cmd="work-mode" type="button" class="choice" aria-pressed="${active}" ${wmOK ? "" : "disabled"}
         hx-put="${API}/work-mode" hx-encoding="json" hx-vals='{"work_mode":"${m}"}' hx-swap="none">
-        <span class="choice-title">${title}${active
-          ? (st.active_mode?.source === "schedule" ? ` <span class="chip">set</span>` : ` <span class="chip ok">active</span>`)
+        <span class="choice-title">${esc(title)}${active
+          ? (st.active_mode?.source === "schedule" ? ` <span class="chip">${esc(tr("set"))}</span>` : ` <span class="chip ok">${esc(tr("active"))}</span>`)
           : ""}</span>
-        <span class="choice-desc">${desc}</span></button>`;
+        <span class="choice-desc">${esc(desc)}</span></button>`;
   };
   const am = st.active_mode ?? {};
   const allDay = (st.schedule?.enabled ? st.schedule.groups ?? [] : [])
     .find((g) => g.enabled && g.start === "00:00" && hhmmMin(g.end) >= 23 * 60 + 59);
   return `
-  ${pageHead("Control", "Changes are sent to the inverter and confirmed by reading them back.")}
-  <section class="stack" aria-label="controls">
+  ${pageHead(tr("Control"), esc(tr("Changes are sent to the inverter and confirmed by reading them back.")))}
+  <section class="stack" aria-label="${esc(tr("controls"))}">
     <article class="panel">
-      <h3>Running now</h3>
+      <h3>${esc(tr("Running now"))}</h3>
       <p class="running"><strong>${esc(SCHED_TEXT[am.mode] ?? am.mode ?? "—")}</strong>
         <span class="muted">${am.source === "schedule"
-          ? `schedule group ${am.group} (${esc(am.start)}–${esc(am.end)}) · <a href="#/schedule">Schedule</a>`
-          : "the base work mode (no schedule group applies)"}</span></p>
+          ? `${esc(tr("schedule group {n} ({from}–{to})", { n: am.group, from: am.start, to: am.end }))} · <a href="#/schedule">${esc(tr("Schedule"))}</a>`
+          : esc(tr("the base work mode (no schedule group applies)"))}</span></p>
       ${flowMarkup(true)}
       ${limitsLegend(st)}
     </article>
 
     <article class="panel">
-      <h3>Base work mode</h3>
-      <p class="muted small">Used when no schedule group covers the time.${allDay
-        ? ` Schedule group ${allDay.index} runs all day (${esc(SCHED_TEXT[allDay.work_mode] ?? allDay.work_mode)}), so the base mode currently never applies — the FoxESS app's "work mode" is that group.`
+      <h3>${esc(tr("Base work mode"))}</h3>
+      <p class="muted small">${esc(tr("Used when no schedule group covers the time."))}${allDay
+        ? " " + esc(tr("Schedule group {n} runs all day ({mode}), so the base mode currently never applies — the FoxESS app's \"work mode\" is that group.", { n: allDay.index, mode: SCHED_TEXT[allDay.work_mode] ?? allDay.work_mode }))
         : ""}</p>
       <div class="choices">${IMMEDIATE_MODES.map(wmBtn).join("")}</div>
       ${writeNote("work_mode")}
-      <p class="muted small">Force charge / discharge and grid charging are time windows: see Schedule.</p>
+      <p class="muted small">${esc(tr("Force charge / discharge and grid charging are time windows: see Schedule."))}</p>
     </article>
 
     ${limitsPanel(st)}
@@ -1760,10 +1788,10 @@ async function renderControl() {
 const SETTING_PATHS = ["/current-limits", "/port-limits", "/battery-currents", "/power-limit", "/eps-mode"];
 
 const SETTING_LABEL = {
-  import_current_a: "import current (A)", export_current_a: "export current (A)",
-  load_limit_w: "load limit (W)", generation_limit_w: "generation limit (W)",
-  max_charge_current_a: "max charge current (A)", max_discharge_current_a: "max discharge current (A)",
-  power_limit_pct: "power limit (%)", eps_mode: "EPS mode",
+  import_current_a: tr("import current (A)"), export_current_a: tr("export current (A)"),
+  load_limit_w: tr("load limit (W)"), generation_limit_w: tr("generation limit (W)"),
+  max_charge_current_a: tr("max charge current (A)"), max_discharge_current_a: tr("max discharge current (A)"),
+  power_limit_pct: tr("power limit (%)"), eps_mode: tr("EPS mode"),
 };
 
 // numIn is one numeric field of a limits form.
@@ -1776,7 +1804,7 @@ function limitForm(id, cmd, path, feature, fields, button) {
   const ok = writable(feature);
   return `<form id="${id}" data-cmd="${cmd}" hx-put="${API}${path}" hx-encoding="json" hx-swap="none">
       <div class="fields two">${fields(ok)}</div>
-      <button data-cmd="${cmd}" type="submit" class="cmd" ${ok ? "" : "disabled"}>${button}</button>
+      <button data-cmd="${cmd}" type="submit" class="cmd" ${ok ? "" : "disabled"}>${esc(button)}</button>
     </form>${writeNote(feature)}`;
 }
 
@@ -1789,46 +1817,46 @@ function limitsPanel(st) {
   const epsOK = writable("eps_mode");
   const eps = st.eps_mode;
   return `<article class="panel limits">
-      <h3>Limits</h3>
-      <p class="muted small">Numbered as on the diagram above. Installer role, except meter compensation (expert). Each change is read back from the inverter; the inverter may round values.</p>
+      <h3>${esc(tr("Limits"))}</h3>
+      <p class="muted small">${esc(tr("Numbered as on the diagram above. Installer role, except meter compensation (expert). Each change is read back from the inverter; the inverter may round values."))}</p>
 
-      ${head(1, "Grid connection")}
+      ${head(1, tr("Grid connection"))}
       ${limitForm("limits-form", "limits", "/limits", "power_limits", (ok) =>
-        numIn("import_w", "Import limit", l.import_w, "W", 0, 30000, 1, ok) +
-        numIn("export_w", "Export limit", l.export_w, "W", 0, 30000, 1, ok), "Apply power limits")}
+        numIn("import_w", tr("Import limit"), l.import_w, "W", 0, 30000, 1, ok) +
+        numIn("export_w", tr("Export limit"), l.export_w, "W", 0, 30000, 1, ok), tr("Apply power limits"))}
       ${limitForm("current-form", "current-limits", "/current-limits", "current_limits", (ok) =>
-        numIn("import_current_a", "Import current limit", l.import_current_a, "A", 2, 100, 0.1, ok) +
-        numIn("export_current_a", "Export current limit", l.export_current_a, "A", 2, 100, 0.1, ok), "Apply current limits")}
+        numIn("import_current_a", tr("Import current limit"), l.import_current_a, "A", 2, 100, 0.1, ok) +
+        numIn("export_current_a", tr("Export current limit"), l.export_current_a, "A", 2, 100, 0.1, ok), tr("Apply current limits"))}
       <form id="comp-form" data-cmd="meter-comp" hx-put="${API}/meter-compensation" hx-encoding="json" hx-swap="none">
-        <div class="fields two">${numIn("w", "Meter compensation", st.meter_compensation_w ?? 0, "W", -500, 500, 1, compOK)}</div>
-        <p class="muted small">Corrects a steady offset between the CT meter and the real flow (−500 to 500 W). Export limiting uses the corrected reading, so real export can exceed the export limit by up to this amount.</p>
-        <button data-cmd="meter-comp" type="submit" class="cmd" ${compOK ? "" : "disabled"}>Apply compensation</button>
+        <div class="fields two">${numIn("w", tr("Meter compensation"), st.meter_compensation_w ?? 0, "W", -500, 500, 1, compOK)}</div>
+        <p class="muted small">${esc(tr("Corrects a steady offset between the CT meter and the real flow (−500 to 500 W). Export limiting uses the corrected reading, so real export can exceed the export limit by up to this amount."))}</p>
+        <button data-cmd="meter-comp" type="submit" class="cmd" ${compOK ? "" : "disabled"}>${esc(tr("Apply compensation"))}</button>
       </form>${writeNote("meter_compensation")}
 
-      ${head(2, "Inverter grid port")}
+      ${head(2, tr("Inverter grid port"))}
       ${limitForm("port-form", "port-limits", "/port-limits", "port_limits", (ok) =>
-        numIn("load_limit_w", "Load limit", l.load_limit_w, "W", 0, 65535, 1, ok) +
-        numIn("generation_limit_w", "Generation limit", l.generation_limit_w, "W", 0, 65535, 1, ok), "Apply port limits")}
-      <p class="muted small">The load limit caps what the inverter draws from the switchboard — battery charging plus backup pass-through (verified 17 Nov); keep it within the inverter's supply breaker. The generation limit's effect is untested.</p>
+        numIn("load_limit_w", tr("Load limit"), l.load_limit_w, "W", 0, 65535, 1, ok) +
+        numIn("generation_limit_w", tr("Generation limit"), l.generation_limit_w, "W", 0, 65535, 1, ok), tr("Apply port limits"))}
+      <p class="muted small">${esc(tr("The load limit caps what the inverter draws from the switchboard — battery charging plus backup pass-through (verified 17 Nov); keep it within the inverter's supply breaker. The generation limit's effect is untested."))}</p>
 
-      ${head(3, "Battery")}
+      ${head(3, tr("Battery"))}
       ${limitForm("batt-form", "battery-currents", "/battery-currents", "battery_currents", (ok) =>
-        numIn("max_charge_current_a", "Max charge current", l.max_charge_current_a, "A", 0, 50, 0.1, ok) +
-        numIn("max_discharge_current_a", "Max discharge current", l.max_discharge_current_a, "A", 0, 50, 0.1, ok), "Apply battery currents")}
+        numIn("max_charge_current_a", tr("Max charge current"), l.max_charge_current_a, "A", 0, 50, 0.1, ok) +
+        numIn("max_discharge_current_a", tr("Max discharge current"), l.max_discharge_current_a, "A", 0, 50, 0.1, ok), tr("Apply battery currents"))}
 
-      ${head(4, "Inverter output")}
+      ${head(4, tr("Inverter output"))}
       ${limitForm("plim-form", "power-limit", "/power-limit", "power_limit", (ok) =>
-        numIn("power_limit_pct", "Power limit", l.power_limit_pct, "% of rating", 0, 100, 1, ok), "Apply power limit")}
+        numIn("power_limit_pct", tr("Power limit"), l.power_limit_pct, esc(tr("% of rating")), 0, 100, 1, ok), tr("Apply power limit"))}
 
-      ${head(5, "Backup (EPS) port")}
+      ${head(5, tr("Backup (EPS) port"))}
       <form id="eps-form" data-cmd="eps-mode" data-confirm="epsMode" hx-put="${API}/eps-mode" hx-encoding="json" hx-swap="none">
-        <div class="radio-list">${[["ups", "UPS mode", "switches the backup circuits to the battery within milliseconds when the grid fails"],
-          ["eps", "EPS mode", "switches over more slowly when the grid fails"]].map(([v, t, d]) => `
+        <div class="radio-list">${[["ups", tr("UPS mode"), tr("switches the backup circuits to the battery within milliseconds when the grid fails")],
+          ["eps", tr("EPS mode"), tr("switches over more slowly when the grid fails")]].map(([v, t, d]) => `
           <label class="radio-row"><input type="radio" name="eps_mode" value="${v}" ${eps === v ? "checked" : ""} ${epsOK ? "" : "disabled"}>
-            <span><strong>${t}</strong><span class="desc muted small">${d}</span></span></label>`).join("")}
+            <span><strong>${esc(t)}</strong><span class="desc muted small">${esc(d)}</span></span></label>`).join("")}
         </div>
-        ${eps === "disabled" ? `<p class="muted small">The port is currently disabled; enabling and disabling it from here is not offered until that has been verified on this inverter.</p>` : ""}
-        <button data-cmd="eps-mode" type="submit" class="cmd" ${epsOK ? "" : "disabled"}>Apply EPS mode</button>
+        ${eps === "disabled" ? `<p class="muted small">${esc(tr("The port is currently disabled; enabling and disabling it from here is not offered until that has been verified on this inverter."))}</p>` : ""}
+        <button data-cmd="eps-mode" type="submit" class="cmd" ${epsOK ? "" : "disabled"}>${esc(tr("Apply EPS mode"))}</button>
       </form>${writeNote("eps_mode")}
     </article>`;
 }
@@ -1836,8 +1864,8 @@ function limitsPanel(st) {
 // ---------- schedule ----------
 
 const SCHED_TEXT = {
-  "self-use": "Self-use", "feed-in": "Feed-in first", "backup": "Backup", "peak-shaving": "Peak shaving",
-  "power-station": "Power station", "force-charge": "Force charge", "force-discharge": "Force discharge",
+  "self-use": tr("Self-use"), "feed-in": tr("Feed-in first"), "backup": tr("Backup"), "peak-shaving": tr("Peak shaving"),
+  "power-station": tr("Power station"), "force-charge": tr("Force charge"), "force-discharge": tr("Force discharge"),
 };
 const FORCE_MODES = ["force-charge", "force-discharge"];
 
@@ -1856,7 +1884,7 @@ function schedTimeline(groups, master) {
   const blocks = groups.filter((g) => g.enabled && !g.default).map((g) => {
     const a = hhmmMin(g.start), b = Math.max(hhmmMin(g.end), a + 1);
     // the position rides in data-*: the CSP forbids inline style attributes
-    return `<div class="tl-block k-${schedKind(g.work_mode)}" data-a="${a}" data-b="${b}" title="Group ${g.index}: ${esc(SCHED_TEXT[g.work_mode] ?? g.work_mode)} ${esc(g.start)}–${esc(g.end)}"><span>${g.index}</span></div>`;
+    return `<div class="tl-block k-${schedKind(g.work_mode)}" data-a="${a}" data-b="${b}" title="${esc(tr("Group {n}", { n: g.index }))}: ${esc(SCHED_TEXT[g.work_mode] ?? g.work_mode)} ${esc(g.start)}–${esc(g.end)}"><span>${g.index}</span></div>`;
   }).join("");
   return `<div class="timeline${master ? "" : " off"}" aria-hidden="true">
       <div class="tl-bar">${blocks}</div>
@@ -1868,8 +1896,8 @@ function schedTimeline(groups, master) {
 // as no limit — the cloud's 99999 / 100000 defaults)
 function fmtLimitW(w) {
   if (w == null) return "—";
-  if (w >= 99999) return "no limit";
-  return (w / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 }) + " kW";
+  if (w >= 99999) return tr("no limit");
+  return (w / 1000).toLocaleString(locale(), { maximumFractionDigits: 1 }) + " kW";
 }
 
 // schedDetail: a force window's settings the FoxESS app owns (read-only
@@ -1879,13 +1907,13 @@ function schedDetail(g) {
   if (!FORCE_MODES.includes(g.work_mode)) return "";
   const chg = g.work_mode === "force-charge";
   const items = [];
-  if (g.after_cutoff) items.push(`after the target: ${esc(SCHED_TEXT[g.after_cutoff] ?? g.after_cutoff)}`);
-  if (chg) items.push(g.fd_pwr_w > 0 ? "charges from the grid" : "no charging from the grid");
-  if (g.pv != null) items.push(chg ? (g.pv ? "charges from solar" : "no charging from solar") : (g.pv ? "discharges with solar" : "solar not used"));
-  if (g.import_limit_w != null) items.push(`grid import ${fmtLimitW(g.import_limit_w)}`);
-  if (g.export_limit_w != null) items.push(`export ${fmtLimitW(g.export_limit_w)}`);
+  if (g.after_cutoff) items.push(tr("after the target: {mode}", { mode: SCHED_TEXT[g.after_cutoff] ?? g.after_cutoff }));
+  if (chg) items.push(g.fd_pwr_w > 0 ? tr("charges from the grid") : tr("no charging from the grid"));
+  if (g.pv != null) items.push(chg ? (g.pv ? tr("charges from solar") : tr("no charging from solar")) : (g.pv ? tr("discharges with solar") : tr("solar not used")));
+  if (g.import_limit_w != null) items.push(tr("grid import {w}", { w: fmtLimitW(g.import_limit_w) }));
+  if (g.export_limit_w != null) items.push(tr("export {w}", { w: fmtLimitW(g.export_limit_w) }));
   if (!items.length) return "";
-  return `<p class="muted small g-detail">${items.join(" · ")}<br><span>Set in the FoxESS app; saving here keeps them.</span></p>`;
+  return `<p class="muted small g-detail">${items.map(esc).join(" · ")}<br><span>${esc(tr("Set in the FoxESS app; saving here keeps them."))}</span></p>`;
 }
 
 // schedDefault: the default group (the cloud's "remaining time" mode) —
@@ -1898,12 +1926,12 @@ function schedDefault(g) {
     <input type="checkbox" name="g${i}-enabled" checked hidden>
     <input type="hidden" name="g${i}-start" value="00:00"><input type="hidden" name="g${i}-end" value="23:59">
     <input type="hidden" name="g${i}-fdsoc" value="${g.fd_soc_pct}"><input type="hidden" name="g${i}-fdpwr" value="${g.fd_pwr_w}">
-    <h3>Default mode</h3>
-    <p class="muted small">Outside the windows below.</p>
-    <label>Mode<select name="g${i}-mode">${modes.map((m) => `<option value="${m}" ${m === g.work_mode ? "selected" : ""}>${SCHED_TEXT[m]}</option>`).join("")}</select></label>
+    <h3>${esc(tr("Default mode"))}</h3>
+    <p class="muted small">${esc(tr("Outside the windows below."))}</p>
+    <label>${esc(tr("Mode"))}<select name="g${i}-mode">${modes.map((m) => `<option value="${m}" ${m === g.work_mode ? "selected" : ""}>${esc(SCHED_TEXT[m])}</option>`).join("")}</select></label>
     <div class="fields two">
-      <label>Max SoC from grid<span class="unit-in"><input type="number" inputmode="numeric" min="10" max="100" name="g${i}-maxsoc" value="${g.max_soc_pct}"><span>%</span></span></label>
-      <label>Min SoC on grid<span class="unit-in"><input type="number" inputmode="numeric" min="10" max="100" name="g${i}-minsoc" value="${g.min_soc_on_grid_pct}"><span>%</span></span></label>
+      <label>${esc(tr("Max SoC from grid"))}<span class="unit-in"><input type="number" inputmode="numeric" min="10" max="100" name="g${i}-maxsoc" value="${g.max_soc_pct}"><span>%</span></span></label>
+      <label>${esc(tr("Min SoC on grid"))}<span class="unit-in"><input type="number" inputmode="numeric" min="10" max="100" name="g${i}-minsoc" value="${g.min_soc_on_grid_pct}"><span>%</span></span></label>
     </div>
   </article>`;
 }
@@ -1915,25 +1943,25 @@ function schedGroup(g) {
   const force = FORCE_MODES.includes(g.work_mode);
   const summary = on
     ? `${esc(SCHED_TEXT[g.work_mode] ?? g.work_mode)} · <span class="num">${esc(g.start)}–${esc(g.end)}</span>`
-    : `<span class="muted">off</span>`;
+    : `<span class="muted">${esc(tr("off"))}</span>`;
   // an unused group stays in the form (the save sends all eight), hidden
   // until "Add a window" brings it up
   return `<div class="group k-${schedKind(g.work_mode)}${on ? " on" : ""}" data-group="${i}"${on ? "" : " data-unused hidden"}>
-    <input type="checkbox" switch name="g${i}-enabled" ${on ? "checked" : ""} aria-label="Group ${i} enabled">
+    <input type="checkbox" switch name="g${i}-enabled" ${on ? "checked" : ""} aria-label="${esc(tr("Group {n} enabled", { n: i }))}">
     <details>
-      <summary><span class="g-title">Group ${i}</span><span class="g-sum">${summary}</span></summary>
+      <summary><span class="g-title">${esc(tr("Group {n}", { n: i }))}</span><span class="g-sum">${summary}</span></summary>
       <div class="fields two">
-        <label>Start<input type="time" name="g${i}-start" value="${esc(g.start)}"${dis}></label>
-        <label>End<input type="time" name="g${i}-end" value="${esc(g.end)}"${dis}></label>
+        <label>${esc(tr("Start"))}<input type="time" name="g${i}-start" value="${esc(g.start)}"${dis}></label>
+        <label>${esc(tr("End"))}<input type="time" name="g${i}-end" value="${esc(g.end)}"${dis}></label>
       </div>
-      <label>Mode<select name="g${i}-mode"${dis}>${SCHED_MODES.map((m) => `<option value="${m}" ${m === g.work_mode ? "selected" : ""}>${SCHED_TEXT[m]}</option>`).join("")}</select></label>
+      <label>${esc(tr("Mode"))}<select name="g${i}-mode"${dis}>${SCHED_MODES.map((m) => `<option value="${m}" ${m === g.work_mode ? "selected" : ""}>${esc(SCHED_TEXT[m])}</option>`).join("")}</select></label>
       <div class="fields two">
-        <label>Max SoC from grid<span class="unit-in"><input type="number" inputmode="numeric" min="10" max="100" name="g${i}-maxsoc" value="${g.max_soc_pct}"${dis}><span>%</span></span></label>
-        <label>Min SoC on grid<span class="unit-in"><input type="number" inputmode="numeric" min="10" max="100" name="g${i}-minsoc" value="${g.min_soc_on_grid_pct}"${dis}><span>%</span></span></label>
+        <label>${esc(tr("Max SoC from grid"))}<span class="unit-in"><input type="number" inputmode="numeric" min="10" max="100" name="g${i}-maxsoc" value="${g.max_soc_pct}"${dis}><span>%</span></span></label>
+        <label>${esc(tr("Min SoC on grid"))}<span class="unit-in"><input type="number" inputmode="numeric" min="10" max="100" name="g${i}-minsoc" value="${g.min_soc_on_grid_pct}"${dis}><span>%</span></span></label>
       </div>
       <div class="fields two force"${force ? "" : " hidden"}>
-        <label>Target SoC<span class="unit-in"><input type="number" inputmode="numeric" min="10" max="100" name="g${i}-fdsoc" value="${g.fd_soc_pct}"${dis}><span>%</span></span></label>
-        <label>Power<span class="unit-in"><input type="number" inputmode="numeric" min="0" max="10500" step="1" name="g${i}-fdpwr" value="${g.fd_pwr_w}"${dis}><span>W</span></span></label>
+        <label>${esc(tr("Target SoC"))}<span class="unit-in"><input type="number" inputmode="numeric" min="10" max="100" name="g${i}-fdsoc" value="${g.fd_soc_pct}"${dis}><span>%</span></span></label>
+        <label>${esc(tr("Power"))}<span class="unit-in"><input type="number" inputmode="numeric" min="0" max="10500" step="1" name="g${i}-fdpwr" value="${g.fd_pwr_w}"${dis}><span>W</span></span></label>
       </div>
       ${schedDetail(g)}
     </details>
@@ -1954,34 +1982,35 @@ async function renderSchedule() {
   const spare = windows.some((g) => !g.enabled);
   const shown = windows.filter((g) => g.enabled).length;
   return `
-  ${pageHead("Schedule", def
-    ? "Daily time windows, and the default mode that runs outside them."
-    : "Daily time windows. Outside them the inverter follows its work mode.")}
+  ${pageHead(tr("Schedule"), esc(def
+    ? tr("Daily time windows, and the default mode that runs outside them.")
+    : tr("Daily time windows. Outside them the inverter follows its work mode.")))}
   <form id="schedule-form" data-cmd="schedule" hx-put="${API}/schedule" hx-encoding="json" hx-swap="none">
     <article class="panel">
-      <label class="row"><input id="sched-enabled" name="enabled" type="checkbox" switch ${sch?.enabled ? "checked" : ""}> <strong>Scheduler</strong> <span class="muted small">${sch?.enabled ? "on" : "off — the schedule below is ignored"}</span></label>
+      <label class="row"><input id="sched-enabled" name="enabled" type="checkbox" switch ${sch?.enabled ? "checked" : ""}> <strong>${esc(tr("Scheduler"))}</strong> <span class="muted small">${esc(sch?.enabled ? tr("on") : tr("off — the schedule below is ignored"))}</span></label>
       ${schedTimeline(groups, sch?.enabled)}
-      <p class="legend small"><span><i class="lg k-chg"></i>Force charge</span><span><i class="lg k-dis"></i>Force discharge</span><span><i class="lg k-base"></i>Other modes</span>${def ? `<span>Otherwise: ${esc(SCHED_TEXT[def.work_mode] ?? def.work_mode)}</span>` : ""}</p>
+      <p class="legend small"><span><i class="lg k-chg"></i>${esc(tr("Force charge"))}</span><span><i class="lg k-dis"></i>${esc(tr("Force discharge"))}</span><span><i class="lg k-base"></i>${esc(tr("Other modes"))}</span>${def ? `<span>${esc(tr("Otherwise: {mode}", { mode: SCHED_TEXT[def.work_mode] ?? def.work_mode }))}</span>` : ""}</p>
     </article>
     ${def ? `<div class="groups${sch?.enabled ? "" : " master-off"}">${schedDefault(def)}</div>` : ""}
-    <h3 class="sub-head">Windows</h3>
+    <h3 class="sub-head">${esc(tr("Windows"))}</h3>
     <div class="groups${sch?.enabled ? "" : " master-off"}">${windows.map(schedGroup).join("")}
-      ${shown ? "" : `<p class="muted small" id="sched-none">No windows: the ${def ? "default mode" : "work mode"} runs all day.</p>`}
+      ${shown ? "" : `<p class="muted small" id="sched-none">${esc(def ? tr("No windows: the default mode runs all day.") : tr("No windows: the work mode runs all day."))}</p>`}
     </div>
-    <button type="button" class="ghost" data-action="sched-add" ${spare ? "" : "disabled"}>Add a window</button>
-    <p class="muted small">Windows may nest (a narrow window inside a long one) or touch, but not partly overlap. End must be after start.</p>
+    <button type="button" class="ghost" data-action="sched-add" ${spare ? "" : "disabled"}>${esc(tr("Add a window"))}</button>
+    <p class="muted small">${esc(tr("Windows may nest (a narrow window inside a long one) or touch, but not partly overlap. End must be after start."))}</p>
     ${writeNote("schedule")}
     <div class="savebar">
-      <span id="sched-dirty" class="muted small">No changes</span>
-      <button type="button" class="ghost" data-action="sched-reset">Reset</button>
-      <button data-cmd="schedule" type="submit" class="cmd" ${ok ? "" : "disabled"}>Save schedule</button>
+      <span id="sched-dirty" class="muted small">${esc(tr("No changes"))}</span>
+      <button type="button" class="ghost" data-action="sched-reset">${esc(tr("Reset"))}</button>
+      <button data-cmd="schedule" type="submit" class="cmd" ${ok ? "" : "disabled"}>${esc(tr("Save schedule"))}</button>
     </div>
   </form>`;
 }
 
 // ---------- activity (audit) ----------
 
-const ACTION_CHIPS = [["", "All"], ["allow", "Allowed"], ["drop", "Blocked"], ["hold", "Held"]];
+const ACTION_CHIPS = [["", tr("All")], ["allow", tr("Allowed")], ["drop", tr("Blocked")], ["hold", tr("Held")]];
+const ACTION_NAME = { allow: tr("allowed"), drop: tr("blocked"), hold: tr("held") };
 
 function actionKind(a) {
   return a === "drop" ? "err" : a === "allow" ? "ok" : "warn";
@@ -1997,25 +2026,25 @@ async function renderAudit() {
     const head = day !== lastDay ? `<li class="day">${esc(day)}</li>` : "";
     lastDay = day;
     const conf = a.confirmed && a.confirmed !== "not-applicable"
-      ? `<span class="chip ${a.confirmed === "yes" ? "ok" : a.confirmed === "no" ? "err" : "warn"}">${a.confirmed === "yes" ? "confirmed" : a.confirmed === "no" ? "not applied" : "unconfirmed"}</span>` : "";
+      ? `<span class="chip ${a.confirmed === "yes" ? "ok" : a.confirmed === "no" ? "err" : "warn"}">${esc(a.confirmed === "yes" ? tr("confirmed") : a.confirmed === "no" ? tr("not applied") : tr("unconfirmed"))}</span>` : "";
     return `${head}<li class="item">
       <span class="item-mark ${actionKind(a.action)}" aria-hidden="true"></span>
       <div class="item-main">
         <div class="item-title">${esc(a.summary)}</div>
-        <div class="item-meta muted small"><time datetime="${esc(a.ts)}" title="${esc(fmtTime(a.ts))}">${fmtAgo(a.ts)}</time> · ${esc(a.source)}${a.source_role ? " (" + esc(fmtRole(a.source_role)) + ")" : ""} · <span class="chip ${actionKind(a.action)}">${esc(a.action)}</span> ${conf}</div>
+        <div class="item-meta muted small"><time datetime="${esc(a.ts)}" title="${esc(fmtTime(a.ts))}">${fmtAgo(a.ts)}</time> · ${esc(a.source)}${a.source_role ? " (" + esc(fmtRole(a.source_role)) + ")" : ""} · <span class="chip ${actionKind(a.action)}">${esc(ACTION_NAME[a.action] ?? a.action)}</span> ${conf}</div>
       </div>
     </li>`;
   }).join("");
   return `
-  ${pageHead("Activity", "Every command sent to the inverter and every cloud message allowed or blocked, newest first.")}
+  ${pageHead(tr("Activity"), esc(tr("Every command sent to the inverter and every cloud message allowed or blocked, newest first.")))}
   <form id="audit-form" class="filterbar" role="search">
-    <div class="chips" role="group" aria-label="Filter by action">
-      ${ACTION_CHIPS.map(([v, l]) => `<button type="submit" name="action" value="${v}" class="chipbtn" aria-pressed="${f.action === v}">${l}</button>`).join("")}
+    <div class="chips" role="group" aria-label="${esc(tr("Filter by action"))}">
+      ${ACTION_CHIPS.map(([v, l]) => `<button type="submit" name="action" value="${v}" class="chipbtn" aria-pressed="${f.action === v}">${esc(l)}</button>`).join("")}
     </div>
-    <label class="search"><span class="sr-only">Source</span><input type="text" name="source" value="${esc(f.source)}" placeholder="Filter by source (token name or cloud)"></label>
+    <label class="search"><span class="sr-only">${esc(tr("Source"))}</span><input type="text" name="source" value="${esc(f.source)}" placeholder="${esc(tr("Filter by source (token name or cloud)"))}"></label>
   </form>
-  <ul class="list">${items || `<li class="empty muted">No activity${f.source || f.action ? " for this filter" : ""}.</li>`}</ul>
-  ${S.audit.exhausted ? "" : `<button type="button" class="ghost wide" data-action="audit-more">Load older</button>`}`;
+  <ul class="list">${items || `<li class="empty muted">${esc(f.source || f.action ? tr("No activity for this filter.") : tr("No activity."))}</li>`}</ul>
+  ${S.audit.exhausted ? "" : `<button type="button" class="ghost wide" data-action="audit-more">${esc(tr("Load older"))}</button>`}`;
 }
 
 // ---------- more (hub) ----------
@@ -2024,21 +2053,21 @@ async function renderMore() {
   if (!(await loadState())) return null;
   const id = S.state.identity ?? {};
   const devSub = id.model
-    ? `${esc(id.model)} · fw ${esc(id.firmware?.master ?? "?")} · ${id.verified_profile ? "verified" : "unverified model"}`
-    : "not identified yet";
+    ? `${esc(id.model)} · fw ${esc(id.firmware?.master ?? "?")} · ${esc(id.verified_profile ? tr("verified") : tr("unverified model"))}`
+    : esc(tr("not identified yet"));
   const link = (route, title, sub, ico) => `<li><a class="hub-link" href="#/${route}">
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ico}</svg>
-      <span><span class="hub-title">${title}</span><span class="hub-sub muted small">${sub}</span></span>
+      <span><span class="hub-title">${esc(title)}</span><span class="hub-sub muted small">${sub}</span></span>
       <svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></a></li>`;
   return `
-  ${pageHead("More")}
+  ${pageHead(tr("More"))}
   <ul class="hub">
-    ${link("device", "Device", devSub, '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6"/>')}
-    ${link("cloud", "Cloud & maintenance", "cloud forwarding: " + esc((S.forwardMode?.mode ?? "—").replace("_", " ")), '<path d="M7 18a4 4 0 0 1-.5-8 6 6 0 0 1 11.5 1.5A3.5 3.5 0 0 1 17.5 18z"/>')}
-    ${link("setup", "Setup", "checks, battery capacity, cloud and access choices", '<path d="m5 12 4 4 10-10"/>')}
-    ${link("settings", "Settings", "access tokens, diagnostics, server", '<circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>')}
-    ${link("report", "Report a problem", "one file for the developers, plus a prefilled issue", '<path d="M12 3 2 21h20zM12 9v5M12 17.5v.5"/>')}
-    ${link("messages", "Frame messages", "the raw message log (diagnostics)", '<path d="M4 6h16M4 12h16M4 18h10"/>')}
+    ${link("device", tr("Device"), devSub, '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6"/>')}
+    ${link("cloud", tr("Cloud & maintenance"), esc(tr("cloud forwarding: {mode}", { mode: FORWARD_NAME()[S.forwardMode?.mode] ?? "—" }))), '<path d="M7 18a4 4 0 0 1-.5-8 6 6 0 0 1 11.5 1.5A3.5 3.5 0 0 1 17.5 18z"/>')}
+    ${link("setup", tr("Setup"), esc(tr("checks, battery capacity, cloud and access choices")), '<path d="m5 12 4 4 10-10"/>')}
+    ${link("settings", tr("Settings"), esc(tr("language, access tokens, notifications, tuning, diagnostics")), '<circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>')}
+    ${link("report", tr("Report a problem"), esc(tr("one file for the developers, plus a prefilled issue")), '<path d="M12 3 2 21h20zM12 9v5M12 17.5v.5"/>')}
+    ${link("messages", tr("Frame messages"), esc(tr("the raw message log (diagnostics)")), '<path d="M4 6h16M4 12h16M4 18h10"/>')}
   </ul>`;
 }
 
@@ -2048,11 +2077,11 @@ async function renderMore() {
 function msgStatus(m) {
   const r = m.reason ?? "";
   let txt = "", cls = "";
-  if (m.decision === "dropped") [txt, cls] = ["blocked", "err"];
-  else if (m.decision === "injected") txt = "sent by the app" + (m.origin ? ` (${m.origin})` : "");
-  else if (m.decision === "residue") [txt, cls] = ["partial frame", "warn"];
-  else if (r.includes("kept from the cloud")) txt = "kept from the cloud";
-  else if (r.startsWith("mode:telemetry_only read:")) [txt, cls] = ["relayed (read-only)", "ok"];
+  if (m.decision === "dropped") [txt, cls] = [tr("blocked"), "err"];
+  else if (m.decision === "injected") txt = tr("sent by the app") + (m.origin ? ` (${m.origin})` : "");
+  else if (m.decision === "residue") [txt, cls] = [tr("partial frame"), "warn"];
+  else if (r.includes("kept from the cloud")) txt = tr("kept from the cloud");
+  else if (r.startsWith("mode:telemetry_only read:")) [txt, cls] = [tr("relayed (read-only)"), "ok"];
   if (!txt) return "";
   return `<span class="chip ${cls}"${r ? ` title="${esc(r)}"` : ""}>${esc(txt)}</span>`;
 }
@@ -2066,11 +2095,11 @@ function paintScan(st) {
   const el = byId("scan-status");
   if (!el || !st) return;
   if (st.state === "running") {
-    el.textContent = `Scanning… ${st.blocks_done} of ${st.blocks_total} reads`;
+    el.textContent = tr("Scanning… {done} of {total} reads", { done: st.blocks_done, total: st.blocks_total });
   } else if (st.state === "done") {
-    el.innerHTML = `Done: ${st.blocks_ok} of ${st.blocks_total} reads answered` +
-      (st.blocks_failed ? `, ${st.blocks_failed} refused by the inverter (expected for registers it does not have)` : "") +
-      `. <a href="#/report">Report it</a> to share the result.`;
+    el.innerHTML = esc(tr("Done: {ok} of {total} reads answered", { ok: st.blocks_ok, total: st.blocks_total })) +
+      (st.blocks_failed ? esc(tr(", {n} refused by the inverter (expected for registers it does not have)", { n: st.blocks_failed })) : "") +
+      `. <a href="#/report">${esc(tr("Report it"))}</a> ${esc(tr("to share the result."))}`;
   } else {
     el.textContent = "";
   }
@@ -2097,21 +2126,28 @@ async function scanStart() {
 
 // ---------- setup wizard (F12) ----------
 
-const CHECK_CHIP = { ok: ["ok", "ok"], warn: ["check", "warn"], fail: ["needs attention", "err"], pending: ["waiting", "muted"] };
+const CHECK_CHIP = { ok: [tr("ok"), "ok"], warn: [tr("check"), "warn"], fail: [tr("needs attention"), "err"], pending: [tr("waiting"), "muted"] };
+
+// CHECK_TITLE: the setup checks' titles by id (their details come from
+// the server, in English)
+const CHECK_TITLE = {
+  inverter_connected: tr("Inverter connected"), identified: tr("Inverter identified"),
+  verified: tr("Settings support"), clock: tr("Clocks agree"), battery_capacity: tr("Battery capacity"),
+};
 
 const FORWARD_CHOICES = [
-  ["off", "Nothing", "The cloud and the FoxESS app see nothing. Recommended to start."],
-  ["telemetry_only", "Readings only", "The FoxESS app keeps showing data; the cloud cannot change anything."],
-  ["full", "Everything, as before", "The cloud can change settings too. A firmware update still needs a maintenance window."],
+  ["off", tr("Nothing"), tr("The cloud and the FoxESS app see nothing. Recommended to start.")],
+  ["telemetry_only", tr("Readings only"), tr("The FoxESS app keeps showing data; the cloud cannot change anything.")],
+  ["full", tr("Everything, as before"), tr("The cloud can change settings too. A firmware update still needs a maintenance window.")],
 ];
 
 async function renderSetup() {
   const [sr, gr] = await Promise.all([apiFetch("/setup"), apiFetch("/settings")]);
-  if (sr.status === 401) { gate("the token was rejected — sign in again"); return null; }
+  if (sr.status === 401) { gate(tr("the token was rejected — sign in again")); return null; }
   if (!sr.ok) {
     const p = await problemOf(sr);
-    return `${pageHead("Setup")}<article class="panel"><p class="muted">${p.code === "insufficient_role"
-      ? `Setup needs an installer token (yours: ${esc(p.token_role)}).` : "Setup is not available on this server."}</p></article>`;
+    return `${pageHead(tr("Setup"))}<article class="panel"><p class="muted">${esc(p.code === "insufficient_role"
+      ? tr("Setup needs an installer token (yours: {role}).", { role: p.token_role }) : tr("Setup is not available on this server."))}</p></article>`;
   }
   const s = await sr.json();
   const set = gr.ok ? await gr.json() : { settings: [] };
@@ -2125,7 +2161,7 @@ async function renderSetup() {
     const [txt, cls] = CHECK_CHIP[c.status] ?? [c.status, "muted"];
     return `<li class="item">
       <div class="item-main">
-        <div class="item-title">${esc(c.title)} <span class="chip ${cls}">${esc(txt)}</span></div>
+        <div class="item-title">${esc(CHECK_TITLE[c.id] ?? c.title)} <span class="chip ${cls}">${esc(txt)}</span></div>
         <div class="item-meta muted small">${esc(c.detail)}</div>
         ${c.fix && c.status !== "ok" ? `<p class="small">${esc(c.fix)}</p>` : ""}
       </div></li>`;
@@ -2134,61 +2170,57 @@ async function renderSetup() {
   const allOk = s.checks.every((c) => c.status !== "fail");
 
   return `<div class="setup">
-  ${pageHead("Setup", s.completed ? "Setup was completed; you can change anything here at any time." : "A few checks and choices to get foxesslocal running. Everything can be changed later.")}
+  ${pageHead(tr("Setup"), esc(s.completed ? tr("Setup was completed; you can change anything here at any time.") : tr("A few checks and choices to get foxesslocal running. Everything can be changed later.")))}
   <article class="panel">
-    <h3>1 · Checks</h3>
+    <h3>1 · ${esc(tr("Checks"))}</h3>
     <ul class="list compact">${checks}</ul>
-    <button type="button" class="ghost" data-action="setup-refresh">Check again</button>
+    <button type="button" class="ghost" data-action="setup-refresh">${esc(tr("Check again"))}</button>
   </article>
   <article class="panel">
-    <h3>2 · Battery capacity</h3>
-    <p class="muted small">The battery's usable energy, used to show how much is stored.
-      It is the number of battery modules times the energy of one module${modules
-        ? `: the inverter reports <strong>${modules}</strong> modules — for EQ4800 modules (4.66 kWh each) that is ${(modules * 4.66).toFixed(2)} kWh.`
-        : " (an EQ4800 module is 4.66 kWh). The module count shows here once the inverter has sent its battery details."}</p>
-    <label>Usable capacity (kWh)<input type="number" id="setup-capacity" min="0.1" max="200" step="0.01" value="${capWh ? (capWh / 1000).toFixed(2) : ""}"></label>
-    <p class="muted small">${capWh ? `Currently ${(capWh / 1000).toFixed(2)} kWh (${esc(SOURCE_TEXT[src("battery.capacity_wh")] ?? "")}).` : "Not set yet."}</p>
-    <button type="button" class="cmd" data-action="setup-capacity">Save capacity</button>
+    <h3>2 · ${esc(tr("Battery capacity"))}</h3>
+    <p class="muted small">${esc(tr("The battery's usable energy, used to show how much is stored. It is the number of battery modules times the energy of one module."))} ${esc(modules
+        ? tr("The inverter reports {n} modules — for EQ4800 modules (4.66 kWh each) that is {kwh} kWh.", { n: modules, kwh: (modules * 4.66).toFixed(2) })
+        : tr("An EQ4800 module is 4.66 kWh. The module count shows here once the inverter has sent its battery details."))}</p>
+    <label>${esc(tr("Usable capacity (kWh)"))}<input type="number" id="setup-capacity" min="0.1" max="200" step="0.01" value="${capWh ? (capWh / 1000).toFixed(2) : ""}"></label>
+    <p class="muted small">${esc(capWh ? tr("Currently {kwh} kWh ({source}).", { kwh: (capWh / 1000).toFixed(2), source: SOURCE_TEXT[src("battery.capacity_wh")] ?? "" }) : tr("Not set yet."))}</p>
+    <button type="button" class="cmd" data-action="setup-capacity">${esc(tr("Save capacity"))}</button>
   </article>
   <article class="panel">
-    <h3>3 · Cloud forwarding</h3>
-    <p class="muted small">What reaches the FoxESS cloud and the FoxESS app, and whether they can change anything.
-      The same setting as More → Cloud &amp; maintenance; a maintenance window overrides it for a while.</p>
+    <h3>3 · ${esc(tr("Cloud forwarding"))}</h3>
+    <p class="muted small">${esc(tr("What reaches the FoxESS cloud and the FoxESS app, and whether they can change anything. The same setting as More → Cloud & maintenance; a maintenance window overrides it for a while."))}</p>
     <div class="radio-list">${FORWARD_CHOICES.map(([m, t, d]) => `
       <label class="radio-row"><input type="radio" name="setup-forward" value="${m}" ${fwd === m ? "checked" : ""}>
         <span><strong>${esc(t)}</strong><span class="desc muted small">${esc(d)}</span></span></label>`).join("")}
     </div>
-    <button type="button" class="cmd" data-action="setup-forward">Save cloud choice</button>
+    <button type="button" class="cmd" data-action="setup-forward">${esc(tr("Save cloud choice"))}</button>
   </article>
   <article class="panel">
-    <h3>4 · Visitors without a token</h3>
-    <p class="muted small">Separate from cloud forwarding: this is about people on your own network opening this web page.</p>
+    <h3>4 · ${esc(tr("Visitors without a token"))}</h3>
+    <p class="muted small">${esc(tr("Separate from cloud forwarding: this is about people on your own network opening this web page."))}</p>
     <label class="radio-row"><input type="checkbox" id="setup-public" ${val("access.public_read_only") ? "checked" : ""}>
-      <span>Can see the dashboard (read only)</span></label>
+      <span>${esc(tr("Can see the dashboard (read only)"))}</span></label>
     <label class="radio-row"><input type="checkbox" id="setup-public-all" ${val("access.public_all_pages") ? "checked" : ""}>
-      <span>…and every other page (still read only)</span></label>
-    <p class="muted small">Anyone on your network can open this page. Changes always need a token.</p>
-    <button type="button" class="cmd" data-action="setup-access">Save access</button>
+      <span>${esc(tr("…and every other page (still read only)"))}</span></label>
+    <p class="muted small">${esc(tr("Anyone on your network can open this page. Changes always need a token."))}</p>
+    <button type="button" class="cmd" data-action="setup-access">${esc(tr("Save access"))}</button>
   </article>
   <article class="panel">
-    <h3>5 · Done</h3>
-    <p class="muted small">Each section above takes effect as soon as you save it; this changes no setting.
-      Marking setup as done only stops this page opening by itself when an installer signs in —
-      it stays under More → Setup.
-      ${allOk ? "Everything needed is in place." : "Some checks still need attention: you can mark it done now and come back."}</p>
-    ${s.completed ? `<p class="small">Setup is marked as done.</p>`
-      : `<button type="button" class="cmd" data-action="setup-finish">Mark setup as done</button>`}
+    <h3>5 · ${esc(tr("Done"))}</h3>
+    <p class="muted small">${esc(tr("Each section above takes effect as soon as you save it; this changes no setting. Marking setup as done only stops this page opening by itself when an installer signs in — it stays under More → Setup."))}
+      ${esc(allOk ? tr("Everything needed is in place.") : tr("Some checks still need attention: you can mark it done now and come back."))}</p>
+    ${s.completed ? `<p class="small">${esc(tr("Setup is marked as done."))}</p>`
+      : `<button type="button" class="cmd" data-action="setup-finish">${esc(tr("Mark setup as done"))}</button>`}
   </article></div>`;
 }
 
-const SOURCE_TEXT = { ui: "set here", config: "from the config file", default: "built-in default" };
+const SOURCE_TEXT = { ui: tr("set here"), config: tr("from the config file"), default: tr("built-in default") };
 
 // setupSave sends one setup change and reports the outcome.
 async function setupSave(path, method, body, okMsg) {
   const r = await apiFetch(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok) {
     const p = await problemOf(r);
-    toast("not saved", "err", (CODE_TEXT[p.code] ?? (() => p.detail ?? p.title))(p));
+    toast(tr("not saved"), "err", (CODE_TEXT[p.code] ?? (() => p.detail ?? p.title))(p));
     return false;
   }
   toast(okMsg);
@@ -2202,14 +2234,14 @@ async function setupAction(action) {
       break;
     case "setup-capacity": {
       const kwh = parseFloat(byId("setup-capacity").value);
-      if (!(kwh > 0)) { toast("enter the usable capacity in kWh", "warn"); return; }
-      if (await setupSave("/settings", "PUT", { "battery.capacity_wh": Math.round(kwh * 1000) }, "battery capacity saved")) render();
+      if (!(kwh > 0)) { toast(tr("enter the usable capacity in kWh"), "warn"); return; }
+      if (await setupSave("/settings", "PUT", { "battery.capacity_wh": Math.round(kwh * 1000) }, tr("battery capacity saved"))) render();
       break;
     }
     case "setup-forward": {
       const m = document.querySelector('input[name="setup-forward"]:checked')?.value;
-      if (!m) { toast("choose what the cloud may receive", "warn"); return; }
-      if (await setupSave("/forward-mode", "PUT", { mode: m }, "cloud choice saved — the inverter reconnects under it within seconds")) {
+      if (!m) { toast(tr("choose what the cloud may receive"), "warn"); return; }
+      if (await setupSave("/forward-mode", "PUT", { mode: m }, tr("cloud choice saved — the inverter reconnects under it within seconds"))) {
         S.forwardMode = { mode: m };
         renderForwardBadge();
         render();
@@ -2219,7 +2251,7 @@ async function setupAction(action) {
     case "setup-access": {
       const pub = byId("setup-public").checked;
       const all = pub && byId("setup-public-all").checked;
-      if (await setupSave("/settings", "PUT", { "access.public_read_only": pub, "access.public_all_pages": all }, "access saved")) {
+      if (await setupSave("/settings", "PUT", { "access.public_read_only": pub, "access.public_all_pages": all }, tr("access saved"))) {
         S.cfg = null;
         refreshMeta();
         render();
@@ -2228,8 +2260,8 @@ async function setupAction(action) {
     }
     case "setup-finish": {
       const r = await apiFetch("/setup/complete", { method: "POST" });
-      if (!r.ok) { toast("could not record setup", "err"); return; }
-      toast("setup complete");
+      if (!r.ok) { toast(tr("could not record setup"), "err"); return; }
+      toast(tr("setup complete"));
       location.hash = "#/dashboard";
       break;
     }
@@ -2239,8 +2271,8 @@ async function setupAction(action) {
 // ---------- device ----------
 
 const LEVEL_TEXT = {
-  exact: ["verified", "ok"], compatible: ["compatible", "warn"], tentative: ["tentative", "warn"],
-  pending: ["not read yet", "muted"], unknown: ["not trusted", "err"],
+  exact: [tr("verified"), "ok"], compatible: [tr("compatible"), "warn"], tentative: [tr("tentative"), "warn"],
+  pending: [tr("not read yet"), "muted"], unknown: [tr("not trusted"), "err"],
 };
 
 async function renderDevice() {
@@ -2252,39 +2284,39 @@ async function renderDevice() {
     if (r.ok) ov = await r.json();
   } catch { /* shown without the grant state */ }
   const fw = id.firmware ?? {};
-  const v = (s) => (s ? esc(s) : "not seen yet");
+  const v = (s) => esc(s || tr("not seen yet"));
   const status = id.verified_profile
-    ? `<p class="note ok">Verified model and firmware (<strong>${esc(id.verified_profile)}</strong>): every setting here has been confirmed on this exact inverter.</p>`
-    : `<p class="note warn">This model or firmware is not verified yet. Monitoring works; settings show whether they are available, untested or not mapped.</p>`;
+    ? `<p class="note ok">${esc(tr("Verified model and firmware ({profile}): every setting here has been confirmed on this exact inverter.", { profile: id.verified_profile }))}</p>`
+    : `<p class="note warn">${esc(tr("This model or firmware is not verified yet. Monitoring works; settings show whether they are available, untested or not mapped."))}</p>`;
   const rows = Object.keys(COMPAT_LABEL).filter((k) => id.compatibility?.[k]).map((k) => {
     const [txt, cls] = LEVEL_TEXT[id.compatibility[k]] ?? [id.compatibility[k], "muted"];
     return `<div><dt>${esc(COMPAT_LABEL[k])}</dt><dd><span class="chip ${cls}">${esc(txt)}</span></dd></div>`;
   }).join("");
   return `
-  ${pageHead("Device")}
+  ${pageHead(tr("Device"))}
   <section class="stack">
     <article class="panel">
-      <h3>Inverter</h3>
+      <h3>${esc(tr("Inverter"))}</h3>
       <dl class="kv">
-        <div><dt>Model</dt><dd>${v(id.model)}</dd></div>
-        <div><dt>Serial</dt><dd class="num">${v(id.sn)}</dd></div>
-        <div><dt>Firmware</dt><dd class="num">${v(fw.master)} / ${v(fw.slave)} / ${v(fw.manager)}</dd></div>
+        <div><dt>${esc(tr("Model"))}</dt><dd>${v(id.model)}</dd></div>
+        <div><dt>${esc(tr("Serial"))}</dt><dd class="num">${v(id.sn)}</dd></div>
+        <div><dt>${esc(tr("Firmware"))}</dt><dd class="num">${v(fw.master)} / ${v(fw.slave)} / ${v(fw.manager)}</dd></div>
       </dl>
       ${status}
     </article>
     <article class="panel">
-      <h3>Confidence per feature</h3>
-      <dl class="kv">${rows || `<div><dt>—</dt><dd class="muted">not evaluated yet</dd></div>`}</dl>
-      <p class="muted small">Re-checked on every reading. Details: <a href="${API}/compatibility" target="_blank" rel="noopener">compatibility report</a>.</p>
+      <h3>${esc(tr("Confidence per feature"))}</h3>
+      <dl class="kv">${rows || `<div><dt>—</dt><dd class="muted">${esc(tr("not evaluated yet"))}</dd></div>`}</dl>
+      <p class="muted small">${esc(tr("Re-checked on every reading."))} <a href="${API}/compatibility" target="_blank" rel="noopener">${esc(tr("Compatibility report"))}</a></p>
     </article>
     ${id.verified_profile ? "" : `<article class="panel">${writeOverrideSection(ov)}</article>`}
     <article class="panel">
-      <h3>Register scan</h3>
-      <p class="muted small">${id.verified_profile
-        ? "Reads every register the known maps for this model name, so a developer can check them against the inverter."
-        : "This model is not verified yet. A scan reads every register the community maps for it name — read-only, nothing is changed — so a developer can check which map fits and work towards full support."}
-        It takes about ten seconds; live values keep updating. The result joins your next <a href="#/report">problem report</a>. Installer role.</p>
-      <button type="button" class="cmd" data-action="scan-start">Scan registers</button>
+      <h3>${esc(tr("Register scan"))}</h3>
+      <p class="muted small">${esc(id.verified_profile
+        ? tr("Reads every register that the known maps list for this model, so a developer can check them against the inverter.")
+        : tr("This model is not verified yet. A scan reads every register that the community maps list for it — read-only, nothing is changed — so a developer can check which map fits and work towards full support."))}
+        ${esc(tr("It takes about ten seconds; live values keep updating. The result joins your next problem report (More → Report a problem). Installer role."))}</p>
+      <button type="button" class="cmd" data-action="scan-start">${esc(tr("Scan registers"))}</button>
       <p id="scan-status" class="small" aria-live="polite"></p>
     </article>
   </section>`;
@@ -2293,35 +2325,35 @@ async function renderDevice() {
 // writeOverrideSection: the installer's grant of untested writes for this
 // exact model and firmware (C-008). Shown only for an unverified device.
 function writeOverrideSection(ov) {
-  if (!ov) return "<h3>Write access</h3><p class=\"muted small\">Not available.</p>";
-  const head = `<h3>Write access</h3>`;
+  if (!ov) return `<h3>${esc(tr("Write access"))}</h3><p class="muted small">${esc(tr("Not available."))}</p>`;
+  const head = `<h3>${esc(tr("Write access"))}</h3>`;
   if (ov.granted) {
-    return `${head}<p class="note warn"><strong>Untested writes are enabled</strong> for ${esc(ov.device.model)} fw ${esc(ov.device.firmware.master)} (by ${esc(ov.grant?.by ?? "?")}).</p>
-      <button type="button" class="ghost" data-cmd="write-override" data-confirm="writeOverrideRevoke" hx-delete="${API}/write-override" hx-swap="none">Disable untested writes</button>`;
+    return `${head}<p class="note warn">${esc(tr("Untested writes are enabled for {model} fw {fw} (by {by}).", { model: ov.device.model, fw: ov.device.firmware.master, by: ov.grant?.by ?? "?" }))}</p>
+      <button type="button" class="ghost" data-cmd="write-override" data-confirm="writeOverrideRevoke" hx-delete="${API}/write-override" hx-swap="none">${esc(tr("Disable untested writes"))}</button>`;
   }
-  return `${head}<p class="small">Writes are limited to settings verified on this model and firmware.</p>
-    <p class="note warn">An installer can enable <strong>untested</strong> writes for this exact inverter. They may misconfigure it.</p>
-    <button type="button" class="cmd danger" data-cmd="write-override" data-confirm="writeOverride" hx-put="${API}/write-override" hx-encoding="json" hx-vals='{"acknowledge_risk":true}' hx-swap="none">Enable untested writes…</button>`;
+  return `${head}<p class="small">${esc(tr("Writes are limited to settings verified on this model and firmware."))}</p>
+    <p class="note warn">${esc(tr("An installer can enable untested writes for this exact inverter. They may misconfigure it."))}</p>
+    <button type="button" class="cmd danger" data-cmd="write-override" data-confirm="writeOverride" hx-put="${API}/write-override" hx-encoding="json" hx-vals='{"acknowledge_risk":true}' hx-swap="none">${esc(tr("Enable untested writes…"))}</button>`;
 }
 
 // feature labels (device page)
 const COMPAT_LABEL = {
-  live_values: "Live values", settings_read: "Settings read", work_mode: "Work mode",
-  power_limits: "Grid power limits", current_limits: "Grid current limits",
-  meter_compensation: "Meter compensation", schedule: "Schedule",
+  live_values: tr("Live values"), settings_read: tr("Settings read"), work_mode: tr("Work mode"),
+  power_limits: tr("Grid power limits"), current_limits: tr("Grid current limits"),
+  meter_compensation: tr("Meter compensation"), schedule: tr("Schedule"),
 };
 
 // ---------- cloud & maintenance ----------
 
 const FORWARD_TEXT = {
-  off: ["Off", "The inverter's cloud channel is blocked at the gate. The FoxESS app shows no live data; local monitoring and control continue."],
-  telemetry_only: ["Telemetry only", "The cloud receives the inverter's data but cannot change anything."],
-  full: ["Full", "The cloud has its normal access, including settings. A firmware update needs a maintenance window: anything the cloud is not known to send is held until one is open."],
+  off: [tr("Off"), tr("The inverter's cloud channel is blocked at the gate. The FoxESS app shows no live data; local monitoring and control continue.")],
+  telemetry_only: [tr("Telemetry only"), tr("The cloud receives the inverter's data but cannot change anything.")],
+  full: [tr("Full"), tr("The cloud has its normal access, including settings. A firmware update needs a maintenance window: anything the cloud is not known to send is held until one is open.")],
 };
 
 async function fetchMaintenance() {
   const resp = await apiFetch("/maintenance");
-  if (resp.status === 401) { gate("the token was rejected — sign in again"); return null; }
+  if (resp.status === 401) { gate(tr("the token was rejected — sign in again")); return null; }
   if (!resp.ok) {
     const p = await problemOf(resp);
     return { error: p };
@@ -2337,40 +2369,40 @@ async function renderCloud() {
   const choice = (k) => {
     const [t, d] = FORWARD_TEXT[k];
     return `<label class="choice radio"><input type="radio" name="mode" value="${k}" ${k === mode ? "checked" : ""}>
-      <span class="choice-title">${t}${k === mode ? ` <span class="chip">current</span>` : ""}</span><span class="choice-desc">${d}</span></label>`;
+      <span class="choice-title">${esc(t)}${k === mode ? ` <span class="chip">${esc(tr("current"))}</span>` : ""}</span><span class="choice-desc">${esc(d)}</span></label>`;
   };
   let maint;
   if (m.error) {
     maint = `<p class="error">${esc(m.error.code)}: ${esc(m.error.detail ?? m.error.title)}</p>`;
   } else if (m.active) {
-    maint = `<div class="countdown"><span id="maint-remaining" class="hero num" data-expires="${esc(m.expires_at)}">${Math.floor(m.remaining_s / 60)}:${String(m.remaining_s % 60).padStart(2, "0")}</span><span class="muted">remaining · until ${fmtTime(m.expires_at)}</span></div>
-      <p class="note warn">The cloud has unrestricted access until then (including firmware). "${esc((m.overridden_from ?? "").replace("_", " "))}" is restored at the deadline.</p>
-      ${m.capturing ? `<p class="note">Recording this window's traffic (see Captures below).</p>` : ""}
-      <button type="button" class="cmd danger" data-cmd="maint-close" data-confirm="maintClose" hx-delete="${API}/maintenance" hx-swap="none">Close window now</button>`;
+    maint = `<div class="countdown"><span id="maint-remaining" class="hero num" data-expires="${esc(m.expires_at)}">${Math.floor(m.remaining_s / 60)}:${String(m.remaining_s % 60).padStart(2, "0")}</span><span class="muted">${esc(tr("remaining · until {time}", { time: fmtTime(m.expires_at) }))}</span></div>
+      <p class="note warn">${esc(tr("The cloud has unrestricted access until then (including firmware). \"{mode}\" is restored at the deadline.", { mode: FORWARD_NAME()[m.overridden_from] ?? m.overridden_from ?? "" }))}</p>
+      ${m.capturing ? `<p class="note">${esc(tr("Recording this window's traffic (see Captures below)."))}</p>` : ""}
+      <button type="button" class="cmd danger" data-cmd="maint-close" data-confirm="maintClose" hx-delete="${API}/maintenance" hx-swap="none">${esc(tr("Close window now"))}</button>`;
   } else {
-    maint = `<p class="small">Temporarily give the cloud full access — for example to let the FoxESS app change a setting or install firmware. Installer role; it ends on its own and does not survive a restart.</p>
+    maint = `<p class="small">${esc(tr("Temporarily give the cloud full access — for example to let the FoxESS app change a setting or install firmware. Installer role; it ends on its own and does not survive a restart."))}</p>
     <form data-cmd="maint-open" hx-post="${API}/maintenance" hx-encoding="json" hx-swap="none">
-      <div class="chips" role="radiogroup" aria-label="Duration">
+      <div class="chips" role="radiogroup" aria-label="${esc(tr("Duration"))}">
         ${["15m", "30m", "1h", "2h", "4h"].map((d) => `<label class="chipradio"><input type="radio" name="duration" value="${d}" ${d === "30m" ? "checked" : ""}><span>${d}</span></label>`).join("")}
       </div>
-      <label class="row"><input type="checkbox" name="capture"> <span>Record the traffic <span class="muted small">— a byte-exact copy of everything in the window, e.g. a firmware update, kept until you delete it</span></span></label>
-      <button data-cmd="maint-open" type="submit" class="cmd" data-confirm="maintOpen">Open window</button>
+      <label class="row"><input type="checkbox" name="capture"> <span>${esc(tr("Record the traffic"))} <span class="muted small">${esc(tr("— a byte-exact copy of everything in the window, e.g. a firmware update, kept until you delete it"))}</span></span></label>
+      <button data-cmd="maint-open" type="submit" class="cmd" data-confirm="maintOpen">${esc(tr("Open window"))}</button>
     </form>`;
   }
   const caps = await fetchCaptures();
   return `
-  ${pageHead("Cloud & maintenance", "How much of the FoxESS cloud this inverter may talk to.")}
+  ${pageHead(tr("Cloud & maintenance"), esc(tr("How much of the FoxESS cloud this inverter may talk to.")))}
   <section class="stack">
     <article class="panel">
-      <h3>Cloud forwarding</h3>
+      <h3>${esc(tr("Cloud forwarding"))}</h3>
       <form id="forward-form" data-cmd="forward" hx-put="${API}/forward-mode" hx-encoding="json" hx-swap="none">
         <div class="choices">${["off", "telemetry_only", "full"].map(choice).join("")}</div>
-        <button data-cmd="forward" data-confirm="forward" type="submit" class="cmd">Apply</button>
+        <button data-cmd="forward" data-confirm="forward" type="submit" class="cmd">${esc(tr("Apply"))}</button>
       </form>
-      <p class="muted small">Installer role. Applies at once: the inverter's connection is restarted under the new mode (a few seconds without live data).</p>
+      <p class="muted small">${esc(tr("Installer role. Applies at once: the inverter's connection is restarted under the new mode (a few seconds without live data)."))}</p>
     </article>
     <article class="panel">
-      <div class="card-head"><h3>Maintenance window</h3><span class="chip ${m.active ? "warn" : "muted"}">${m.active ? "open" : "closed"}</span></div>
+      <div class="card-head"><h3>${esc(tr("Maintenance window"))}</h3><span class="chip ${m.active ? "warn" : "muted"}">${esc(m.active ? tr("open") : tr("closed"))}</span></div>
       ${maint}
     </article>
     ${caps === null ? "" : capturesPanel(caps)}
@@ -2390,16 +2422,16 @@ function capturesPanel(caps) {
   const rows = caps.map((c) => `<li class="item">
       <div class="item-main">
         <div class="item-title">${esc(fmtTime(c.started))}${c.stopped ? " – " + esc(fmtTime(c.stopped)) : ""}
-          ${c.active ? `<span class="chip warn">recording</span>` : ""}${c.capped ? `<span class="chip warn">size cap reached</span>` : ""}</div>
-        <div class="muted small num">${fmtSize(c.bytes)} · ${c.connections} connection${c.connections === 1 ? "" : "s"} · ${esc(c.version)}</div>
+          ${c.active ? `<span class="chip warn">${esc(tr("recording"))}</span>` : ""}${c.capped ? `<span class="chip warn">${esc(tr("size cap reached"))}</span>` : ""}</div>
+        <div class="muted small num">${fmtSize(c.bytes)} · ${esc(c.connections === 1 ? tr("1 connection") : tr("{n} connections", { n: c.connections }))} · ${esc(c.version)}</div>
       </div>
-      <button type="button" class="ghost small-btn" data-action="capture-download" data-id="${esc(c.id)}">Download</button>
-      ${c.active ? "" : `<button type="button" class="ghost small-btn danger" data-action="capture-delete" data-id="${esc(c.id)}">Delete</button>`}
+      <button type="button" class="ghost small-btn" data-action="capture-download" data-id="${esc(c.id)}">${esc(tr("Download"))}</button>
+      ${c.active ? "" : `<button type="button" class="ghost small-btn danger" data-action="capture-delete" data-id="${esc(c.id)}">${esc(tr("Delete"))}</button>`}
     </li>`).join("");
   return `<article class="panel">
-      <h3>Captures</h3>
-      <p class="small">Maintenance windows opened with "Record the traffic". Each download is the raw traffic, both directions, in prox's capture layout. It is <strong>not</strong> de-identified: it contains your inverter's serial numbers, so keep it private.</p>
-      ${caps.length ? `<ul class="list">${rows}</ul>` : `<p class="muted small">None yet.</p>`}
+      <h3>${esc(tr("Captures"))}</h3>
+      <p class="small">${esc(tr("Maintenance windows opened with \"Record the traffic\". Each download is the raw traffic, both directions, in prox's capture layout. It is not de-identified: it contains your inverter's serial numbers, so keep it private."))}</p>
+      ${caps.length ? `<ul class="list">${rows}</ul>` : `<p class="muted small">${esc(tr("None yet."))}</p>`}
     </article>`;
 }
 
@@ -2410,18 +2442,18 @@ async function captureDownload(id) {
     toast(`${p.code ?? "error"}: ${p.detail ?? p.title}`, "error");
     return;
   }
-  toast("capture saved: " + await saveBlob(resp, "foxess-capture.tar.gz"));
+  toast(tr("capture saved: {name}", { name: await saveBlob(resp, "foxess-capture.tar.gz") }));
 }
 
 async function captureDelete(id) {
-  if (!(await confirmDlg("delete this capture?", "The recorded traffic is removed from this machine. Download it first if you want to keep it.", "delete"))) return;
+  if (!(await confirmDlg(tr("delete this capture?"), tr("The recorded traffic is removed from this machine. Download it first if you want to keep it."), tr("delete")))) return;
   const resp = await apiFetch("/captures/" + encodeURIComponent(id), { method: "DELETE" });
   if (!resp.ok) {
     const p = await problemOf(resp);
     toast(`${p.code ?? "error"}: ${p.detail ?? p.title}`, "error");
     return;
   }
-  toast("capture deleted");
+  toast(tr("capture deleted"));
   render();
 }
 
@@ -2450,32 +2482,32 @@ async function renderMessages() {
     lastDay = day;
     const up = m.dir === "inverter-to-cloud";
     return `${head}<li class="item">
-      <span class="dir ${up ? "up" : "down"}" title="${up ? "inverter → cloud" : "cloud → inverter"}">${up ? "↑" : "↓"}</span>
+      <span class="dir ${up ? "up" : "down"}" title="${esc(up ? tr("inverter → cloud") : tr("cloud → inverter"))}">${up ? "↑" : "↓"}</span>
       <div class="item-main">
         <div class="item-title"><span class="mono">${esc(m.frame)}</span> <span class="muted small num">${fmtBytes(m.length)}</span> ${msgStatus(m)}</div>
         <div class="item-meta muted small"><time datetime="${esc(m.ts)}">${fmtTime(m.ts)}</time>${m.summary ? " · " + esc(m.summary) : ""}</div>
-        ${m.hex ? `<details class="hex"><summary>raw bytes</summary><pre>${esc(m.hex)}</pre></details>` : ""}
+        ${m.hex ? `<details class="hex"><summary>${esc(tr("raw bytes"))}</summary><pre>${esc(m.hex)}</pre></details>` : ""}
       </div>
     </li>`;
   }).join("");
   return `
-  ${pageHead("Frame messages", "The raw message log between the inverter and the cloud channel (diagnostics).")}
+  ${pageHead(tr("Frame messages"), esc(tr("The raw message log between the inverter and the cloud channel (diagnostics).")))}
   <form class="filterbar" id="messages-form">
     <div class="fields two">
-      <label>Direction<select name="dir">
-        <option value="">All</option>
-        <option value="inverter-to-cloud" ${f.dir === "inverter-to-cloud" ? "selected" : ""}>Inverter → cloud</option>
-        <option value="cloud-to-inverter" ${f.dir === "cloud-to-inverter" ? "selected" : ""}>Cloud → inverter</option>
+      <label>${esc(tr("Direction"))}<select name="dir">
+        <option value="">${esc(tr("All"))}</option>
+        <option value="inverter-to-cloud" ${f.dir === "inverter-to-cloud" ? "selected" : ""}>${esc(tr("Inverter → cloud"))}</option>
+        <option value="cloud-to-inverter" ${f.dir === "cloud-to-inverter" ? "selected" : ""}>${esc(tr("Cloud → inverter"))}</option>
       </select></label>
-      <label>Frame type<select name="frame">
-        <option value="">All</option>
+      <label>${esc(tr("Frame type"))}<select name="frame">
+        <option value="">${esc(tr("All"))}</option>
         ${FRAME_TYPES.map((fr) => `<option ${f.frame === fr ? "selected" : ""}>${fr}</option>`).join("")}
       </select></label>
     </div>
-    <button type="submit" class="ghost">Filter</button>
+    <button type="submit" class="ghost">${esc(tr("Filter"))}</button>
   </form>
-  <ul class="list">${items || `<li class="empty muted">No frames${f.dir || f.frame ? " for this filter" : ""}.</li>`}</ul>
-  ${S.messages.exhausted ? "" : `<button type="button" class="ghost wide" data-action="messages-more">Load older</button>`}`;
+  <ul class="list">${items || `<li class="empty muted">${esc(f.dir || f.frame ? tr("No frames for this filter.") : tr("No frames."))}</li>`}</ul>
+  ${S.messages.exhausted ? "" : `<button type="button" class="ghost wide" data-action="messages-more">${esc(tr("Load older"))}</button>`}`;
 }
 
 // ---------- settings ----------
@@ -2484,7 +2516,7 @@ async function renderSettings() {
   let cfg = S.cfg;
   if (!cfg) {
     const r = await apiFetch("/config");
-    if (r.status === 401) { gate("the token was rejected — sign in again"); return null; }
+    if (r.status === 401) { gate(tr("the token was rejected — sign in again")); return null; }
     if (r.ok) cfg = await r.json();
     S.cfg = cfg;
   }
@@ -2492,7 +2524,7 @@ async function renderSettings() {
   let denied = null;
   {
     const r = await apiFetch("/config/tokens");
-    if (r.status === 401 && S.token) { gate("the token was rejected — sign in again"); return null; }
+    if (r.status === 401 && S.token) { gate(tr("the token was rejected — sign in again")); return null; }
     if (r.ok) tokens = await r.json();
     else denied = await problemOf(r);
   }
@@ -2501,26 +2533,26 @@ async function renderSettings() {
       <li class="item">
         <div class="item-main">
           <div class="item-title">${esc(tk.name)} <span class="chip">${esc(tk.role)}</span></div>
-          <div class="item-meta muted small">created ${fmtTime(tk.created)} · last used ${tk.last_used ? fmtAgo(tk.last_used) : "never"}</div>
+          <div class="item-meta muted small">${esc(tr("created {time}", { time: fmtTime(tk.created) }))} · ${esc(tr("last used {when}", { when: tk.last_used ? fmtAgo(tk.last_used) : tr("never") }))}</div>
         </div>
         <button type="button" class="ghost small-btn danger-text" data-cmd="token-revoke" data-name="${esc(tk.name)}" data-role="${esc(tk.role)}" data-confirm="tokenRevoke"
-          hx-delete="${API}/config/tokens/${encodeURIComponent(tk.id)}" hx-swap="none">Revoke</button>
-      </li>`).join("") || `<li class="empty muted">No tokens.</li>`}</ul>
+          hx-delete="${API}/config/tokens/${encodeURIComponent(tk.id)}" hx-swap="none">${esc(tr("Revoke"))}</button>
+      </li>`).join("") || `<li class="empty muted">${esc(tr("No tokens."))}</li>`}</ul>
     <details class="sub">
-      <summary>Create a token</summary>
+      <summary>${esc(tr("Create a token"))}</summary>
       <form id="token-form" data-cmd="tokens" hx-post="${API}/config/tokens" hx-encoding="json" hx-swap="none">
         <div class="fields two">
-          <label>Name<input type="text" name="name" required maxlength="64" pattern="[\\w.-]+" placeholder="e.g. phone, home-assistant"></label>
-          <label>Role<select name="role">${ROLES.map((r) => `<option ${r === "standard" ? "selected" : ""}>${r}</option>`).join("")}</select></label>
+          <label>${esc(tr("Name"))}<input type="text" name="name" required maxlength="64" pattern="[\\w.-]+" placeholder="${esc(tr("e.g. phone, home-assistant"))}"></label>
+          <label>${esc(tr("Role"))}<select name="role">${ROLES.map((r) => `<option ${r === "standard" ? "selected" : ""}>${r}</option>`).join("")}</select></label>
         </div>
-        <button type="submit" class="cmd" data-cmd="tokens">Create</button>
-        <p class="muted small">Read-only &lt; standard (work mode, schedule) &lt; expert (meter compensation) &lt; installer (limits, cloud, tokens). The token is shown once.</p>
+        <button type="submit" class="cmd" data-cmd="tokens">${esc(tr("Create"))}</button>
+        <p class="muted small">${esc(tr("Read-only < standard (work mode, schedule) < expert (meter compensation, tuning) < installer (limits, cloud, tokens). The token is shown once."))}</p>
       </form>
     </details>`
-    : `<p class="muted">${denied?.code === "insufficient_role"
-      ? `Token management needs the ${esc(denied.required_role)} role (yours: ${esc(denied.token_role)}).`
-      : denied?.status === 401 ? "Sign in with an installer token to manage tokens."
-      : "Cannot load the token list."}</p>`;
+    : `<p class="muted">${esc(denied?.code === "insufficient_role"
+      ? tr("Token management needs the {need} role (yours: {have}).", { need: denied.required_role, have: denied.token_role })
+      : denied?.status === 401 ? tr("Sign in with an installer token to manage tokens.")
+      : tr("Cannot load the token list."))}</p>`;
   let upd = null;
   try {
     const r = await apiFetch("/update");
@@ -2532,36 +2564,37 @@ async function renderSettings() {
     if (r.ok) sets = await r.json();
   } catch { /* the panel says it cannot load */ }
   return `
-  ${pageHead("Settings")}
+  ${pageHead(tr("Settings"))}
   <section class="stack">
+    ${languagePanel()}
     ${updatesPanel(upd)}
     ${notifyPanel(sets)}
     ${tuningPanel(sets)}
     <article class="panel">
-      <h3>Access tokens</h3>
+      <h3>${esc(tr("Access tokens"))}</h3>
       ${tokenList}
     </article>
     <article class="panel">
-      <h3>Diagnostics</h3>
-      <p class="small">Download a diagnostic bundle to help support your inverter model: recent messages and register readings, with serial numbers and dates removed. You can inspect it before sharing; nothing is uploaded.</p>
+      <h3>${esc(tr("Diagnostics"))}</h3>
+      <p class="small">${esc(tr("Download a diagnostic bundle to help support your inverter model: recent messages and register readings, with serial numbers and dates removed. You can inspect it before sharing; nothing is uploaded."))}</p>
       <div class="fields two inline">
-        <label>Period<select id="bundle-hours">
-          <option value="6">last 6 hours</option><option value="24" selected>last 24 hours</option><option value="72">last 3 days</option><option value="168">last 7 days</option>
+        <label>${esc(tr("Period"))}<select id="bundle-hours">
+          <option value="6">${esc(tr("last 6 hours"))}</option><option value="24" selected>${esc(tr("last 24 hours"))}</option><option value="72">${esc(tr("last 3 days"))}</option><option value="168">${esc(tr("last 7 days"))}</option>
         </select></label>
-        <button type="button" class="cmd" data-action="bundle-download">Download bundle</button>
+        <button type="button" class="cmd" data-action="bundle-download">${esc(tr("Download bundle"))}</button>
       </div>
-      <p class="muted small">Installer role. Reporting a problem? <a href="#/report">Report a problem</a> adds your description and the app's checks to the same file.</p>
+      <p class="muted small">${esc(tr("Installer role. Reporting a problem? Report a problem (under More) adds your description and the app's checks to the same file."))}</p>
     </article>
     <article class="panel">
-      <h3>Server</h3>
+      <h3>${esc(tr("Server"))}</h3>
       <dl class="kv">
-        <div><dt>Version</dt><dd class="num">${esc(cfg?.version ?? "—")}</dd></div>
-        <div><dt>Detailed history kept</dt><dd>${cfg ? cfg.raw_hours + " h" : "—"}</dd></div>
-        <div><dt>Hourly history kept</dt><dd>${cfg ? cfg.bucket_days + " days" : "—"}</dd></div>
-        <div><dt>Read-only access without a token</dt><dd>${S.cfg?.public_access ? "on" : "off"}</dd></div>
-        <div><dt>Schedule time zone</dt><dd>${cfg ? esc(cfg.time_zone) + " " + utcOffset(cfg.utc_offset_s) : "—"}</dd></div>
-        <div><dt>Inverter clock</dt><dd>${clockOffsetText(cfg?.inverter_clock_offset_s)}</dd></div>
-        <div><dt>API description</dt><dd><a href="${API}/openapi.yaml" target="_blank" rel="noopener">openapi.yaml</a></dd></div>
+        <div><dt>${esc(tr("Version"))}</dt><dd class="num">${esc(cfg?.version ?? "—")}</dd></div>
+        <div><dt>${esc(tr("Detailed history kept"))}</dt><dd>${cfg ? cfg.raw_hours + " h" : "—"}</dd></div>
+        <div><dt>${esc(tr("Hourly history kept"))}</dt><dd>${cfg ? esc(tr("{n} days", { n: cfg.bucket_days })) : "—"}</dd></div>
+        <div><dt>${esc(tr("Read-only access without a token"))}</dt><dd>${esc(S.cfg?.public_access ? tr("on") : tr("off"))}</dd></div>
+        <div><dt>${esc(tr("Schedule time zone"))}</dt><dd>${cfg ? esc(cfg.time_zone) + " " + utcOffset(cfg.utc_offset_s) : "—"}</dd></div>
+        <div><dt>${esc(tr("Inverter clock"))}</dt><dd>${clockOffsetText(cfg?.inverter_clock_offset_s)}</dd></div>
+        <div><dt>${esc(tr("API description"))}</dt><dd><a href="${API}/openapi.yaml" target="_blank" rel="noopener">openapi.yaml</a></dd></div>
       </dl>
     </article>
   </section>`;
@@ -2570,10 +2603,10 @@ async function renderSettings() {
 // NOTIFY_KEYS: the notification targets (F2) — a secret: the API shows
 // the URL to installers only ("(set)" to anyone else).
 const NOTIFY_KEYS = [
-  ["notify.webhook_url", "Webhook URL", "http://homeassistant.local:8123/api/webhook/…",
-    "A JSON POST per notice — e.g. a Home Assistant webhook trigger."],
-  ["notify.ntfy_url", "ntfy topic URL", "https://ntfy.sh/your-hard-to-guess-topic",
-    "A push to your phone through ntfy; pick a hard-to-guess topic."],
+  ["notify.webhook_url", tr("Webhook URL"), "http://homeassistant.local:8123/api/webhook/…",
+    tr("A JSON POST per notice — e.g. a Home Assistant webhook trigger.")],
+  ["notify.ntfy_url", tr("ntfy topic URL"), "https://ntfy.sh/your-hard-to-guess-topic",
+    tr("A push to your phone through ntfy; pick a hard-to-guess topic.")],
 ];
 
 // notifyPanel: where notices go (F2) — an installer edits and tests the
@@ -2585,42 +2618,39 @@ function notifyPanel(sets) {
   const fields = NOTIFY_KEYS.map(([k, label, ph, help]) => {
     const it = item(k);
     if (hidden) {
-      return `<div><dt>${esc(label)}</dt><dd>${it?.value ? "set" : "not set"}</dd></div>`;
+      return `<div><dt>${esc(label)}</dt><dd>${esc(it?.value ? tr("set") : tr("not set"))}</dd></div>`;
     }
     return `<label>${esc(label)}<input type="url" id="notify-${k.split(".")[1]}" value="${esc(it?.value ?? "")}"
       placeholder="${esc(ph)}" maxlength="2048" autocomplete="off"><span class="muted small">${esc(help)}${
-      it?.source === "config" ? " Set in the config file; a value saved here wins." : ""}</span></label>`;
+      it?.source === "config" ? " " + esc(tr("Set in the config file; a value saved here wins.")) : ""}</span></label>`;
   }).join("");
   return `
     <article class="panel">
-      <h3>Notifications</h3>
-      <p class="small">Hear about a problem without this page open: the inverter offline for 10 minutes (and back),
-        the gate losing its rules, a failed command or schedule, a write refused by the hourly limit, low disk,
-        an upgrade rolled back, cloud-forwarding or maintenance-window changes, a lost grid, a restart after a power cut,
-        and a low or falling battery (see Tuning).</p>
-      ${hidden ? `<dl class="kv">${fields}</dl><p class="muted small">Sign in with an installer token to change or test them.</p>`
+      <h3>${esc(tr("Notifications"))}</h3>
+      <p class="small">${esc(tr("Hear about a problem without this page open: the inverter offline for 10 minutes (and back), the gate losing its rules, a failed command or schedule, a write refused by the hourly limit, low disk, an upgrade rolled back, cloud-forwarding or maintenance-window changes, a lost grid, a restart after a power cut, and a low or falling battery (see Tuning)."))}</p>
+      ${hidden ? `<dl class="kv">${fields}</dl><p class="muted small">${esc(tr("Sign in with an installer token to change or test them."))}</p>`
         : `<div class="fields stacked-fields">${fields}</div>
       <div class="row-actions">
-        <button type="button" class="cmd" data-action="notify-save">Save</button>
-        <button type="button" class="ghost" data-action="notify-test">Send a test</button>
+        <button type="button" class="cmd" data-action="notify-save">${esc(tr("Save"))}</button>
+        <button type="button" class="ghost" data-action="notify-test">${esc(tr("Send a test"))}</button>
       </div>
-      <p class="muted small">Empty turns a target off. The URLs are kept from other users: only installers see them.</p>`}
+      <p class="muted small">${esc(tr("Empty turns a target off. The URLs are kept from other users: only installers see them."))}</p>`}
     </article>`;
 }
 
 // TUNING_KEYS: the expert-level knobs (owner, 2026-11-18): [key, label,
 // unit, min, max, step, help].
 const TUNING_KEYS = [
-  ["store.write_delay_s", "Write delay", "s", 0, 900, 1,
-    "How long new readings may wait in memory before they are saved. Longer is gentler on an SD card or eMMC; a power cut loses what waits. Commands and setting changes are always saved at once. 0 saves at once."],
-  ["alerts.soc_threshold_pct", "Battery alert level", "%", 0, 95, 1,
-    "Notify when the battery is at or below this charge, or is forecast to reach it. 0 turns the battery alerts off."],
-  ["alerts.soc_horizon_min", "Forecast horizon", "min", 10, 1440, 1,
-    "How far ahead the forecast looks."],
-  ["alerts.soc_window_min", "Forecast window", "min", 5, 240, 1,
-    "How much recent history the forecast fits its line to."],
-  ["alerts.soc_p_value", "Forecast p-value", "", 0.001, 0.5, 0.001,
-    "How sure the forecast must be: 0.05 means 95 % confident. Smaller means fewer, later warnings."],
+  ["store.write_delay_s", tr("Write delay"), "s", 0, 900, 1,
+    tr("How long new readings may wait in memory before they are saved. Longer is gentler on an SD card or eMMC; a power cut loses what waits. Commands and setting changes are always saved at once. 0 saves at once.")],
+  ["alerts.soc_threshold_pct", tr("Battery alert level"), "%", 0, 95, 1,
+    tr("Notify when the battery is at or below this charge, or is forecast to reach it. 0 turns the battery alerts off.")],
+  ["alerts.soc_horizon_min", tr("Forecast horizon"), "min", 10, 1440, 1,
+    tr("How far ahead the forecast looks.")],
+  ["alerts.soc_window_min", tr("Forecast window"), "min", 5, 240, 1,
+    tr("How much recent history the forecast fits its line to.")],
+  ["alerts.soc_p_value", tr("Forecast p-value"), "", 0.001, 0.5, 0.001,
+    tr("How sure the forecast must be: 0.05 means 95 % confident. Smaller means fewer, later warnings.")],
 ];
 
 // tuningPanel: the expert knobs — anyone may look; saving needs an
@@ -2632,14 +2662,14 @@ function tuningPanel(sets) {
     const it = item(k);
     return `<label>${esc(label)}${unit ? ` <span class="muted small">(${esc(unit)})</span>` : ""}
       <input type="number" id="tune-${k.replace(/\./g, "-")}" value="${esc(it?.value ?? "")}" data-orig="${esc(it?.value ?? "")}" min="${min}" max="${max}" step="${step}" inputmode="decimal">
-      <span class="muted small">${esc(help)}${it?.source === "config" ? " Set in the config file; a value saved here wins." : ""}</span></label>`;
+      <span class="muted small">${esc(help)}${it?.source === "config" ? " " + esc(tr("Set in the config file; a value saved here wins.")) : ""}</span></label>`;
   }).join("");
   return `
     <article class="panel">
-      <h3>Tuning <span class="chip muted">expert</span></h3>
+      <h3>${esc(tr("Tuning"))} <span class="chip muted">${esc(tr("expert"))}</span></h3>
       <div class="fields stacked-fields">${fields}</div>
       <div class="row-actions">
-        <button type="button" class="cmd" data-action="tuning-save">Save</button>
+        <button type="button" class="cmd" data-action="tuning-save">${esc(tr("Save"))}</button>
       </div>
     </article>`;
 }
@@ -2655,15 +2685,15 @@ async function tuningSave() {
     if (v === el.dataset.orig) continue;
     body[k] = v === "" ? null : Number(v);
   }
-  if (Object.keys(body).length === 0) { toast("nothing changed"); return; }
-  if (await setupSave("/settings", "PUT", body, "tuning saved")) render();
+  if (Object.keys(body).length === 0) { toast(tr("nothing changed")); return; }
+  if (await setupSave("/settings", "PUT", body, tr("tuning saved"))) render();
 }
 
 // notifySave stores both targets ("" = off).
 async function notifySave() {
   const body = {};
   for (const [k] of NOTIFY_KEYS) body[k] = byId("notify-" + k.split(".")[1]).value.trim();
-  if (await setupSave("/settings", "PUT", body, "notifications saved")) render();
+  if (await setupSave("/settings", "PUT", body, tr("notifications saved"))) render();
 }
 
 // notifyTest sends a test notice to each saved target and reports each.
@@ -2671,13 +2701,13 @@ async function notifyTest() {
   const r = await apiFetch("/notify/test", { method: "POST" });
   if (!r.ok) {
     const p = await problemOf(r);
-    toast("no test sent", "warn", p.detail ?? p.title);
+    toast(tr("no test sent"), "warn", p.detail ?? p.title);
     return;
   }
   const res = (await r.json()).results ?? [];
   const bad = res.filter((x) => x.error);
-  if (bad.length === 0) toast("test sent to " + res.map((x) => x.target).join(" and "));
-  else toast("test failed", "err", bad.map((x) => `${x.target}: ${x.error}`).join("; "));
+  if (bad.length === 0) toast(tr("test sent to {targets}", { targets: res.map((x) => x.target).join(", ") }));
+  else toast(tr("test failed"), "err", bad.map((x) => `${x.target}: ${x.error}`).join("; "));
 }
 
 // utcOffset formats a zone offset in seconds as UTC±hh:mm.
@@ -2690,42 +2720,57 @@ function utcOffset(s) {
 // R8). Schedule windows run on this machine's clock; a large difference
 // means a wrong host zone or an inverter clock to set.
 function clockOffsetText(d) {
-  if (d == null) return "not read yet";
+  if (d == null) return esc(tr("not read yet"));
   const a = Math.abs(d);
-  if (a < 60) return "in step with this machine";
+  if (a < 60) return esc(tr("in step with this machine"));
   const t = a >= 3600 ? (a / 3600).toFixed(1) + " h" : Math.round(a / 60) + " min";
-  return `<span class="warn">${t} ${d > 0 ? "ahead of" : "behind"} this machine — check the host time zone or the inverter's clock</span>`;
+  return `<span class="warn">${esc(d > 0
+    ? tr("{d} ahead of this machine — check the host time zone or the inverter's clock", { d: t })
+    : tr("{d} behind this machine — check the host time zone or the inverter's clock", { d: t }))}</span>`;
+}
+
+// languagePanel: the UI language (kept on this device; the browser's
+// language until one is picked). The translations are machine-made.
+function languagePanel() {
+  const cur = currentLang();
+  return `<article class="panel">
+      <h3>${esc(tr("Language"))}</h3>
+      <label>${esc(tr("Language of this page"))}<select id="lang-select">
+        ${LANGS.map(([code, name]) => `<option value="${code}" ${code === cur ? "selected" : ""}>${esc(name)}</option>`).join("")}
+      </select></label>
+      <p class="muted small">${esc(tr("Kept on this device. The translations other than English are machine-made: corrections are welcome (one file per language, internal/web/static/i18n/ in the repository)."))}</p>
+    </article>`;
 }
 
 // updatesPanel: the release check and the no-root self-upgrade (D-023).
 function updatesPanel(u) {
   if (!u) return "";
-  const checked = u.checked_at ? `checked ${fmtAgo(u.checked_at)}` : "not checked yet";
+  const checked = esc(u.checked_at ? tr("checked {when}", { when: fmtAgo(u.checked_at) }) : tr("not checked yet"));
   let status;
   if (u.available) {
-    status = `<p class="note ok"><strong>${esc(u.latest)}</strong> is available (you have ${esc(u.current)}). ${u.url ? `<a href="${esc(u.url)}" target="_blank" rel="noopener">Release notes</a>` : ""}</p>
+    status = `<p class="note ok">${esc(tr("{latest} is available (you have {current}).", { latest: u.latest, current: u.current }))} ${u.url ? `<a href="${esc(u.url)}" target="_blank" rel="noopener">${esc(tr("Release notes"))}</a>` : ""}</p>
       ${u.can_apply
-        ? `<button type="button" class="cmd" data-cmd="update-apply" data-confirm="updateApply" data-to="${esc(u.latest)}" hx-post="${API}/update/apply" hx-swap="none">Update now</button>`
+        ? `<button type="button" class="cmd" data-cmd="update-apply" data-confirm="updateApply" data-to="${esc(u.latest)}" hx-post="${API}/update/apply" hx-swap="none">${esc(tr("Update now"))}</button>`
         : `<p class="muted small">${esc(u.reason ?? "")}</p>`}`;
   } else if (u.latest) {
-    status = `<p class="small">Up to date (latest release ${esc(u.latest)}).</p>`;
+    status = `<p class="small">${esc(tr("Up to date (latest release {v}).", { v: u.latest }))}</p>`;
   } else {
-    const why = u.checks_enabled ? "No release information yet."
+    const why = u.checks_enabled ? tr("No release information yet.")
       : u.reason ? u.reason.charAt(0).toUpperCase() + u.reason.slice(1) + "."
-      : "Release checks are off ([update] check = false).";
+      : tr("Release checks are off ([update] check = false).");
     status = `<p class="muted small">${esc(why)}</p>`;
   }
   const rolled = u.rolled_back
-    ? `<p class="note warn">The update to <strong>${esc(u.rolled_back.to)}</strong> did not start correctly and was rolled back to ${esc(u.rolled_back.from)}.
-        <button type="button" class="ghost small-btn" data-cmd="update-dismiss" hx-delete="${API}/update/rolled-back" hx-swap="none">Dismiss</button></p>` : "";
+    ? `<p class="note warn">${esc(tr("The update to {to} did not start correctly and was rolled back to {from}.", { to: u.rolled_back.to, from: u.rolled_back.from }))}
+        <button type="button" class="ghost small-btn" data-cmd="update-dismiss" hx-delete="${API}/update/rolled-back" hx-swap="none">${esc(tr("Dismiss"))}</button></p>` : "";
   const pending = u.pending && u.pending.to === u.current
-    ? `<p class="muted small">Running the new version; it is confirmed after two minutes.</p>` : "";
+    ? `<p class="muted small">${esc(tr("Running the new version; it is kept once the inverter is back with fresh readings."))}</p>` : "";
   return `<article class="panel">
-      <div class="card-head"><h3>Updates</h3><span class="chip">${esc(u.current)}</span></div>
+      <div class="card-head"><h3>${esc(tr("Updates"))}</h3><span class="chip">${esc(u.current)}</span></div>
       ${rolled}${status}${pending}
-      <p class="muted small">${checked}${u.error ? ` · last check failed: ${esc(u.error)}` : ""} ·
-        <button type="button" class="linkbtn" data-cmd="update-check" hx-post="${API}/update/check" hx-swap="none">check now</button></p>
-      <p class="muted small">Updates are signature-checked before they are installed, and the app restarts itself (installer role). If the new version fails to start, the previous one is restored automatically.</p>
+      <p class="muted small">${checked}${u.error ? " · " + esc(tr("last check failed: {err}", { err: u.error })) : ""} ·
+        <button type="button" class="linkbtn" data-cmd="update-check" hx-post="${API}/update/check" hx-swap="none">${esc(tr("check now"))}</button></p>
+      <p class="muted small">${esc(tr("Updates are signature-checked before they are installed, and the app restarts itself (installer role). If the new version fails to start, the previous one is restored automatically."))}</p>
     </article>`;
 }
 
@@ -2739,7 +2784,7 @@ async function bundleDownload() {
     return;
   }
   const name = await saveBlob(resp, "foxess-bundle.tar.gz");
-  toast("diagnostic bundle saved: " + name);
+  toast(tr("diagnostic bundle saved: {name}", { name }));
 }
 
 // saveBlob saves a file response under its Content-Disposition name.
@@ -2762,18 +2807,18 @@ async function renderReport() {
   if (!(await loadState())) return null;
   const id = S.state.identity ?? {};
   return `
-  ${pageHead("Report a problem", "Builds one file with your description and what this app knows about the problem, for the developers.")}
+  ${pageHead(tr("Report a problem"), esc(tr("Builds one file with your description and what this app knows about the problem, for the developers.")))}
   <article class="panel report">
     <form id="report-form" data-cmd="report">
-      <label>What went wrong?<textarea id="report-desc" name="description" rows="6" maxlength="4000"
-        placeholder="What you saw, when it started, and what you expected instead."></textarea></label>
-      <label>History to include<select id="report-hours">
-        ${[["6", "the last 6 hours"], ["24", "the last 24 hours"], ["72", "the last 3 days"], ["168", "the last week"]].map(([v, t]) =>
-          `<option value="${v}" ${v === "24" ? "selected" : ""}>${t}</option>`).join("")}
+      <label>${esc(tr("What went wrong?"))}<textarea id="report-desc" name="description" rows="6" maxlength="4000"
+        placeholder="${esc(tr("What you saw, when it started, and what you expected instead."))}"></textarea></label>
+      <label>${esc(tr("History to include"))}<select id="report-hours">
+        ${[["6", tr("the last 6 hours")], ["24", tr("the last 24 hours")], ["72", tr("the last 3 days")], ["168", tr("the last week")]].map(([v, t]) =>
+          `<option value="${v}" ${v === "24" ? "selected" : ""}>${esc(t)}</option>`).join("")}
       </select></label>
-      <button type="button" class="cmd" data-action="report-download">Download report</button>
+      <button type="button" class="cmd" data-action="report-download">${esc(tr("Download report"))}</button>
     </form>
-    <p class="muted small">The file contains your description, the app's version, settings and checks, recent errors, and the raw messages between the inverter and the cloud. Serial numbers are replaced, dates are shifted, and token names are left out — you can open it (a .tar.gz) and read everything before sharing. Nothing is sent anywhere by this page. Installer role.</p>
+    <p class="muted small">${esc(tr("The file contains your description, the app's version, settings and checks, recent errors, and the raw messages between the inverter and the cloud. Serial numbers are replaced, dates are shifted, and token names are left out — you can open it (a .tar.gz) and read everything before sharing. Nothing is sent anywhere by this page. Installer role."))}</p>
     <div id="report-next" hidden></div>
   </article>`;
 }
@@ -2810,14 +2855,14 @@ async function reportDownload() {
     return;
   }
   const name = await saveBlob(resp, "foxess-report.tar.gz");
-  toast("report saved: " + name);
+  toast(tr("report saved: {name}", { name }));
   const next = byId("report-next");
   if (!next) return;
   const url = reportIssueURL(name, desc);
   next.innerHTML = url
-    ? `<p><strong>Next:</strong> open an issue and attach <span class="mono">${esc(name)}</span> to it.</p>
-       <a class="cmd" href="${esc(url)}" target="_blank" rel="noopener">Open a GitHub issue</a>`
-    : `<p><strong>Next:</strong> send <span class="mono">${esc(name)}</span> to the developers the way you were told to.</p>`;
+    ? `<p>${esc(tr("Next: open an issue and attach {file} to it.", { file: name }))}</p>
+       <a class="cmd" href="${esc(url)}" target="_blank" rel="noopener">${esc(tr("Open a GitHub issue"))}</a>`
+    : `<p>${esc(tr("Next: send {file} to the developers the way you were told to.", { file: name }))}</p>`;
   next.hidden = false;
 }
 
@@ -2831,8 +2876,8 @@ function paintDeviceBanner() {
     return;
   }
   b.hidden = false;
-  b.innerHTML = `Unverified inverter model: <strong>${esc(id.model)}</strong> fw ${esc(id.firmware?.master ?? "?")}. Monitoring works; some settings may be unavailable.` +
-    (dashOnly() ? "" : ` <a href="#/settings">Share a diagnostic bundle</a> to help add support.`);
+  b.innerHTML = esc(tr("Unverified inverter model: {model} fw {fw}. Monitoring works; some settings may be unavailable.", { model: id.model, fw: id.firmware?.master ?? "?" })) +
+    (dashOnly() ? "" : ` <a href="#/settings">${esc(tr("Share a diagnostic bundle to help add support."))}</a>`);
 }
 
 // ---------- command body builders ----------
@@ -2906,18 +2951,18 @@ document.addEventListener("click", async (e) => {
       break;
     case "export-csv":
       if (histData) exportCSV(histData);
-      else toast("history not loaded yet", "warn");
+      else toast(tr("history not loaded yet"), "warn");
       break;
     case "export-json":
       if (histData) exportJSON(histData);
-      else toast("history not loaded yet", "warn");
+      else toast(tr("history not loaded yet"), "warn");
       break;
     case "toggle-hist-table": {
       const tbl = byId("hist-table");
       if (!tbl) break;
       tbl.hidden = !tbl.hidden;
       t.setAttribute("aria-expanded", String(!tbl.hidden));
-      t.textContent = tbl.hidden ? "show data table" : "hide data table";
+      t.textContent = tbl.hidden ? tr("show data table") : tr("hide data table");
       if (!tbl.hidden && histData) renderHistTable(histData);
       break;
     }
@@ -2927,9 +2972,9 @@ document.addEventListener("click", async (e) => {
     case "token-copy":
       try {
         await navigator.clipboard.writeText(lastToken);
-        toast("token copied to clipboard");
+        toast(tr("token copied to clipboard"));
       } catch {
-        toast("clipboard blocked — select the token text and copy manually", "warn");
+        toast(tr("clipboard blocked — select the token text and copy manually"), "warn");
       }
       break;
     case "audit-more":
@@ -3036,7 +3081,7 @@ document.addEventListener("change", (e) => {
   const f = byId("schedule-form");
   if (!f || !f.contains(e.target)) return;
   const dirty = byId("sched-dirty");
-  if (dirty) { dirty.textContent = "Unsaved changes"; dirty.classList.add("warn"); }
+  if (dirty) { dirty.textContent = tr("Unsaved changes"); dirty.classList.add("warn"); }
   if (e.target.id === "sched-enabled") {
     f.querySelector(".groups")?.classList.toggle("master-off", !e.target.checked);
     return;
@@ -3054,6 +3099,11 @@ document.addEventListener("change", (e) => {
   }
 });
 
+// the UI language: kept on this device; the page reloads into it
+document.addEventListener("change", (e) => {
+  if (e.target.id === "lang-select") setLang(e.target.value);
+});
+
 window.addEventListener("hashchange", () => {
   if (authed()) render();
 });
@@ -3066,12 +3116,12 @@ async function init() {
       const resp = await fetch(API + "/state", { headers: { Authorization: "Bearer " + S.token } });
       if (resp.status === 401) {
         setToken("");
-        gate("the stored token was rejected — sign in again");
+        gate(tr("the stored token was rejected — sign in again"));
         return;
       }
       if (!resp.ok) {
         setToken("");
-        gate("the stored token could not be verified — sign in again");
+        gate(tr("the stored token could not be verified — sign in again"));
         return;
       }
       S.state = await resp.json();
@@ -3079,12 +3129,12 @@ async function init() {
       enterApp();
     } catch {
       setToken("");
-      gate("the server was unreachable — sign in");
+      gate(tr("the server was unreachable — sign in"));
     }
   } else {
     // No stored token: probe public read-only access (config flag,
     // default on — spec §5.5) before falling back to the gate.
-    if (!(await probePublic())) gate("sign in to use foxesslocal");
+    if (!(await probePublic())) gate(tr("sign in to use foxesslocal"));
   }
 }
 

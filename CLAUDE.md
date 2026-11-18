@@ -41,6 +41,17 @@ Users install per `INSTALL.md`. Installed copies self-upgrade without root
 For UI work, `go run ./tools/devui` serves the real API and UI over a
 seeded demo store. It needs no inverter, gate or root.
 
+UI text is translated (web UI only; the API, logs and notifications stay
+English):
+
+- Every user-visible string in `internal/web/static/js/*.js` goes through
+  `tr("English text", {vars})` with a double-quoted literal key.
+- Static text in `index.html` uses `data-i18n="…"`.
+- Each string needs an entry in all five catalogues,
+  `internal/web/static/i18n/{de,fr,it,es,zh-Hans}.json`, with the same
+  `{placeholders}`. `TestCatalogues` fails until they do, and
+  `go run ./tools/i18n` lists what is missing.
+
 The commit hook (prek; `prek install`) runs golangci-lint, shellcheck and
 the generated-installer check from the revs pinned in
 `.pre-commit-config.yaml`. The lint rules are in `.golangci.yml`. CI runs

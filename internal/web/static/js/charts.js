@@ -11,6 +11,8 @@
 // keys). Keyboard: focus a plot, ←/→ move the crosshair, Esc clears. All
 // text goes in via textContent.
 
+import { tr, locale } from "./i18n.js";
+
 const NS = "http://www.w3.org/2000/svg";
 const ROW_H = 92;          // plot height per row (px)
 const AXIS_H = 22;         // x-axis band under the last row
@@ -81,8 +83,8 @@ function xTicks(t0, t1, width) {
 const fmtTick = ({ t, kind }) => {
   const d = new Date(t * 1000);
   return kind === "day"
-    ? d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" })
-    : d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    ? d.toLocaleDateString(locale(), { weekday: "short", day: "numeric" })
+    : d.toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" });
 };
 
 const fmtTipTime = (t, step) => {
@@ -90,7 +92,7 @@ const fmtTipTime = (t, step) => {
   const opts = step >= 3600
     ? { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }
     : { hour: "2-digit", minute: "2-digit" };
-  return d.toLocaleString(undefined, opts);
+  return d.toLocaleString(locale(), opts);
 };
 
 // pathFor: the line (gaps split it), the area wash to the zero line, and
@@ -136,10 +138,11 @@ function summarize(row, rangeLabel) {
     lo = Math.min(lo, v);
     hi = Math.max(hi, v);
   }
-  const span = rangeLabel ? ` over the ${rangeLabel}` : "";
-  if (last == null) return `${row.title}: no data${span}.`;
-  return `${row.title}${span}: latest ${row.fmt(last, false)}, lowest ${row.fmt(lo, false)}, ` +
-    `highest ${row.fmt(hi, false)}. Arrow keys step through the values.`;
+  const title = rangeLabel ? tr("{title} over the {range}", { title: row.title, range: rangeLabel }) : row.title;
+  if (last == null) return tr("{title}: no data.", { title });
+  return tr("{title}: latest {last}, lowest {lo}, highest {hi}. Arrow keys step through the values.", {
+    title, last: row.fmt(last, false), lo: row.fmt(lo, false), hi: row.fmt(hi, false),
+  });
 }
 
 // seriesOf: a row's series (a plain row is one series).
@@ -177,7 +180,7 @@ export function smallMultiples(root, data) {
     if (!hasData) {
       const p = document.createElement("p");
       p.className = "sm-empty muted";
-      p.textContent = "No data in this range yet.";
+      p.textContent = tr("No data in this range yet.");
       root.appendChild(p);
       return;
     }
@@ -312,7 +315,7 @@ export function smallMultiples(root, data) {
     tip.hidden = false;
     if (fromKeyboard) {
       live.textContent = fmtTipTime(data.ts[idx], data.step) + ": " +
-        lines.map(([s, v]) => s.title + " " + (v == null ? "no data" : p.row.fmt(v, false))).join(", ");
+        lines.map(([s, v]) => s.title + " " + (v == null ? tr("no data") : p.row.fmt(v, false))).join(", ");
     }
     placeTip(p);
   }
