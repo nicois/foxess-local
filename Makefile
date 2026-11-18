@@ -30,16 +30,25 @@ fmdata:
 
 # ---- releases (design D-023; RELEASING.md) ----
 #   make release VERSION=v0.2.0 REPO=owner/foxess-local
-#   make sign            # minisign with the owner's secret key, locally
+#   make sign VERSION=v0.2.0  # as the key's account: minisign with SIGN_KEY
 #   make verify-release  # the new binary verifies its own release
 VERSION ?=
 REPO ?=
 DIST ?= dist
+# The secret key lives in another account; that account runs `make sign`
+# (e.g. make -C <this checkout> sign VERSION=…). Override per run.
+SIGN_KEY ?= /home/nfarrell/foxess-key/foxess-local.key
 release:
 	deploy/release.sh "$(VERSION)" "$(REPO)" "$(DIST)"
+	# the signer is another account: an existing file it may write is all
+	# minisign needs (it truncates in place); a tampered signature fails
+	# verify-release, it cannot forge one
+	install -m 0666 /dev/null $(DIST)/SHA256SUMS.minisig
 
 sign:
-	minisign -S -m $(DIST)/SHA256SUMS -x $(DIST)/SHA256SUMS.minisig -t "foxess-local $(VERSION)"
+	@test -n "$(VERSION)" || { echo "make sign VERSION=vX.Y.Z" >&2; exit 2; }
+	@test -w $(DIST)/SHA256SUMS.minisig || { echo "$(DIST)/SHA256SUMS.minisig is not writable by $$(id -un): run make release first" >&2; exit 2; }
+	minisign -S -s $(SIGN_KEY) -m $(DIST)/SHA256SUMS -x $(DIST)/SHA256SUMS.minisig -t "foxess-local $(VERSION)"
 
 verify-release:
 	deploy/verify-release.sh "$(DIST)"

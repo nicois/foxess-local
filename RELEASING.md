@@ -64,7 +64,11 @@ only accept binaries signed by the key built into them.
    diff dist/SHA256SUMS /tmp/draft/SHA256SUMS   # identical: reproducible
    ```
 
-3. Sign: `make sign VERSION=v0.2.0` (minisign asks for the key password).
+3. Sign, as the account that holds the key (`SIGN_KEY`, default
+   `/home/nfarrell/foxess-key/foxess-local.key`):
+   `make -C <this checkout> sign VERSION=v0.2.0` (minisign asks for the
+   key password). `make release` leaves `dist/SHA256SUMS.minisig` as an
+   empty file that account may write; the build account reads the result.
 4. Verify with the new binary's own verifier (this also cross-checks the
    app's minisign implementation against the real tool):
    `make verify-release`.

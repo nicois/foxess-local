@@ -21,3 +21,4 @@ __pycache__/
 
 # installation-specific agent notes (never committed)
 CLAUDE.local.md
+/dist/
