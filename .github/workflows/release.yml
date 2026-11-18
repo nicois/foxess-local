@@ -32,5 +32,7 @@ jobs:
 
           <!-- owner: rebuild and compare (make release), sign (make sign), upload SHA256SUMS.minisig, edit the notes, publish -->
           EOF
+          # the release files by name: dist/ also holds the empty signature
+          # placeholder (make release), which GitHub refuses to upload
           gh release create "${GITHUB_REF_NAME}" --draft --title "${GITHUB_REF_NAME}" \
-            --notes-file notes.md dist/*
+            --notes-file notes.md dist/foxess-local_linux_* dist/installer.sh dist/SHA256SUMS
