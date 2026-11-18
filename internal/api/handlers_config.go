@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -23,6 +24,9 @@ type configView struct {
 	// evaluated in (audit R8).
 	TimeZone   string `json:"time_zone"`
 	UTCOffsetS int    `json:"utc_offset_s"`
+	// TimeZoneName is the host's IANA zone (e.g. Australia/Sydney); null
+	// when it cannot be told.
+	TimeZoneName *string `json:"time_zone_name"`
 	// InverterClockOffsetS: the inverter's clock minus the host's at the
 	// last read (positive: the inverter is ahead); null before a read.
 	InverterClockOffsetS *float64 `json:"inverter_clock_offset_s"`
@@ -73,6 +77,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request, _ Token) {
 		IssueURL:       s.info.IssueURL,
 		TimeZone:       time.Local.String() + " (" + zone + ")",
 		UTCOffsetS:     offset,
+		TimeZoneName:   ianaZone(hostZoneSources, os.Getenv("TZ")),
 	}
 	if d, ok := s.inverterClockOffset(); ok {
 		view.InverterClockOffsetS = &d

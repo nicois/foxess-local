@@ -31,7 +31,7 @@ func writeGateResponse(err error) (commandResponse, bool) {
 	default:
 		return commandResponse{}, false
 	}
-	return commandResponse{status, p}, true
+	return commandResponse{status: status, body: p}, true
 }
 
 // writeOverrideBody is the spec's WriteOverride schema.

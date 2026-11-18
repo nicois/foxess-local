@@ -153,8 +153,12 @@ type Gateway struct {
 	// wear protections (wear.go)
 	skipUnchanged bool
 	budget        int
+	budgetFor     map[CommandKind]int // per-setting overrides of budget
 	budgetWindow  time.Duration
-	written       map[CommandKind][]time.Time // real write phases per kind
+	// budgetMu guards written on its own: Budget is read by the observer,
+	// which the gateway calls under mu (order: mu, then budgetMu)
+	budgetMu sync.Mutex
+	written  map[CommandKind][]time.Time // real write phases per kind
 }
 
 // New creates a gateway. The clock is injected (C-004); the queue TTL
@@ -301,6 +305,7 @@ func (g *Gateway) Pending() []PendingCommand {
 // startLocked injects the command's opening frames on the active flow.
 // schedule: the read phase (fn03); other kinds: the write frames.
 func (g *Gateway) startLocked(rt *rtCommand) error {
+	writing := false // the frames below are the command's writes (budgeted)
 	var frs []frame.Frame
 	switch rt.cmd.Kind {
 	case KindSchedule:
@@ -327,11 +332,14 @@ func (g *Gateway) startLocked(rt *rtCommand) error {
 		if err != nil {
 			return err
 		}
-		g.noteWriteLocked(rt.cmd.Kind)
+		writing = true
 	}
 	for i := range frs {
 		if err := g.inj.InjectS2C(g.flow, frs[i].Raw); err != nil {
 			return fmt.Errorf("gateway: inject: %w", err)
+		}
+		if writing && i == 0 {
+			g.noteWriteLocked(rt.cmd.Kind) // counted once a frame reached the session
 		}
 	}
 	rt.status = StatusInFlight

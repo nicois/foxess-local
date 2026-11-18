@@ -370,6 +370,8 @@ paths:
             schema:
               $ref: '#/components/schemas/WorkModeRequest'
       responses:
+        '429':
+          $ref: '#/components/responses/TooManyWrites'
         '200':
           description: Confirmed value (read-back)
           content:
@@ -421,6 +423,8 @@ paths:
             schema:
               $ref: '#/components/schemas/Schedule'
       responses:
+        '429':
+          $ref: '#/components/responses/TooManyWrites'
         '200':
           description: Confirmed table (read-back)
           content:
@@ -465,6 +469,8 @@ paths:
             schema:
               $ref: '#/components/schemas/MeterCompensationRequest'
       responses:
+        '429':
+          $ref: '#/components/responses/TooManyWrites'
         '200':
           description: Confirmed value (read-back)
           content:
@@ -510,6 +516,8 @@ paths:
             schema:
               $ref: '#/components/schemas/CurrentLimits'
       responses:
+        '429':
+          $ref: '#/components/responses/TooManyWrites'
         '200':
           description: The values as set (confirmed by the inverter's echo)
           content:
@@ -558,6 +566,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PortLimits'
       responses:
+        '429':
+          $ref: '#/components/responses/TooManyWrites'
         '200':
           description: The values as set (confirmed by the inverter's echo)
           content:
@@ -602,6 +612,8 @@ paths:
             schema:
               $ref: '#/components/schemas/BatteryCurrents'
       responses:
+        '429':
+          $ref: '#/components/responses/TooManyWrites'
         '200':
           description: The values as set (confirmed by the inverter's echo)
           content:
@@ -646,6 +658,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PowerLimit'
       responses:
+        '429':
+          $ref: '#/components/responses/TooManyWrites'
         '200':
           description: The values as set (confirmed by the inverter's echo)
           content:
@@ -693,6 +707,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EpsModeRequest'
       responses:
+        '429':
+          $ref: '#/components/responses/TooManyWrites'
         '200':
           description: The values as set (confirmed by the inverter's echo)
           content:
@@ -739,6 +755,8 @@ paths:
             schema:
               $ref: '#/components/schemas/LimitsUpdate'
       responses:
+        '429':
+          $ref: '#/components/responses/TooManyWrites'
         '200':
           description: Confirmed values (read-back)
           content:
@@ -1621,6 +1639,22 @@ components:
       schema:
         type: string
   responses:
+    TooManyWrites:
+      description: >-
+        The setting's write budget is spent (`write_budget`): at most
+        `limit` real writes per setting per rolling hour (`[writes]`
+        per_hour, default 10, with per-setting overrides). The Problem
+        names the `setting`, has `remaining: 0` and `next_free_at`; the
+        `Retry-After` header gives the seconds until then. What counts is
+        described under `WriteBudget`.
+      headers:
+        Retry-After:
+          description: Seconds until the next write to this setting is allowed.
+          schema: {type: integer, minimum: 1}
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
     WriteUnsupported:
       description: >-
         The write is impossible on this inverter (`write_unsupported`;
@@ -1688,8 +1722,24 @@ components:
       enum: [read-only, standard, expert, installer]
     State:
       type: object
-      required: [as_of, online, power, battery, work_mode, meter_compensation_w, limits, schedule, forward_mode, identity]
+      required: [ts, online, power, battery, work_mode, meter_compensation_w, limits, schedule, forward_mode, identity, energy, write_budget]
       properties:
+        ts:
+          type: string
+          format: date-time
+          description: When this snapshot was built.
+        energy:
+          $ref: '#/components/schemas/Energy'
+        write_budget:
+          type: object
+          description: >-
+            Each budgeted setting's write budget, keyed by the
+            `identity.writes` feature names (work_mode, schedule,
+            power_limits, current_limits, meter_compensation,
+            battery_currents, power_limit, port_limits, eps_mode). A setting
+            that is not listed is unbudgeted.
+          additionalProperties:
+            $ref: '#/components/schemas/WriteBudget'
         as_of:
           type: [string, 'null']
           format: date-time
@@ -1866,6 +1916,58 @@ components:
     ConfidenceLevel:
       type: string
       enum: [exact, compatible, pending, unknown]
+    Energy:
+      type: object
+      description: >-
+        The inverter's lifetime energy counters, in kWh with 0.1 kWh
+        resolution, read every 30 s (KH: the 32000 register block). Each
+        counter is monotonic: a lower reading is held until the next read
+        confirms it, then reported as the new value with a `counter-reset`
+        system event naming the field (re-baseline; do not book a negative
+        delta). A field is null until its first read, and null when this
+        inverter model does not report it.
+      required: [grid_export_kwh, grid_import_kwh, pv_kwh, battery_charge_kwh, battery_discharge_kwh, load_kwh, output_kwh, as_of, sources]
+      properties:
+        grid_export_kwh: {type: [number, 'null'], description: Energy exported to the grid (feed-in).}
+        grid_import_kwh: {type: [number, 'null'], description: Energy imported from the grid.}
+        pv_kwh: {type: [number, 'null'], description: Photovoltaic yield.}
+        battery_charge_kwh: {type: [number, 'null'], description: Energy into the battery.}
+        battery_discharge_kwh: {type: [number, 'null'], description: Energy out of the battery.}
+        load_kwh: {type: [number, 'null'], description: Household consumption.}
+        output_kwh: {type: [number, 'null'], description: The inverter's AC output (its "yield" total).}
+        as_of:
+          type: [string, 'null']
+          format: date-time
+          description: When the counters were last read; null before the first read.
+        sources:
+          type: object
+          description: >-
+            Where each reported field comes from: `register` (the
+            inverter's own lifetime total; survives gateway restarts and
+            matches the FoxESS app) or `integrated` (power integrated here).
+          additionalProperties:
+            type: string
+            enum: [register, integrated]
+    WriteBudget:
+      type: object
+      description: >-
+        One setting's write budget now: at most `limit` real writes per
+        rolling `window_s`. What counts: a write that reached the inverter
+        counts one — a whole `PUT /schedule` is one schedule write however
+        many groups changed, and a write whose read-back timed out (504,
+        `applied: unknown`) counts one. A write the inverter already holds
+        (not sent) and a write refused before sending count zero. Each
+        counted write's config event carries the updated budget (section
+        `write-budget` when nothing else changed).
+      required: [limit, remaining, window_s, next_free_at]
+      properties:
+        limit: {type: integer, description: "The configured cap ([writes] per_hour or per_setting)."}
+        remaining: {type: integer, minimum: 0}
+        window_s: {type: integer, examples: [3600]}
+        next_free_at:
+          type: [string, 'null']
+          format: date-time
+          description: When the oldest counted write leaves the window (remaining goes up by one); null while remaining == limit.
     CompatibilityReport:
       type: object
       required: [family, features]
@@ -1876,6 +1978,17 @@ components:
         family:
           type: string
           description: Recognised model family and register layout; empty when unrecognised.
+        layout:
+          type: string
+          description: The register layout established from the registers that answer (the driver key); empty when not established.
+        third_party:
+          type: object
+          description: The foxess_modbus map behind the layout (a tentative source) and where it disagrees with the verified profile.
+          properties:
+            source: {type: string}
+            commit: {type: string}
+            map: {type: string}
+            divergences: {type: array, items: {type: object}}
         features:
           type: array
           items:
@@ -2329,6 +2442,15 @@ components:
       type: object
       required: [raw_hours, bucket_days, version, public_access]
       properties:
+        forward_mode:
+          $ref: '#/components/schemas/ForwardMode'
+        time_zone_name:
+          type: [string, 'null']
+          description: >-
+            The host's IANA time-zone name (e.g. Australia/Sydney), from TZ,
+            /etc/timezone or the /etc/localtime link; null when it cannot be
+            told. Schedule windows run in this zone; compare it with Home
+            Assistant's to catch a mismatch.
         raw_hours:
           type: integer
           description: Dense raw telemetry retention (hours).
@@ -2549,6 +2671,9 @@ components:
       description: Every 150 B telemetry frame (~5 s) — the immediate sensor feed.
       required: [ts, power, soc_pct, battery_state]
       properties:
+        energy:
+          $ref: '#/components/schemas/Energy'
+          description: The lifetime counters, in every snapshot once they have been read (absent before).
         ts:
           type: string
           format: date-time
@@ -2574,7 +2699,7 @@ components:
           minItems: 1
           items:
             type: string
-            enum: [work-mode, limits, meter-compensation, schedule, forward-mode, identity]
+            enum: [work-mode, limits, meter-compensation, schedule, forward-mode, identity, write-budget]
         state:
           $ref: '#/components/schemas/State'
     ConnectionEvent:
@@ -2593,7 +2718,7 @@ components:
       properties:
         type:
           type: string
-          enum: [forward-mode-changed, maintenance-opened, maintenance-extended, maintenance-expired, maintenance-closed, alert, gate-rule-loss, upgrade-rolled-back, grid-lost, grid-restored, unclean-restart, battery-low, battery-forecast-low]
+          enum: [forward-mode-changed, maintenance-opened, maintenance-extended, maintenance-expired, maintenance-closed, alert, gate-rule-loss, upgrade-rolled-back, grid-lost, grid-restored, unclean-restart, battery-low, battery-forecast-low, counter-reset]
         detail:
           type: string
     ResyncEvent:
@@ -2660,6 +2785,28 @@ components:
             - write_unverified
             - device_not_identified
             - checks_failing
+            - write_budget
+            - insufficient_space
+            - maintenance_not_active
+            - notify_not_configured
+            - scan_running
+            - scan_unavailable
+            - settings_unavailable
+            - too_many_streams
+            - update_failed
+            - update_not_available
+            - update_not_possible
+            - update_verification_failed
+        setting:
+          type: string
+          description: Present on write_budget — the setting whose budget is spent (a `write_budget` key).
+        remaining:
+          type: integer
+          description: Present on write_budget (always 0).
+        next_free_at:
+          type: string
+          format: date-time
+          description: Present on write_budget — when the next write to the setting is allowed.
         reason:
           type: string
           enum: [unmapped, not_supported]

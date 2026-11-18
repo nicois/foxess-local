@@ -70,6 +70,18 @@
 # ntfy_url: an ntfy topic (a phone push); pick a hard-to-guess topic.
 # ntfy_url = "https://ntfy.sh/foxess-<random>"
 
+[writes]
+# Every real write lands in the inverter's non-volatile memory, whose
+# endurance is finite. per_hour caps real writes per setting per rolling
+# hour; a write the inverter already holds costs nothing. Over the cap a
+# write is refused (HTTP 429 write_budget). per_setting overrides it by
+# the API's setting names (work_mode, schedule, power_limits,
+# current_limits, meter_compensation, battery_currents, power_limit,
+# port_limits, eps_mode); 0 leaves a setting unbudgeted.
+# per_hour = 10
+# [writes.per_setting]
+# schedule = 20
+
 [alerts]
 # The battery alerts (also settable in the web UI at expert level, More →
 # Settings). battery-low: the state of charge is at or below the

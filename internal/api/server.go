@@ -87,6 +87,10 @@ type ServerInfo struct {
 	// up and fresh telemetry) — the same answer its SSE connection
 	// events carry. nil: the telemetry age alone decides.
 	Online func() bool `json:"-"`
+	// Energy is the host's lifetime energy counters (nil: all null).
+	Energy func() Energy `json:"-"`
+	// WriteBudget is the host's write budget (nil: the server's gateway).
+	WriteBudget func() map[string]WriteBudget `json:"-"`
 }
 
 // SettingsView is the live settings source (settings.Settings).
@@ -348,6 +352,11 @@ type problem struct {
 	// Reason refines write_unsupported: "unmapped" (no known register or
 	// encoding) or "not_supported" (the inverter lacks the feature).
 	Reason string `json:"reason,omitempty"`
+	// write_budget: the setting, none remaining, and when the next write
+	// is allowed (Retry-After carries the same).
+	Setting    string     `json:"setting,omitempty"`
+	Remaining  *int       `json:"remaining,omitempty"`
+	NextFreeAt *time.Time `json:"next_free_at,omitempty"`
 }
 
 // fieldError is one 400 detail (the spec's errors[] entries).

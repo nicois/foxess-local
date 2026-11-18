@@ -210,3 +210,107 @@ func TestUnchangedDoesNotCount(t *testing.T) {
 		}
 	}
 }
+
+// TestWriteBudgetView (foxess-control local backend, 2026-11-19): the
+// budget is visible per setting — limit, remaining, the window and when
+// the oldest counted write leaves it (null while the budget is full) —
+// limits can differ per setting, and a refusal carries the setting and
+// the next free time.
+func TestWriteBudgetView(t *testing.T) {
+	clk := &vclock{now: fixedNow()}
+	gw, _ := newWearGW(t, clk, WithSkipUnchanged(), WithWriteBudget(2, time.Hour),
+		WithWriteBudgetFor(map[CommandKind]int{KindSchedule: 5}))
+	checkFreshBudget(t, gw.Budget())
+	first := clk.now
+	for range 2 {
+		writeWorkMode(t, gw)
+		clk.advance(time.Minute)
+	}
+	b := gw.Budget()[KindWorkMode]
+	if b.Remaining != 0 || b.NextFree == nil || !b.NextFree.Equal(first.Add(time.Hour)) {
+		t.Fatalf("spent: %+v", b)
+	}
+	_, err := gw.Submit(context.Background(), Command{Kind: KindWorkMode, Params: map[Param]int{pMode: 0}})
+	var be *BudgetError
+	if !errors.As(err, &be) || !errors.Is(err, ErrWriteBudget) || be.Kind != KindWorkMode || be.Limit != 2 || !be.NextFree.Equal(first.Add(time.Hour)) {
+		t.Fatalf("refusal: %v (%+v)", err, be)
+	}
+}
+
+// TestBudgetCountsSentWrites (foxess-control local backend, 2026-11-19):
+// a write that never reached the inverter (the injection failed) costs
+// nothing; the budget counts what was sent.
+func TestBudgetCountsSentWrites(t *testing.T) {
+	clk := &vclock{now: fixedNow()}
+	gw, inj := newWearGW(t, clk, WithWriteBudget(2, time.Hour)) // no read first: the write is the first frame
+	inj.mu.Lock()
+	inj.err = errors.New("session gone")
+	inj.mu.Unlock()
+	if _, err := gw.Submit(context.Background(), Command{Kind: KindMeterCompensation, Params: map[Param]int{pValue: 10}}); err == nil {
+		t.Fatal("a failed injection was accepted")
+	}
+	if b := gw.Budget()[KindMeterCompensation]; b.Remaining != 2 {
+		t.Fatalf("an unsent write was counted: %+v", b)
+	}
+}
+
+// TestBudgetFromObserver: the observer may read the budget (the host's
+// config event carries it) — the gateway calls the observer under its
+// lock, so Budget must not need that lock.
+func TestBudgetFromObserver(t *testing.T) {
+	clk := &vclock{now: fixedNow()}
+	seen := make(chan int, 1)
+	var gw *Gateway
+	gw, _ = newWearGW(t, clk, WithWriteBudget(3, time.Hour), WithObserver(func(Result) {
+		seen <- gw.Budget()[KindWorkMode].Remaining
+	}))
+	id, err := gw.Submit(context.Background(), Command{Kind: KindWorkMode, Params: map[Param]int{pMode: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- ack(gw, id, fn06AckPDU(regWorkMode)) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second): // a deadlock guard, not timing logic
+		t.Fatal("the observer's Budget call deadlocked")
+	}
+	if got := <-seen; got != 2 {
+		t.Fatalf("remaining seen by the observer: %d, want 2", got)
+	}
+}
+
+// writeWorkMode is one real work-mode write (read first: the inverter
+// holds 0, so 1 is written).
+func writeWorkMode(t *testing.T, gw *Gateway) {
+	t.Helper()
+	id, err := gw.Submit(context.Background(), Command{Kind: KindWorkMode, Params: map[Param]int{pMode: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ack(gw, id, readRespPDU(1, map[int]uint16{0: 0})); err != nil {
+		t.Fatal(err)
+	}
+	if err := ack(gw, id, fn06AckPDU(regWorkMode)); err != nil {
+		t.Fatal(err)
+	}
+	waitRes(t, gw, id)
+}
+
+// checkFreshBudget: an unused budget, with the schedule override, and no
+// entry for reads.
+func checkFreshBudget(t *testing.T, v map[CommandKind]BudgetState) {
+	t.Helper()
+	if b := v[KindWorkMode]; b.Limit != 2 || b.Remaining != 2 || b.Window != time.Hour || b.NextFree != nil {
+		t.Fatalf("fresh work mode: %+v", b)
+	}
+	if b := v[KindSchedule]; b.Limit != 5 || b.Remaining != 5 {
+		t.Fatalf("schedule override: %+v", b)
+	}
+	if _, ok := v[KindRead]; ok {
+		t.Fatal("reads are not budgeted")
+	}
+}

@@ -11,6 +11,7 @@ const (
 	EventTLS         = "tls"          // OnTLSResult (Host + Result; success | mint_failed | client_rejected)
 	EventTelemetry   = "telemetry"    // live values: a 150 B c2s frame or a register poll (Tele holds it)
 	EventWrite       = "write"        // a forwarded s2c Modbus write reached the inverter (PDU = its PDU)
+	EventEnergy      = "energy"       // the lifetime energy totals were read (Energy holds them)
 )
 
 // Event is one observed stack event. The observer is called on the hook
@@ -33,6 +34,9 @@ type Event struct {
 
 	// Write
 	PDU []byte
+
+	// Energy
+	Energy *frame.KHEnergy
 }
 
 // Observer observes stack events.

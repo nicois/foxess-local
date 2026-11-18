@@ -60,11 +60,6 @@ var version = "dev"
 // virtual clock; production passes none).
 type runOption func(*runOpts)
 
-// writeBudgetPerHour caps real writes to one setting (a command kind)
-// per rolling hour: generous for a person, a stop for a runaway
-// automation (inverter non-volatile memory wear).
-const writeBudgetPerHour = 10
-
 // maxStreams caps concurrent live-update (SSE) streams: a household's
 // browsers and Home Assistant need a handful (audit S6).
 const maxStreams = 32
@@ -114,6 +109,7 @@ type handle struct {
 	notifier *notify.Notifier   // outbound notifications (F2)
 	grid     gridWatch          // grid lost / restored, from the inverter state
 	soc      socWatch           // the battery alerts, from the state of charge
+	energy   energyWatch        // the lifetime energy counters
 	pprof    *http.Server       // [debug] pprof_listen; nil when off
 	live     *liveness.Tracker  // online = a session up and fresh telemetry
 	tok      *api.TokenStore    // flushed on shutdown (token last_used)
@@ -201,7 +197,9 @@ func run(cfg *config.Config, opts ...runOption) (*handle, error) {
 		return m
 	}, h.maintEmit)
 	h.startStoreUpkeep()
-	h.buildService(p)
+	if err := h.buildService(p); err != nil {
+		return nil, err
+	}
 	h.reconnectOnModeChange()
 
 	h.sim, err = h.buildSim(cfg)
@@ -393,16 +391,22 @@ func tokenStoreOpen(path string, clk func() time.Time) (*api.TokenStore, error) 
 // path, C-003) and the frame service; the lazy injector breaks the
 // gw → svc → gw cycle (the method dereferences the service slot once
 // it is built).
-func (h *handle) buildService(p *prox.Prox) {
+func (h *handle) buildService(p *prox.Prox) error {
+	budget, err := budgetOptions(h.cfg.Writes)
+	if err != nil {
+		return err
+	}
 	var svc *framesvc.Service
 	// C-008: every write (API, simulator, scheduler) is put to the
 	// device view first; reads (the poller, the probe) are never gated.
-	h.gw = gateway.New(&svcInjector{p: &svc}, h.clk, gateway.WithObserver(h.gwObs),
+	// inverter wear: read before every write and skip what it already
+	// holds; cap real writes per setting ([writes])
+	opts := append([]gateway.Option{
+		gateway.WithObserver(h.gwObs),
 		gateway.WithAuthorizer(device.GatewayAuthorizer(h.st)),
-		// inverter wear: read before every write and skip what it
-		// already holds; cap real writes per setting
 		gateway.WithSkipUnchanged(),
-		gateway.WithWriteBudget(writeBudgetPerHour, time.Hour))
+	}, budget...)
+	h.gw = gateway.New(&svcInjector{p: &svc}, h.clk, opts...)
 	h.capt = wincap.New(filepath.Join(h.storeDir(), "captures"),
 		int64(h.cfg.Retention.CaptureMaxMB)*diskspace.MiB, h.clk, appVersion())
 	svc = framesvc.New(p.Ladder.Hooks, h.st, h.gw, h.posture, h.clk,
@@ -410,6 +414,7 @@ func (h *handle) buildService(p *prox.Prox) {
 		framesvc.WithCapture(h.capt.Chunk),
 		framesvc.WithObserver(h.svcObs)) // publishes to the injector's slot via svc
 	h.svc = svc
+	return nil
 }
 
 // buildMux builds the HTTP mux: the self-owned API under /api/v1 (plus
@@ -433,6 +438,7 @@ func (h *handle) buildMux(cfg *config.Config, tok *api.TokenStore) http.Handler 
 		RawHours:   cfg.Retention.RawHours,
 		BucketDays: cfg.Retention.BucketDays,
 		Online:     h.onlineFunc(),
+		Energy:     h.energy.energy,
 		IssueURL:   issueURL(cfg),
 		// a handle built without settings (tests): the config's values
 		PublicReadOnly:    cfg.Access.PublicReadOnly,
@@ -673,6 +679,7 @@ func (h *handle) Start(ctx context.Context) {
 	go h.diskGuard().Run(ctx)
 	h.startNotify(ctx)
 	h.startCaptures(ctx)
+	h.seedEnergy()
 	if h.upd != nil {
 		go h.upd.Run(ctx)
 	}
@@ -801,7 +808,12 @@ func (h *handle) svcObs(ev framesvc.Event) {
 			},
 			SocPct:       int(ev.Tele.Soc),
 			BatteryState: teleBatteryState(ev.Tele),
+			Energy:       h.snapshotEnergy(),
 		})
+	case framesvc.EventEnergy:
+		for _, f := range h.energy.observe(*ev.Energy, h.clk()) {
+			h.bus.PublishSystem(api.SystemEvent{Type: api.SystemCounterReset, Detail: f})
+		}
 	case framesvc.EventWrite:
 		h.publishConfig(api.SectionsOf(writtenAddrs(ev.PDU)))
 	}
@@ -823,6 +835,10 @@ func (h *handle) gwObs(res gateway.Result) {
 			h.publishConfig([]string{sec})
 		}
 	case gateway.StatusFailed, gateway.StatusExpired:
+		if res.Kind != gateway.KindRead {
+			// the write may have been sent (it counts): push the budget
+			h.publishConfig([]string{api.SectionWriteBudget})
+		}
 		detail := res.Detail
 		if detail == "" {
 			detail = string(res.Status)
@@ -839,7 +855,9 @@ func (h *handle) gwObs(res gateway.Result) {
 // state builds the config event's full State snapshot ("" when the
 // build fails — the Changed list still names the register).
 func (h *handle) state() api.State {
-	st, err := api.StateFor(h.st, h.fwd, h.clk, api.ServerInfo{BatteryCapacityWh: h.capacityWh(), Online: h.onlineFunc()})
+	st, err := api.StateFor(h.st, h.fwd, h.clk, api.ServerInfo{
+		BatteryCapacityWh: h.capacityWh(), Online: h.onlineFunc(), Energy: h.energy.energy, WriteBudget: h.writeBudget,
+	})
 	if err != nil {
 		return api.State{TS: h.clk()}
 	}
@@ -1171,4 +1189,12 @@ func (h *handle) capacityWh() int {
 		return h.cfg.Battery.CapacityWh
 	}
 	return 0
+}
+
+// writeBudget is the gateway's budget for /state and config events.
+func (h *handle) writeBudget() map[string]api.WriteBudget {
+	if h.gw == nil {
+		return map[string]api.WriteBudget{}
+	}
+	return api.BudgetView(h.gw.Budget())
 }

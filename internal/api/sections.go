@@ -9,6 +9,9 @@ const (
 	SectionSchedule          = "schedule"
 	SectionIdentity          = "identity"
 	SectionForwardMode       = "forward-mode"
+	// SectionWriteBudget: only the write budget changed (a write that was
+	// sent but not confirmed still counts — state.write_budget is new).
+	SectionWriteBudget = "write-budget"
 )
 
 // Identity registers (the model string 30000 ×15, the versions

@@ -231,6 +231,10 @@ type State struct {
 	GridConnected *bool `json:"grid_connected"`
 	// Temperatures are the live temperatures (°C).
 	Temperatures Temperatures `json:"temperatures"`
+	// Energy is the lifetime energy counters (kWh).
+	Energy Energy `json:"energy"`
+	// WriteBudget is each budgeted setting's write budget (WriteBudget).
+	WriteBudget map[string]WriteBudget `json:"write_budget"`
 }
 
 // handleState is GET /state (spec getState): the normalized snapshot.
@@ -289,6 +293,7 @@ func (s *Server) buildState(st store.State) (State, error) {
 	}
 	body.Temperatures = s.temperaturesOf(st)
 	body.InverterState, body.GridConnected = inverterState(st.InvState)
+	s.hostParts(&body)
 
 	var newest time.Time
 	for _, ts := range []time.Time{st.TeleTS, st.SnapTS, st.SchedTS} {
@@ -590,4 +595,14 @@ func inverterState(v *int) (string, *bool) {
 		grid = new(false)
 	}
 	return inverterStates[*v], grid
+}
+
+// hostParts fills what the host provides: the energy counters and the
+// write budget.
+func (s *Server) hostParts(body *State) {
+	body.WriteBudget = s.writeBudget()
+	body.Energy = Energy{Sources: map[string]string{}}
+	if s.info.Energy != nil {
+		body.Energy = s.info.Energy()
+	}
 }

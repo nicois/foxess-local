@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -503,4 +504,51 @@ func TestWriteBudgetAlerts(t *testing.T) {
 			t.Fatal("no alert for the refused write")
 		}
 	}
+}
+
+// TestWriteBudgetVisible (foxess-control local backend, 2026-11-19): the
+// budget is in /state per setting (the identity.writes names), and a
+// refusal says which setting, that none remain, when the next write is
+// allowed, and Retry-After.
+func TestWriteBudgetVisible(t *testing.T) {
+	h := newHarness(t)
+	gateway.WithWriteBudget(2, time.Hour)(h.gw)
+	var st struct {
+		WriteBudget map[string]struct {
+			Limit      int        `json:"limit"`
+			Remaining  int        `json:"remaining"`
+			WindowS    int        `json:"window_s"`
+			NextFreeAt *time.Time `json:"next_free_at"`
+		} `json:"write_budget"`
+	}
+	decode(t, h.do(t, httpGet, "/api/v1/state", RoleReadOnly, nil), &st)
+	if b := st.WriteBudget["work_mode"]; b.Limit != 2 || b.Remaining != 2 || b.WindowS != 3600 || b.NextFreeAt != nil {
+		t.Fatalf("fresh: %+v", st.WriteBudget)
+	}
+	last := writeUntilRefused(t, h)
+	p := checkProblem(t, last, http.StatusTooManyRequests, "write_budget")
+	if p.Setting != "work_mode" || p.Remaining == nil || *p.Remaining != 0 || p.NextFreeAt == nil {
+		t.Fatalf("429 body: %+v", p)
+	}
+	if ra, err := strconv.Atoi(last.Header().Get("Retry-After")); err != nil || ra <= 0 || ra > 3600 {
+		t.Fatalf("Retry-After %q", last.Header().Get("Retry-After"))
+	}
+	decode(t, h.do(t, httpGet, "/api/v1/state", RoleReadOnly, nil), &st)
+	if b := st.WriteBudget["work_mode"]; b.Remaining != 0 || b.NextFreeAt == nil {
+		t.Fatalf("spent: %+v", b)
+	}
+}
+
+// writeUntilRefused flips the work mode until the budget refuses a write.
+func writeUntilRefused(t *testing.T, h *harness) *httptest.ResponseRecorder {
+	t.Helper()
+	modes := []string{workModeFeedIn, workModeSelfUse}
+	var last *httptest.ResponseRecorder
+	for i := range 12 {
+		last = h.do(t, httpPut, "/api/v1/work-mode", RoleStandard, map[string]string{jsonFieldWorkMode: modes[i%2]})
+		if last.Code == http.StatusTooManyRequests {
+			break
+		}
+	}
+	return last
 }

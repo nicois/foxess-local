@@ -394,7 +394,10 @@ type problemBody struct {
 		Field   string `json:"field"`
 		Message string `json:"message"`
 	} `json:"errors"`
-	Applied string `json:"applied"`
+	Applied    string     `json:"applied"`
+	Setting    string     `json:"setting"`
+	Remaining  *int       `json:"remaining"`
+	NextFreeAt *time.Time `json:"next_free_at"`
 }
 
 // wantStatus asserts the response's status code.

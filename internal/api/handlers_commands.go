@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"net/http"
 	"regexp"
 	"sort"
 	"strconv"
+	"time"
 
 	"foxesslocal/internal/gateway"
 )
@@ -18,8 +20,9 @@ import (
 // status 0 = the client went away (nothing to write), 200 = the body,
 // else a problem.
 type commandResponse struct {
-	status int
-	body   any
+	status     int
+	body       any
+	retryAfter time.Duration // > 0: a Retry-After header (write_budget)
 }
 
 // commandAuditDetail is the /audit row for one operator command (the
@@ -160,18 +163,18 @@ func (s *Server) runCommand(r *http.Request, tk Token, cmd gateway.Command, summ
 					Detail: fmt.Sprintf("write refused for %s by %s: %v", summary, tk.Name, out.submitErr),
 				})
 			}
-			return submitResponse(out.submitErr)
+			return s.submitResponse(out.submitErr)
 		case out.queued:
-			return commandResponse{http.StatusServiceUnavailable, problem{
+			return commandResponse{status: http.StatusServiceUnavailable, body: problem{
 				Title:  "Inverter offline",
 				Code:   "inverter_offline",
 				Detail: "no active inverter flow; the command stays queued",
 			}}
 		case out.waitErr == nil && out.res.Status == gateway.StatusAcked:
 			if fromResult, ok := readBack.(func(gateway.Result) any); ok {
-				return commandResponse{http.StatusOK, fromResult(out.res)}
+				return commandResponse{status: http.StatusOK, body: fromResult(out.res)}
 			}
-			return commandResponse{http.StatusOK, readBack}
+			return commandResponse{status: http.StatusOK, body: readBack}
 		case out.waitErr == nil && (out.res.Status == gateway.StatusFailed || out.res.Status == gateway.StatusExpired):
 			// The device read back a contradiction (failed) or the
 			// gateway's TTL elapsed (expired): the command is confirmed
@@ -180,14 +183,14 @@ func (s *Server) runCommand(r *http.Request, tk Token, cmd gateway.Command, summ
 			if detail == "" {
 				detail = "the command expired before the device read back"
 			}
-			return commandResponse{http.StatusBadGateway, problem{
+			return commandResponse{status: http.StatusBadGateway, body: problem{
 				Title:   "Command failed",
 				Code:    "command_failed",
 				Applied: confirmedNo,
 				Detail:  detail,
 			}}
 		default:
-			return commandResponse{http.StatusGatewayTimeout, problem{
+			return commandResponse{status: http.StatusGatewayTimeout, body: problem{
 				Title:   "Command failed",
 				Code:    "command_failed",
 				Applied: confirmedUnknown,
@@ -270,11 +273,27 @@ func (s *Server) writeCommand(w http.ResponseWriter, resp commandResponse) {
 	if resp.status == 0 {
 		return
 	}
+	if resp.retryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(resp.retryAfter.Seconds()))))
+	}
 	if p, ok := resp.body.(problem); ok && resp.status != http.StatusOK {
 		writeProblem(w, resp.status, p)
 		return
 	}
 	writeJSON(w, resp.status, resp.body)
+}
+
+// submitResponse maps one gateway Submit error to the spec's codes.
+func (s *Server) submitResponse(err error) commandResponse {
+	if be, ok := errors.AsType[*gateway.BudgetError](err); ok {
+		zero := 0
+		next := be.NextFree
+		return commandResponse{status: http.StatusTooManyRequests, body: problem{
+			Title: "Too many writes", Code: "write_budget", Detail: err.Error(),
+			Setting: kindFeature[be.Kind], Remaining: &zero, NextFreeAt: &next,
+		}, retryAfter: max(time.Second, next.Sub(s.clock()))}
+	}
+	return submitResponse(err)
 }
 
 // submitResponse maps one gateway Submit error to the spec's codes.
@@ -284,25 +303,25 @@ func submitResponse(err error) commandResponse {
 	}
 	switch {
 	case errors.Is(err, gateway.ErrWriteBudget):
-		return commandResponse{http.StatusTooManyRequests, problem{
+		return commandResponse{status: http.StatusTooManyRequests, body: problem{
 			Title:  "Too many writes",
 			Code:   "write_budget",
 			Detail: err.Error(),
 		}}
 	case errors.Is(err, gateway.ErrInFlight):
-		return commandResponse{http.StatusConflict, problem{
+		return commandResponse{status: http.StatusConflict, body: problem{
 			Title:  "Command in flight",
 			Code:   "command_in_flight",
 			Detail: err.Error(),
 		}}
 	case errors.Is(err, gateway.ErrScheduleOverlap):
-		return commandResponse{http.StatusBadRequest, problem{
+		return commandResponse{status: http.StatusBadRequest, body: problem{
 			Title:  "Schedule overlap",
 			Code:   "schedule_overlap",
 			Detail: err.Error(),
 		}}
 	default:
-		return commandResponse{http.StatusBadRequest, problem{
+		return commandResponse{status: http.StatusBadRequest, body: problem{
 			Title:  "Invalid value",
 			Code:   "invalid_value",
 			Detail: err.Error(),

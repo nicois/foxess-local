@@ -2,6 +2,7 @@ package api
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -117,5 +118,48 @@ func TestSpecServed(t *testing.T) {
 	rec := h.do(t, httpGet, "/api/v1/openapi.yaml", "", nil)
 	if rec.Code != 200 || rec.Header().Get("Content-Type") != "application/yaml" || rec.Body.String() != string(want) {
 		t.Fatalf("status %d, type %q, %d bytes (want %d)", rec.Code, rec.Header().Get("Content-Type"), rec.Body.Len(), len(want))
+	}
+}
+
+// TestSpecProblemCodes (foxess-control local backend review, 2026-11-19):
+// every problem code the API emits is in the spec's Problem.code enum,
+// so a client can switch on them.
+func TestSpecProblemCodes(t *testing.T) {
+	b, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Components struct {
+			Schemas struct {
+				Problem struct {
+					Properties struct {
+						Code struct {
+							Enum []string `yaml:"enum"`
+						} `yaml:"code"`
+					} `yaml:"properties"`
+				} `yaml:"Problem"` //nolint:tagliatelle // the spec's own schema name
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	enum := doc.Components.Schemas.Problem.Properties.Code.Enum
+	files, _ := filepath.Glob("*.go")
+	used := regexp.MustCompile(`Code:\s+"([a-z_]+)"`)
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(f) //nolint:gosec // G304: this package's own sources
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range used.FindAllStringSubmatch(string(src), -1) {
+			if !slices.Contains(enum, m[1]) {
+				t.Errorf("%s: problem code %q is not in Problem.code's enum", f, m[1])
+			}
+		}
 	}
 }

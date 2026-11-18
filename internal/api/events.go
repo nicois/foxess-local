@@ -83,6 +83,9 @@ type SnapshotEvent struct {
 	Power        Power     `json:"power"`
 	SocPct       int       `json:"soc_pct"`
 	BatteryState string    `json:"battery_state"`
+	// Energy is the lifetime counters, in every snapshot once read (small;
+	// a subscriber need not poll /state for them).
+	Energy *Energy `json:"energy,omitempty"`
 }
 
 // ConfigEvent is one confirmed register change (ours or a cloud push);

@@ -32,6 +32,10 @@ const (
 	// picks up the device's own value (it rounds some limits — profile §5)
 	// and any change made at the inverter's panel.
 	settingsEvery = 5 * time.Minute
+
+	// energyEvery: the lifetime energy totals (the foxess-control local
+	// backend paces its feed-in target from them and checks every 60 s).
+	energyEvery = 30 * time.Second
 )
 
 // identityBlocks are read when a session is classified (its start, then
@@ -78,6 +82,9 @@ type poller struct {
 
 	settingsConn string    // the session the last complete settings round read
 	settingsAt   time.Time // when that round completed
+
+	energyConn string    // the session the last energy read was on
+	energyAt   time.Time // when it was read
 
 	// classification (D-020/D-021): the session's register layout
 	classConn  string
@@ -223,7 +230,28 @@ func (p *poller) tickKH(ctx context.Context, connID string) {
 	tele := r.Tele()
 	p.record(connID, now, tele)
 	p.observe(Event{Kind: EventTelemetry, ConnID: connID, Tele: &tele})
+	p.energy(ctx, connID)
 	p.settings(ctx, connID)
+}
+
+// energy reads the lifetime energy totals when due (a new session, or
+// energyEvery since the last read). A failed read stays due.
+func (p *poller) energy(ctx context.Context, connID string) {
+	if connID == p.energyConn && p.clock().Sub(p.energyAt) < energyEvery {
+		return
+	}
+	vals, err := p.read(ctx, fnHoldingRead, frame.KHEnergyAddr, frame.KHEnergyCount)
+	if err != nil {
+		return
+	}
+	e, err := frame.ParseKHEnergy(vals)
+	if err != nil {
+		return
+	}
+	now := p.clock()
+	p.recordRegs(now, frame.KHEnergyAddr, vals)
+	p.energyConn, p.energyAt = connID, now
+	p.observe(Event{Kind: EventEnergy, ConnID: connID, Energy: &e})
 }
 
 // tickMap is a tentative layout's poll through its foxess_modbus map. A

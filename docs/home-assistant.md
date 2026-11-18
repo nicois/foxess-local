@@ -99,35 +99,43 @@ shows as unknown.
 
 ### Energy dashboard
 
-The Energy dashboard needs energy (kWh) that only ever increases, one
-sensor per direction. Split the signed powers into positive flows, then
-integrate them:
+The Energy dashboard needs energy (kWh) that only ever increases. The
+inverter keeps lifetime counters, and `/state` reports them under
+`energy` (read every 30 s; they match the FoxESS app and survive
+restarts). Add them to the same `rest:` block:
 
 ```yaml
-template:
-  - sensor:
-      - name: FoxESS grid import power
-        unit_of_measurement: W
-        device_class: power
-        state: "{{ [states('sensor.foxess_grid_power') | float(0), 0] | max }}"
-      - name: FoxESS grid export power
-        unit_of_measurement: W
-        device_class: power
-        state: "{{ [-(states('sensor.foxess_grid_power') | float(0)), 0] | max }}"
-      - name: FoxESS battery charge power
-        unit_of_measurement: W
-        device_class: power
-        state: "{{ [states('sensor.foxess_battery_power') | float(0), 0] | max }}"
-      - name: FoxESS battery discharge power
-        unit_of_measurement: W
-        device_class: power
-        state: "{{ [-(states('sensor.foxess_battery_power') | float(0)), 0] | max }}"
+      - name: FoxESS grid export energy
+        value_template: "{{ value_json.energy.grid_export_kwh }}"
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+      - name: FoxESS grid import energy
+        value_template: "{{ value_json.energy.grid_import_kwh }}"
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+      - name: FoxESS solar energy
+        value_template: "{{ value_json.energy.pv_kwh }}"
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+      - name: FoxESS battery charge energy
+        value_template: "{{ value_json.energy.battery_charge_kwh }}"
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+      - name: FoxESS battery discharge energy
+        value_template: "{{ value_json.energy.battery_discharge_kwh }}"
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
 ```
 
-Then, under **Settings → Devices & services → Helpers → Integral
-sensor**, add one per flow (solar, grid import, grid export, battery
-charge, battery discharge): method *left*, unit prefix *k*, time unit
-*hours*. Pick those in the Energy dashboard.
+Pick those in the Energy dashboard. `load_kwh` (household use) and
+`output_kwh` (the inverter's AC output) are there too. A counter is
+`null` until its first read, and on inverter models that do not report
+it.
 
 ## 3. Commands (optional)
 
@@ -211,3 +219,21 @@ critical ones.
   `GET /metrics` serves Prometheus metrics.
 - Errors are RFC 7807 problem documents with a stable `code`; branch on
   it, not on the text.
+- `state.energy` holds the lifetime counters (kWh, 0.1 kWh resolution,
+  `as_of`, and `sources` saying each comes from an inverter register).
+  They never decrease. If the inverter's counter goes backwards
+  (inverter replaced, firmware reset), the new value is reported and a
+  `system` event `counter-reset` names the field: re-baseline rather than
+  booking a negative delta. Every `snapshot` event carries `energy` once
+  it has been read.
+- `state.write_budget` shows, per setting, how many real writes remain
+  in the rolling hour (`limit`, `remaining`, `window_s`,
+  `next_free_at`). A write the inverter already holds costs nothing; a
+  `PUT /schedule` costs one however many groups changed. Over the budget
+  a write is refused with `429 write_budget`, carrying `setting`,
+  `remaining: 0`, `next_free_at` and a `Retry-After` header. Pace
+  frequent adjustments against `remaining` and keep some writes in
+  reserve for the ones that matter. The limits are configurable
+  (`[writes]` in the config file).
+- `GET /api/v1/config` includes `time_zone_name` (IANA, e.g.
+  `Australia/Sydney`): schedule windows run in the host's zone.

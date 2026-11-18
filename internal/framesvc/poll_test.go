@@ -80,11 +80,17 @@ func TestPollerCadence(t *testing.T) {
 		<-done
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		if len(f.recorded) != 3 || len(f.events) != 3 {
-			t.Fatalf("after 3.5 periods: %d rows, %d events, want 3 each", len(f.recorded), len(f.events))
+		var tele []Event // the energy block publishes its own events
+		for _, ev := range f.events {
+			if ev.Kind == EventTelemetry {
+				tele = append(tele, ev)
+			}
 		}
-		if f.recorded[0].Soc != 77 || f.events[0].Kind != EventTelemetry || f.events[0].ConnID != "c1" {
-			t.Fatalf("row %+v event %+v", f.recorded[0], f.events[0])
+		if len(f.recorded) != 3 || len(tele) != 3 {
+			t.Fatalf("after 3.5 periods: %d rows, %d telemetry events, want 3 each", len(f.recorded), len(tele))
+		}
+		if f.recorded[0].Soc != 77 || tele[0].ConnID != "c1" {
+			t.Fatalf("row %+v event %+v", f.recorded[0], tele[0])
 		}
 		want := []int{frame.KHRealtimeAAddr, frame.KHRealtimeBAddr}
 		live := liveReads(f.reads)
@@ -162,7 +168,7 @@ func TestPollTargetSettles(t *testing.T) {
 func settingsRegs(regs []int) []int {
 	var out []int
 	for _, a := range regs {
-		if a != frame.KHRealtimeAAddr && a != frame.KHRealtimeBAddr {
+		if a != frame.KHRealtimeAAddr && a != frame.KHRealtimeBAddr && a != frame.KHEnergyAddr {
 			out = append(out, a)
 		}
 	}
@@ -318,4 +324,45 @@ func TestPollerIdentityBlockOptional(t *testing.T) {
 			t.Fatalf("30000 read %d times in 3 ticks, want 1 (no per-tick retry)", n30000)
 		}
 	})
+}
+
+// TestPollerReadsEnergy (foxess-control local backend, 2026-11-19): on
+// the KH layout the lifetime-energy block is read on the first tick and
+// then every energyEvery (the integration needs ≤ 60 s), recorded, and
+// published as an energy event.
+func TestPollerReadsEnergy(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := &fakePollDeps{ready: true}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() { f.poller().run(ctx); close(done) }()
+		// the first tick (at pollEvery), then energyEvery later
+		time.Sleep(pollEvery + energyEvery + pollEvery/2)
+		synctest.Wait()
+		cancel()
+		<-done
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		reads, recorded := countAddr(f.reads, frame.KHEnergyAddr), countAddr(f.regs, frame.KHEnergyAddr)
+		events := 0
+		for _, ev := range f.events {
+			if ev.Kind == EventEnergy && ev.Energy != nil {
+				events++
+			}
+		}
+		if reads != 2 || recorded != 2 || events != 2 {
+			t.Fatalf("energy reads %d, recorded %d, events %d (want 2 each over %v)", reads, recorded, events, energyEvery)
+		}
+	})
+}
+
+// countAddr counts a block address in a read or record log.
+func countAddr(log []int, addr int) int {
+	n := 0
+	for _, a := range log {
+		if a == addr {
+			n++
+		}
+	}
+	return n
 }

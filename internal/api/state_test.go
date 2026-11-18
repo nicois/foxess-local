@@ -141,8 +141,16 @@ func assertEmptyStateJSON(t *testing.T, body string) {
 	if !contains(body, `"online":false`) {
 		t.Errorf("empty state: want online false, got %s", body)
 	}
-	if contains(body, `"as_of"`) {
+	// the top-level as_of (energy.as_of is its own field: null until read)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["as_of"]; ok {
 		t.Errorf("empty state: as_of must be absent (no frame reflected), got %s", body)
+	}
+	if !contains(body, `"energy":{"grid_export_kwh":null`) {
+		t.Errorf("empty state: energy counters must be null before a read, got %s", body)
 	}
 }
 

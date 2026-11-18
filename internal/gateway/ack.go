@@ -168,11 +168,13 @@ func (g *Gateway) startWritePhaseLocked(rt *rtCommand) error {
 			return nil
 		}
 	}
-	g.noteWriteLocked(rt.cmd.Kind)
 	rt.writes = wrs
 	for i := range frs {
 		if ierr := g.inj.InjectS2C(g.flow, frs[i].Raw); ierr != nil {
 			return fmt.Errorf("gateway: inject write phase: %w", ierr)
+		}
+		if i == 0 {
+			g.noteWriteLocked(rt.cmd.Kind) // counted once a frame reached the session
 		}
 	}
 	return nil

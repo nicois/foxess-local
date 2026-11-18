@@ -35,6 +35,18 @@ version; anything else bumps the patch version.
   `[alerts]` and under Tuning (expert); a level of 0 turns them off.
 - Expert tokens can change the tuning settings; the other settings
   still need an installer.
+- Lifetime energy counters in `/state` and in every SSE snapshot
+  (`energy`: grid export / import, PV, battery charge / discharge, load,
+  inverter output, in kWh). They come from the inverter's own registers,
+  read every 30 s, and never decrease; a real reset is announced with a
+  `counter-reset` system event. For the foxess-control local backend and
+  the Home Assistant Energy dashboard.
+- The write budget is visible: `/state.write_budget` per setting
+  (`limit`, `remaining`, `window_s`, `next_free_at`), and config events
+  carry it. A refused write's 429 names the `setting` and `next_free_at`,
+  with a `Retry-After` header. The limits are configurable
+  (`[writes] per_hour`, `[writes.per_setting]`).
+- `/config.time_zone_name`: the host's IANA time zone.
 - The web UI in German, French, Italian, Spanish and Simplified Chinese.
   It follows the browser's language, with a picker under More →
   Settings → Language that is remembered on the device. Dates follow the
@@ -46,6 +58,13 @@ version; anything else bumps the patch version.
   the tag. Each draft release's notes are its changelog section.
 
 ### Fixed
+- A write whose frame could not be sent no longer counts against the
+  write budget.
+- The API description now lists every problem code the API returns
+  (a test keeps them in step), the 429 on every write endpoint, and the
+  fields `/state.ts`, `/config.forward_mode` and the compatibility
+  report's `layout` and `third_party`, which were returned but
+  undocumented.
 - Two garbled sentences on the Device page (the register scan's
   description).
 - The release workflow uploads the release files by name. It used to

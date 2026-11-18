@@ -58,6 +58,7 @@ type Config struct {
 	Access    Access    `toml:"access"`
 	Notify    Notify    `toml:"notify"`
 	Alerts    Alerts    `toml:"alerts"`
+	Writes    Writes    `toml:"writes"`
 	Net       Net       `toml:"net"`
 	Store     Store     `toml:"store"`
 	Forward   Forward   `toml:"forward"`
@@ -161,6 +162,26 @@ type Access struct {
 	// the pages beyond the dashboard (schedule, control, activity, device,
 	// cloud, settings, frames). Default off: the dashboard only.
 	PublicAllPages bool `toml:"public_all_pages"`
+}
+
+// Writes bounds real writes to the inverter's non-volatile memory: at most
+// PerHour per setting per rolling hour (default DefaultWritesPerHour),
+// with per-setting overrides keyed by the API's feature names
+// (work_mode, schedule, power_limits, …; 0 = unbudgeted).
+type Writes struct {
+	PerHour    *int           `toml:"per_hour"`
+	PerSetting map[string]int `toml:"per_setting"`
+}
+
+// DefaultWritesPerHour is the default write budget per setting.
+const DefaultWritesPerHour = 10
+
+// Hourly is the per-setting budget (the default when unset).
+func (w Writes) Hourly() int {
+	if w.PerHour == nil {
+		return DefaultWritesPerHour
+	}
+	return *w.PerHour
 }
 
 // Notify holds the outbound notification targets (F2); each is optional
