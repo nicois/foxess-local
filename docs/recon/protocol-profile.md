@@ -483,8 +483,30 @@ identity. The measured balance that holds is **load ≈ ac_port + grid**
 (4398 − 76 = 4322 vs 4326 W). The telemetry row's identity-delta
 columns therefore carry the losses instead of ~0.
 
-Open: 31014; 31020's meaning; the 31027 enum values; stored energy
-(no KH_PRE133 register — snap61 stays its source).
+**Lifetime energy totals — 32000 ×24** (holding, fn03; foxess_modbus
+KH_PRE133 / KH_133). Verified live 2026-11-19 07:42 AEDT against the
+FoxESS cloud's cumulative sensors (via Home Assistant). Each total is
+u32, **high word first**, 0.1 kWh, followed by a u16 "today" word (0.1
+kWh since local midnight). Read every 30 s for `/state.energy`.
+
+| regs | total | read | cloud (HA, earlier that morning) | API |
+|---|---|---|---|---|
+| 32000:32001 / 32002 | PV generation | 4429.4 kWh / today 0.2 | `PVEnergyTotal` 4429.2 | `pv_kwh` |
+| 32003:32004 / 32005 | battery charge | 6368.5 / 0.0 | `chargeEnergyToTal` 6368.5 | `battery_charge_kwh` |
+| 32006:32007 / 32008 | battery discharge | 7210.8 / 3.6 | `dischargeEnergyToTal` 7207.7 (01:02) | `battery_discharge_kwh` |
+| 32009:32010 / 32011 | feed-in (export) | 2484.8 / 0.3 | `feedin` 2484.5 | `grid_export_kwh` |
+| 32012:32013 / 32014 | grid consumption (import) | 5676.5 / 0.0 | `gridConsumption` 5676.5 | `grid_import_kwh` |
+| 32015:32016 / 32017 | yield (inverter AC output) | 7573.1 / 1.8 | `generation` 7571.6 | `output_kwh` |
+| 32018:32019 / 32020 | "input energy" | 4242.1 / 0.0 | — | not used (meaning open) |
+| 32021:32022 / 32023 | load (household) | 6421.5 / 1.2 | `loads` 6420.5 | `load_kwh` |
+
+Discharge and yield exceed 65 535 tenths, which confirms the word
+order. The cloud's "generation" (labelled "Solarenergie" in the German
+Home Assistant UI) is the yield total, not PV.
+
+Open: 31014; 31020's meaning; the 31027 enum values; 32018 "input
+energy"; stored energy (no KH_PRE133 register — snap61 stays its
+source).
 
 ## 6. Firmware / update messages
 

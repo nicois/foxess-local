@@ -2,10 +2,11 @@ package frame
 
 import "fmt"
 
-// KH lifetime energy totals (foxess_modbus KH_PRE133 / KH_133 maps,
-// 2026-11-19, for the foxess-control local backend): one holding-register
-// block, 32-bit values high word first, 0.1 kWh. Each total is followed
-// by a 16-bit "today" word, which is not decoded.
+// KH lifetime energy totals (foxess_modbus KH_PRE133 / KH_133 maps, for
+// the foxess-control local backend): one holding-register block, 32-bit
+// values high word first, 0.1 kWh. Each total is followed by a 16-bit
+// "today" word, which is not decoded. Verified live on the KH10
+// 2026-11-19 against the cloud's cumulative totals (profile §5).
 const (
 	KHEnergyAddr  = 32000 // 32000..32023
 	KHEnergyCount = 24

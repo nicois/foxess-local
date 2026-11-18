@@ -8,6 +8,16 @@ import "testing"
 // discharge 32006, feed-in 32009, grid consumption 32012, yield 32015,
 // input 32018, load 32021); the "today" words between are skipped.
 func TestParseKHEnergy(t *testing.T) {
+	// the live KH10 read, 2026-11-19 07:42 AEDT (profile §5)
+	live := []uint16{0, 44294, 2, 0, 63685, 0, 1, 6572, 36, 0, 24848, 3, 0, 56765, 0, 1, 10195, 18, 0, 42421, 0, 0, 64215, 12}
+	got, err := ParseKHEnergy(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (KHEnergy{PV: 44294, Charge: 63685, Discharge: 72108, FeedIn: 24848, GridImport: 56765, Yield: 75731, Input: 42421, Load: 64215}); got != want {
+		t.Fatalf("live read: %+v, want %+v", got, want)
+	}
+
 	regs := make([]uint16, KHEnergyCount)
 	set := func(off int, v uint32) { regs[off], regs[off+1] = uint16(v>>16), uint16(v) } //nolint:gosec // G115: splitting a uint32 into its words
 	set(0, 123456)                                                                       // PV 12345.6 kWh (crosses a word: 0x0001_E240)
