@@ -27,6 +27,9 @@ prek run --all-files    # the lint hooks — exactly what CI's lint job runs
 
 Releases (D-023, `RELEASING.md`):
 
+- `make tag` picks the next version from `CHANGELOG.md`'s Unreleased
+  entries, commits and tags locally. Every notable change adds an entry
+  under `## [Unreleased]` (`tools/changelog` checks the format).
 - `make release VERSION=vX.Y.Z REPO=owner/name` builds reproducible static
   amd64/arm64/armv7 binaries, the installer and `SHA256SUMS`.
 - `make sign` signs offline with minisign; `make verify-release` checks

@@ -54,8 +54,23 @@ only accept binaries signed by the key built into them.
    self-upgrades to the second from a fake GitHub API, checks that a
    deliberately broken third is rolled back by the upgrade guard, re-runs
    the installer and uninstalls. Nothing touches GitHub or the real key.
-1. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`. CI runs the
-   tests, builds `dist/` and opens a **draft** release.
+1. Tag: `make tag` (on a clean `main`). It picks the version from
+   `CHANGELOG.md`'s Unreleased entries:
+   - Breaking or Removed → major (minor before 1.0);
+   - Added → minor;
+   - anything else → patch.
+
+   `BUMP=minor` or `BUMP=major` raises the bump; nothing lowers it. It
+   dates the entries under the new version, commits "Release vX.Y.Z" and
+   creates an annotated tag carrying that section. Nothing is pushed:
+   check the commit and tag, then push both (`git push origin main
+   vX.Y.Z`, the command it prints). CI runs the tests, builds `dist/` and
+   opens a **draft** release whose notes are that changelog section,
+   followed by the verification commands. A tag without a section fails
+   before any draft.
+
+   Between releases, add an entry under `## [Unreleased]` with each
+   notable change. `make tag` refuses an empty Unreleased section.
 2. Check the draft by rebuilding locally from the same tag:
 
    ```bash

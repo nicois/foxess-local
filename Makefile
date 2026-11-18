@@ -1,6 +1,6 @@
 GIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
-.PHONY: all foxess-local installer fmdata release sign verify-release image synthdb pgo
+.PHONY: all foxess-local installer fmdata tag release sign verify-release image synthdb pgo
 all: foxess-local installer
 
 # The app binary, stamped with the git short hash. The stamp is the
@@ -29,6 +29,8 @@ fmdata:
 	python3 -I tools/fmimport/fmimport.py --src $(FM_SRC) --out internal/fmdata/foxess_modbus.json
 
 # ---- releases (design D-023; RELEASING.md) ----
+#   make tag             # next version from CHANGELOG.md's Unreleased entries;
+#                        # commits and tags locally (BUMP=minor|major raises it)
 #   make release VERSION=v0.2.0 REPO=owner/foxess-local
 #   make sign VERSION=v0.2.0  # as the key's account: minisign with SIGN_KEY
 #   make verify-release  # the new binary verifies its own release
@@ -38,6 +40,10 @@ DIST ?= dist
 # The secret key lives in another account; that account runs `make sign`
 # (e.g. make -C <this checkout> sign VERSION=…). Override per run.
 SIGN_KEY ?= /home/nfarrell/foxess-key/foxess-local.key
+BUMP ?=
+tag:
+	BUMP="$(BUMP)" deploy/tag.sh
+
 release:
 	deploy/release.sh "$(VERSION)" "$(REPO)" "$(DIST)"
 	# the signer is another account: an existing file it may write is all

@@ -1,5 +1,6 @@
 # Builds a release on a version tag and opens an UNSIGNED draft (design
-# D-023, RELEASING.md). CI never holds the signing key: the owner checks
+# D-023, RELEASING.md), with the tag's CHANGELOG.md section as its notes.
+# CI never holds the signing key: the owner checks
 # the draft by rebuilding it (the builds are reproducible), signs
 # SHA256SUMS locally with minisign, uploads the .minisig and publishes.
 # Actions are pinned to commit SHAs (update the SHA and its tag comment together).
@@ -17,6 +18,10 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
+      # the notes are the tag's CHANGELOG.md section (make tag writes it):
+      # a tag without one fails here, before any build or draft
+      - name: changelog section
+        run: go run ./tools/changelog notes -version "${GITHUB_REF_NAME}" >changes.md
       - run: go test ./...
       - run: make release VERSION="${GITHUB_REF_NAME}" REPO="${GITHUB_REPOSITORY}"
       - name: draft release (unsigned)
@@ -24,8 +29,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           key="$(sed -n 2p deploy/release-key.pub)"
-          cat >notes.md <<EOF
-          Verify the download (INSTALL.md, step 2) with this release's signing key:
+          cp changes.md notes.md
+          cat >>notes.md <<EOF
+
+          ## Verify the download
+
+          With minisign (INSTALL.md, step 2) and this release's signing key:
 
               minisign -Vm SHA256SUMS -P ${key}
               sha256sum -c --ignore-missing SHA256SUMS
