@@ -1515,3 +1515,44 @@ a.badge { text-decoration: none; &:hover { text-decoration: underline; } }
   .radio-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.35rem 0; cursor: pointer; }
   .btn-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.4rem; }
 }
+
+/* very wide screens, the dashboard: two columns. Left, the header, the
+   banners, the live view and the footer; right, the energy history,
+   scrolling on its own so the live view stays in sight. main#view steps
+   aside (display: contents) so its two sections are the grid's items;
+   each becomes the size container its container queries need. */
+@media (min-width: 1400px) {
+  #app[data-route="dashboard"] {
+    display: grid;
+    grid-template-columns: minmax(0, 40rem) minmax(0, 1fr);
+    /* header, three banners, the live view, the footer; the last row
+       takes the rest of the history column's height */
+    grid-template-rows: auto auto auto auto auto auto 1fr;
+    align-items: start;
+
+    > .top { grid-area: 1 / 1; }
+    > #banner-inverter { grid-area: 2 / 1; }
+    > #banner-feed { grid-area: 3 / 1; }
+    > #banner-device { grid-area: 4 / 1; }
+    > #view { display: contents; }
+    > footer { grid-area: 6 / 1; max-width: none; margin: 0; padding-top: 0.5rem; }
+
+    .now {
+      grid-area: 5 / 1;
+      margin: 1rem;
+      container-type: inline-size;
+    }
+    .energy {
+      grid-column: 2;
+      grid-row: 1 / -1;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      margin: 0;
+      padding: 1rem 1.25rem;
+      border-left: 1px solid var(--line);
+      container-type: inline-size;
+    }
+  }
+}

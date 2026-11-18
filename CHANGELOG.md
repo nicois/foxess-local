@@ -75,6 +75,9 @@ version; anything else bumps the patch version.
 
 ### Changed
 - Release checks run weekly by default (they were daily).
+- On a very wide screen (1400 px and up) the dashboard uses two columns:
+  the header, live view and footer on the left, the energy history on
+  the right with its own scrolling, so the live view stays in sight.
 - The web UI in German, French, Italian, Spanish and Simplified Chinese.
   It follows the browser's language, with a picker under More →
   Settings → Language that is remembered on the device. Dates follow the

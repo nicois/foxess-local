@@ -1009,6 +1009,8 @@ async function render() {
   // shows where you are) and a matching document title (WCAG 2.4.2)
   const title = ROUTE_TITLES[routeName()] ?? "foxesslocal";
   document.title = title + " · foxesslocal";
+  // the shell's layout may depend on the page (the wide dashboard)
+  byId("app").dataset.route = routeName();
   view.innerHTML = `<h1 class="sr-only">${esc(title)}</h1>` + html;
   paintDeviceBanner();
   htmx.process(view);
