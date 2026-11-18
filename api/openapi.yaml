@@ -2752,6 +2752,7 @@ components:
         auto_apply: { type: boolean, description: "Each new eligible release is applied once, on its own, when a scheduled check finds it (update.auto_apply). Not retried after a failure or a rollback." }
         can_apply: { type: boolean, description: Available and installable here. }
         reason: { type: string, description: Why it cannot be applied here. }
+        reason_code: { type: string, enum: [container, source_build, no_key, no_repo, unavailable], description: "reason's stable code, for a UI to translate." }
         rolled_back: { $ref: '#/components/schemas/UpgradeMarker' }
         pending: { $ref: '#/components/schemas/UpgradeMarker' }
     UpgradeMarker:

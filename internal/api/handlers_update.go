@@ -27,7 +27,7 @@ func WithUpdate(u UpdateService) ServerOption {
 const auditKindUpdate = "update"
 
 func (s *Server) noUpdates() update.View {
-	return update.View{Current: s.info.Version, Reason: "self-upgrade is not available in this host"}
+	return update.View{Current: s.info.Version, Reason: "self-upgrade is not available in this host", ReasonCode: update.ReasonUnavailable}
 }
 
 // handleUpdateGet is GET /update.

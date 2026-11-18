@@ -56,6 +56,11 @@ version; anything else bumps the patch version.
   choice), prereleases, and installing updates automatically — each new
   update tried once, never again after a rollback.
 
+- A header badge when a newer version is available ("update ↑" on a
+  phone), linked to Settings → Updates.
+- `/update` carries `reason_code`, so a UI can translate why an update
+  cannot be applied here.
+
 ### Changed
 - Release checks run weekly by default (they were daily).
 - The web UI in German, French, Italian, Spanish and Simplified Chinese.
@@ -69,6 +74,9 @@ version; anything else bumps the patch version.
   the tag. Each draft release's notes are its changelog section.
 
 ### Fixed
+- The Update choices ran together on one line; the reason an update
+  cannot be applied ("a source build: update by rebuilding") was not
+  translated.
 - The web UI did not load at all (a syntax error in the translated
   More page, unreleased). A test now checks every UI script as an ES
   module; `node --check` on a `.js` file had silently passed it.

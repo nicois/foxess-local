@@ -18,16 +18,17 @@ func TestServiceReasons(t *testing.T) {
 		name string
 		svc  *Service
 		want string
+		code string // the stable reason_code a UI translates (2026-11-19)
 	}{
-		{"container", &Service{U: &Updater{Current: vOld, Key: &PublicKey{}, Repo: testRepo}, Container: true}, "container"},
-		{"source build", &Service{U: &Updater{Current: "92ca87b", Key: &PublicKey{}, Repo: testRepo}}, "source build"},
-		{"no key", &Service{U: &Updater{Current: vOld, Repo: testRepo}}, "signing key"},
-		{"no repo", &Service{U: &Updater{Current: vOld, Key: &PublicKey{}}}, "repository"},
+		{"container", &Service{U: &Updater{Current: vOld, Key: &PublicKey{}, Repo: testRepo}, Container: true}, "container", ReasonContainer},
+		{"source build", &Service{U: &Updater{Current: "92ca87b", Key: &PublicKey{}, Repo: testRepo}}, "source build", ReasonSourceBuild},
+		{"no key", &Service{U: &Updater{Current: vOld, Repo: testRepo}}, "signing key", ReasonNoKey},
+		{"no repo", &Service{U: &Updater{Current: vOld, Key: &PublicKey{}}}, "repository", ReasonNoRepo},
 	}
 	for _, c := range cases {
 		v := c.svc.View()
-		if v.CanApply || !strings.Contains(v.Reason, c.want) {
-			t.Errorf("%s: can_apply %v reason %q", c.name, v.CanApply, v.Reason)
+		if v.CanApply || !strings.Contains(v.Reason, c.want) || v.ReasonCode != c.code {
+			t.Errorf("%s: can_apply %v reason %q code %q", c.name, v.CanApply, v.Reason, v.ReasonCode)
 		}
 	}
 }

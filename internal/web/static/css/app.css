@@ -161,6 +161,8 @@ a {
   .tabs-top { display: none; }
   #forward-badge { display: none; }
   .status { gap: 0.4rem; }
+  /* the update badge: its short form only ("update ↑") */
+  #update-badge .long { display: none; }
   .tabbar {
     position: fixed;
     inset: auto 0 0 0;
@@ -1116,6 +1118,37 @@ details.adv, details.sub {
   &[open] summary { margin-bottom: 0.6rem; }
 }
 details.sub { margin-top: 0.75rem; border-top: 1px solid var(--line); padding-top: 0.6rem; }
+
+/* the Updates panel's choices: one field per row */
+details.update-choices {
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin: 0.6rem 0 0.4rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+    select { align-self: flex-start; }
+  }
+  .radio-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.35rem 0;
+    cursor: pointer;
+    font-size: 0.9rem;
+    input { margin-top: 0.2rem; flex: none; }
+    .desc { display: block; margin-top: 0.1rem; }
+  }
+  button { margin-top: 0.5rem; }
+}
+
+/* the header's update badge is a link */
+a.badge { text-decoration: none; &:hover { text-decoration: underline; } }
+#update-badge .short { display: none; }
+@media (max-width: 720px) {
+  #update-badge .short { display: inline; }
+}
 
 /* schedule */
 .timeline {

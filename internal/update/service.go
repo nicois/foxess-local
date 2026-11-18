@@ -68,8 +68,10 @@ type View struct {
 	Checks    bool       `json:"checks_enabled"`
 	CanApply  bool       `json:"can_apply"`
 	Reason    string     `json:"reason,omitempty"` // why it cannot be applied
-	Failed    *Marker    `json:"rolled_back,omitempty"`
-	Pending   *Marker    `json:"pending,omitempty"`
+	// ReasonCode is Reason's stable code (Reason* constants).
+	ReasonCode string  `json:"reason_code,omitempty"`
+	Failed     *Marker `json:"rolled_back,omitempty"`
+	Pending    *Marker `json:"pending,omitempty"`
 	// LatestPrerelease: Latest is a prerelease (offered by the opt-in).
 	LatestPrerelease bool `json:"latest_prerelease"`
 	// The installer's choices: the check interval in hours (0 = off),
@@ -83,19 +85,30 @@ type View struct {
 
 func (s *Service) dir() string { return filepath.Dir(s.U.Exe) }
 
-// reason is why an update could not be applied here ("" = it could).
-func (s *Service) reason() string {
+// Stable codes for why an update cannot be applied here (View.ReasonCode):
+// a UI translates these; Reason stays the English text.
+const (
+	ReasonContainer   = "container"
+	ReasonSourceBuild = "source_build"
+	ReasonNoKey       = "no_key"
+	ReasonNoRepo      = "no_repo"
+	ReasonUnavailable = "unavailable" // no updater in this host (devui, tests)
+)
+
+// reason is why an update could not be applied here: its code and its
+// English text ("", "" = it could).
+func (s *Service) reason() (code, text string) {
 	switch {
 	case s.Container:
-		return "running in a container: update by pulling the new image"
+		return ReasonContainer, "running in a container: update by pulling the new image"
 	case !semver.MatchString(s.U.Current):
-		return "a source build (" + s.U.Current + "): update by rebuilding"
+		return ReasonSourceBuild, "a source build (" + s.U.Current + "): update by rebuilding"
 	case s.U.Key == nil:
-		return "this build carries no release signing key"
+		return ReasonNoKey, "this build carries no release signing key"
 	case s.U.Repo == "":
-		return "no release repository configured"
+		return ReasonNoRepo, "no release repository configured"
 	}
-	return ""
+	return "", ""
 }
 
 // View is the current state.
@@ -104,7 +117,7 @@ func (s *Service) View() View {
 	defer s.mu.Unlock()
 	iv := s.interval()
 	v := View{
-		Current: s.U.Current, Checks: iv > 0, Error: s.lastErr, Reason: s.reason(),
+		Current: s.U.Current, Checks: iv > 0, Error: s.lastErr,
 		CheckIntervalH: int(iv / time.Hour), Prerelease: s.U.allowPre(),
 		AutoApply: s.AutoApply != nil && s.AutoApply(),
 	}
@@ -117,6 +130,7 @@ func (s *Service) View() View {
 		next := s.lastAt.Add(iv)
 		v.NextCheckAt = &next
 	}
+	v.ReasonCode, v.Reason = s.reason()
 	v.CanApply = v.Reason == "" && v.Available
 	if s.U.Exe != "" {
 		if m, ok, _ := ReadFailed(s.dir()); ok {
@@ -146,7 +160,7 @@ func (s *Service) CheckNow(ctx context.Context) View {
 
 // Apply installs the latest release and, on success, restarts.
 func (s *Service) Apply(ctx context.Context) error {
-	if r := s.reason(); r != "" {
+	if _, r := s.reason(); r != "" {
 		return &ReasonError{Reason: r}
 	}
 	online := s.Healthy != nil && s.Healthy()

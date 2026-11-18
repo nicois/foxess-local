@@ -242,6 +242,8 @@ function enterApp() {
   render();
   connectSSE();
   refreshMeta();
+  refreshUpdateBadge();
+  setInterval(() => refreshUpdateBadge(), 30 * 60 * 1000);
   maybeStartSetup();
 }
 
@@ -499,6 +501,7 @@ document.body.addEventListener("htmx:after:request", (e) => {
     toast(tr("updating to {to} — the app restarts; this page reconnects by itself", { to: body?.to ?? tr("the new release") }));
   } else if (path === API + "/update/check") {
     toast(body?.available ? tr("update available: {v}", { v: body.latest }) : tr("no newer release"));
+    if (body) refreshUpdateBadge(body);
   } else if (path === API + "/write-override") {
     toast(body?.granted ? tr("untested writes enabled for this exact inverter") : tr("untested writes disabled"));
   } else if (path === API + "/config/tokens" && body) {
@@ -869,6 +872,27 @@ function renderForwardBadge() {
   }
   el.textContent = tr("cloud: {mode}", { mode: FORWARD_NAME()[mode] ?? mode.replace("_", " ") });
   el.className = "badge";
+}
+
+// refreshUpdateBadge shows a header badge, linked to Settings, while a
+// newer eligible version is known (the server's last check: no network).
+async function refreshUpdateBadge(u) {
+  if (!u) {
+    try {
+      const r = await apiFetch("/update");
+      if (!r.ok) return;
+      u = await r.json();
+    } catch { return; }
+  }
+  const el = byId("update-badge");
+  el.hidden = !u.available;
+  if (!u.available) return;
+  const long = u.latest_prerelease
+    ? tr("update: {v} (prerelease)", { v: u.latest })
+    : tr("update: {v}", { v: u.latest });
+  // the short form is for narrow screens; the title keeps the version
+  el.innerHTML = `<span class="long">${esc(long)}</span><span class="short">${esc(tr("update ↑"))}</span>`;
+  el.title = long + " — " + tr("A newer version is available: see Settings → Updates.");
 }
 
 async function refreshMeta() {
@@ -2558,6 +2582,7 @@ async function renderSettings() {
     const r = await apiFetch("/update");
     if (r.ok) upd = await r.json();
   } catch { /* the panel shows without the update state */ }
+  if (upd) refreshUpdateBadge(upd);
   let sets = null;
   try {
     const r = await apiFetch("/settings");
@@ -2751,12 +2776,12 @@ function updatesPanel(u) {
     status = `<p class="note ok">${esc(tr("{latest} is available (you have {current}).", { latest: u.latest, current: u.current }))}${u.latest_prerelease ? ` <span class="chip warn">${esc(tr("prerelease"))}</span>` : ""} ${u.url ? `<a href="${esc(u.url)}" target="_blank" rel="noopener">${esc(tr("Release notes"))}</a>` : ""}</p>
       ${u.can_apply
         ? `<button type="button" class="cmd" data-cmd="update-apply" data-confirm="updateApply" data-to="${esc(u.latest)}" hx-post="${API}/update/apply" hx-swap="none">${esc(tr("Update now"))}</button>`
-        : `<p class="muted small">${esc(u.reason ?? "")}</p>`}`;
+        : `<p class="muted small">${esc(updateReason(u))}</p>`}`;
   } else if (u.latest) {
     status = `<p class="small">${esc(tr("Up to date (latest release {v}).", { v: u.latest }))}</p>`;
   } else {
     const why = u.checks_enabled ? tr("No release information yet.")
-      : u.reason ? u.reason.charAt(0).toUpperCase() + u.reason.slice(1) + "."
+      : u.reason ? updateReason(u)
       : tr("Scheduled checks are off.");
     status = `<p class="muted small">${esc(why)}</p>`;
   }
@@ -2775,6 +2800,20 @@ function updatesPanel(u) {
     </article>`;
 }
 
+// updateReason: why an update cannot be applied here, translated by its
+// code (the server's English text when the code is unknown).
+function updateReason(u) {
+  switch (u.reason_code) {
+    case "container": return tr("Running in a container: update by pulling the new image.");
+    case "source_build": return tr("A source build ({v}): update by rebuilding.", { v: u.current });
+    case "no_key": return tr("This build carries no release signing key.");
+    case "no_repo": return tr("No release repository is configured.");
+    case "unavailable": return tr("Self-upgrade is not available in this host.");
+  }
+  const r = u.reason ?? "";
+  return r ? r.charAt(0).toUpperCase() + r.slice(1) + "." : "";
+}
+
 // UPDATE_INTERVALS: the check-interval choices, in hours.
 const UPDATE_INTERVALS = [[0, tr("Never")], [6, tr("Every 6 hours")], [24, tr("Daily")], [168, tr("Weekly")], [720, tr("Every 30 days")]];
 
@@ -2783,9 +2822,9 @@ const UPDATE_INTERVALS = [[0, tr("Never")], [6, tr("Every 6 hours")], [24, tr("D
 function updateChoices(u) {
   const iv = u.check_interval_h ?? 168;
   const opts = UPDATE_INTERVALS.some(([h]) => h === iv) ? UPDATE_INTERVALS : [...UPDATE_INTERVALS, [iv, tr("Every {n} hours", { n: iv })]];
-  return `<details class="sub">
+  return `<details class="sub update-choices">
       <summary>${esc(tr("Update choices"))}</summary>
-      <label>${esc(tr("Check for updates"))}<select id="upd-interval">
+      <label class="field">${esc(tr("Check for updates"))}<select id="upd-interval">
         ${opts.map(([h, l]) => `<option value="${h}" ${h === iv ? "selected" : ""}>${esc(l)}</option>`).join("")}
       </select></label>
       <label class="radio-row"><input type="checkbox" id="upd-pre" ${u.prerelease ? "checked" : ""}>
