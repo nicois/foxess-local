@@ -42,6 +42,8 @@ version; anything else bumps the patch version.
   never warned, or warned early from a single step.
 - History charts: a legend entry's line sample no longer wraps away from
   its name on narrow screens.
+- Control → Backup (EPS) port: choosing the other mode works. Clicking a
+  mode asked to switch to the current one, and confirming did nothing.
 
 ## [v0.2.0] - 2026-11-19
 

@@ -595,7 +595,9 @@ async function confirmGate(kind, elt, redo) {
 // the request is held until the dialog resolves.
 document.addEventListener("click", (e) => {
   const elt = e.target.closest("[data-confirm]");
-  if (!elt || elt.dataset.confirming) return;
+  // a confirming form is the submit handler's: a click inside it (a
+  // radio, its submit button) must reach the form as usual
+  if (!elt || elt instanceof HTMLFormElement || elt.dataset.confirming) return;
   e.preventDefault();
   e.stopPropagation();
   confirmGate(elt.dataset.confirm, elt, () => {
