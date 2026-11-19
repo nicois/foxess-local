@@ -13,6 +13,7 @@ import (
 
 	"foxesslocal/internal/forward"
 	"foxesslocal/internal/policy"
+	"foxesslocal/internal/siteclock"
 
 	"github.com/BurntSushi/toml"
 )
@@ -34,7 +35,7 @@ var UISettable = append([]string{
 	"battery.capacity_wh", "access.public_read_only", "access.public_all_pages", "forward.mode",
 	"notify.webhook_url", "notify.ntfy_url",
 	"store.write_delay_s",
-	"update.check_interval_h", "update.prerelease", "update.auto_apply",
+	"update.check_interval_h", "update.prerelease", "update.auto_apply", "site.time_zone",
 	"alerts.soc_threshold_pct", "alerts.soc_horizon_min", "alerts.soc_p_value", "alerts.soc_window_min",
 }, quirks.Keys()...)
 
@@ -70,6 +71,7 @@ type Config struct {
 	Scheduler Scheduler `toml:"scheduler"`
 	Battery   Battery   `toml:"battery"`
 	Update    Update    `toml:"update"`
+	Site      Site      `toml:"site"`
 	// Quirks turns known inverter quirks on or off by id (package
 	// quirks); an unlisted quirk takes its default.
 	Quirks map[string]bool `toml:"quirks"`
@@ -212,6 +214,14 @@ func (w Writes) Hourly() int {
 		return DefaultWritesPerHour
 	}
 	return *w.PerHour
+}
+
+// Site is about where the inverter is.
+type Site struct {
+	// TimeZone is the site's IANA time zone (Australia/Melbourne): the
+	// zone of the inverter's clock and schedule. Unset until chosen
+	// (setup); never assumed to be the host's.
+	TimeZone string `toml:"time_zone"`
 }
 
 // Notify holds the outbound notification targets (F2); each is optional
@@ -487,6 +497,11 @@ func (c *Config) validate() error {
 	}
 	if err := c.validateForward(); err != nil {
 		return err
+	}
+	if z := c.Site.TimeZone; z != "" {
+		if _, err := siteclock.Zone(z); err != nil {
+			return fmt.Errorf("site.time_zone: %w", err)
+		}
 	}
 	return c.validateSim()
 }

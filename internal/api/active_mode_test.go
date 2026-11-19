@@ -56,6 +56,7 @@ func TestStateInverterLimits(t *testing.T) {
 	block[41016-41007] = 100      // power limit %
 	h.st.RecordRegisters(testBase, 41007, block)
 	h.st.RecordRegisters(testBase, 41200, []uint16{10000, 7000, 0})
+	h.st.RecordRegisters(testBase, 40000, []uint16{2026, 11, 8, 23, 0, 0}) // the inverter's clock
 	var st struct {
 		Limits struct {
 			LoadW       *int     `json:"load_limit_w"`
@@ -65,7 +66,7 @@ func TestStateInverterLimits(t *testing.T) {
 			PowerPct    *int     `json:"power_limit_pct"`
 		} `json:"limits"`
 		EpsMode    string `json:"eps_mode"`
-		ActiveMode struct {
+		ActiveMode *struct {
 			Mode   string `json:"mode"`
 			Source string `json:"source"`
 		} `json:"active_mode"`
@@ -77,7 +78,7 @@ func TestStateInverterLimits(t *testing.T) {
 		l.PowerPct == nil || *l.PowerPct != 100 {
 		t.Fatalf("limits %+v", l)
 	}
-	if st.EpsMode != "ups" || st.ActiveMode.Mode == "" {
+	if st.EpsMode != "ups" || st.ActiveMode == nil || st.ActiveMode.Mode == "" {
 		t.Fatalf("eps_mode %q active %+v", st.EpsMode, st.ActiveMode)
 	}
 }

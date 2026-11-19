@@ -549,3 +549,48 @@ func TestSchedulerErrInFlightRetry(t *testing.T) {
 		t.Fatalf("want the retried open acked row, got %v", rows)
 	}
 }
+
+// TestSchedulerWallClock (owner, 2026-11-19): the windows run on the
+// inverter's wall time (OnWallClock), not the host's zone — here the
+// inverter is 5 h ahead of the host; while that time is unknown the
+// scheduler pushes nothing.
+func TestSchedulerWallClock(t *testing.T) {
+	st := newTestStore(t)
+	synctest.Test(t, func(t *testing.T) {
+		ahead := time.FixedZone("inverter", 5*3600)
+		var unknown atomic.Bool
+		wall := func() (time.Time, bool) { return time.Now().In(ahead), !unknown.Load() }
+		now, _ := wall()
+		start := now.Add(20 * time.Minute).Truncate(time.Minute)
+		end := now.Add(50 * time.Minute).Truncate(time.Minute)
+		wins := []Window{{Name: "wall", Slot: 1, Start: packHHMM(start), End: packHHMM(end), FdSoc: 90}}
+
+		f := newTestInv(t)
+		gw := gateway.New(f, time.Now)
+		f.setGw(gw)
+		gw.SetFlow(connTest)
+		sched, err := NewScheduler(st, gw, time.Now, wins)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sched.OnWallClock(wall)
+		ctx, cancel := context.WithCancel(context.Background())
+		runDone := make(chan struct{})
+		go func() { sched.Run(ctx); close(runDone) }()
+
+		sleepTo(t, start)
+		<-f.acked
+		if got := len(schedWrites(t, f)); got != 1 {
+			t.Fatalf("pushes at the inverter's start: %d, want 1", got)
+		}
+		unknown.Store(true) // e.g. the reading went stale and no zone is set
+		sleepTo(t, end.Add(2*time.Minute))
+		synctest.Wait()
+		if got := len(schedWrites(t, f)); got != 1 {
+			t.Fatalf("pushes while the wall time is unknown: %d, want 1", got)
+		}
+		cancel()
+		<-runDone
+		close(f.ackCh)
+	})
+}

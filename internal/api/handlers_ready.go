@@ -73,7 +73,14 @@ func (s *Server) readiness() ([]Check, error) {
 	if s.readyChecks != nil {
 		out = append(out, s.readyChecks()...)
 	}
-	return append(out, s.checkConnected(st), s.checkStore(), s.checkClock()), nil
+	clock := s.checkClock()
+	switch {
+	case s.siteZone() == nil:
+		clock.Status = checkPending // a setup choice, not a fault
+	case clock.Status == checkFail:
+		clock.Status = checkWarn // the inverter's clock never makes this service "not ready"
+	}
+	return append(out, s.checkConnected(st), s.checkStore(), clock), nil
 }
 
 // checkStore: every batch write has landed (the first failure sticks:

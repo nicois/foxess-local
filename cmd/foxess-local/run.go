@@ -46,6 +46,7 @@ import (
 	"foxesslocal/internal/scan"
 	"foxesslocal/internal/settings"
 	"foxesslocal/internal/sim"
+	"foxesslocal/internal/siteclock"
 	"foxesslocal/internal/store"
 	"foxesslocal/internal/update"
 	"foxesslocal/internal/web"
@@ -475,6 +476,7 @@ func (h *handle) buildMux(cfg *config.Config, tok *api.TokenStore) http.Handler 
 		PublicReadOnly:    cfg.Access.PublicReadOnly,
 		PublicAllPages:    cfg.Access.PublicAllPages,
 		BatteryCapacityWh: cfg.Battery.CapacityWh,
+		HostClockSynced:   siteclock.HostSynced,
 	}
 	if h.set != nil { // never a typed nil in the interface
 		info.Settings = h.set
@@ -540,6 +542,7 @@ func (h *handle) buildSched(cfg *config.Config) (*forward.Scheduler, error) {
 	s.OnAlert(func(msg string) {
 		h.bus.PublishSystem(api.SystemEvent{Type: api.SystemAlert, Detail: msg})
 	})
+	s.OnWallClock(h.wallNow) // the inverter's time, never the host's zone
 	return s, nil
 }
 
@@ -705,6 +708,7 @@ func (h *handle) Start(ctx context.Context) {
 	if h.sched != nil {
 		go h.sched.Run(ctx)
 	}
+	go h.clockSyncer().Run(ctx)
 	go h.maint.Run(ctx)
 	go h.live.Run(ctx, livenessTick)
 	go h.diskGuard().Run(ctx)
@@ -956,8 +960,8 @@ func commandSection(k gateway.CommandKind) string {
 		return api.SectionMeterCompensation
 	case gateway.KindSchedule:
 		return api.SectionSchedule
-	case gateway.KindRead:
-		return "" // reads change nothing
+	case gateway.KindRead, gateway.KindClock:
+		return "" // a read changes nothing; the clock is no state section
 	default:
 		return ""
 	}

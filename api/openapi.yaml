@@ -1013,7 +1013,22 @@ paths:
           `battery-forecast-low` when a line fitted to the last window of
           readings says, with confidence 1 − p, that it will be there
           within the horizon).
+
+        `site.time_zone` (installer): the site's IANA zone (e.g.
+        `Australia/Melbourne`), the zone of the inverter's clock and
+        schedule. Unset until chosen; the host's zone is never assumed.
+        When the inverter's clock disagrees with the chosen zone by more
+        than drift (5 min) or a missed daylight-saving change, the request
+        is refused with `409 zone_mismatch` (nothing stored) unless it
+        carries `?confirm=zone` — then `POST /clock/set` sets the
+        inverter's clock to it.
       x-required-role: expert
+      parameters:
+        - name: confirm
+          in: query
+          required: false
+          schema: { type: string, enum: [zone] }
+          description: Store a `site.time_zone` the inverter's clock disagrees with.
       requestBody:
         required: true
         content:
@@ -1034,6 +1049,7 @@ paths:
                 update.check_interval_h: { type: [integer, 'null'], minimum: 0, maximum: 720 }
                 update.prerelease: { type: [boolean, 'null'] }
                 update.auto_apply: { type: [boolean, 'null'] }
+                site.time_zone: { type: [string, 'null'], description: "An IANA zone name (Area/City)." }
                 quirks.eps_dropouts: { type: [boolean, 'null'], description: "Expert. See GET /quirks." }
               additionalProperties: false
       responses:
@@ -1049,6 +1065,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/InsufficientRole'
+        '409':
+          description: >-
+            The chosen `site.time_zone` disagrees with the inverter's clock
+            (`zone_mismatch`; the detail gives both times). Nothing stored.
         '503':
           description: The server runs without stored settings (tools, tests).
   /openapi.yaml:
@@ -1272,6 +1292,51 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/InsufficientRole'
+  /clock/set:
+    post:
+      tags: [Commands]
+      operationId: setInverterClock
+      summary: Set the inverter's clock to the site's time
+      description: |
+        The inverter keeps a bare wall clock (40000 ×6: year, month, day,
+        hour, minute, second; no time zone). This writes the site zone's
+        wall time now (`site.time_zone`, `PUT /settings`), from this
+        machine's clock, as one fn10 write — the FoxESS cloud's own clock
+        write, echoed by the inverter (protocol profile §5). foxess-local
+        also corrects drift (up to 5 min) and a missed daylight-saving
+        change by itself; this is for anything larger, after the owner
+        has confirmed the zone. Never queued: with no inverter session it
+        is refused. Write gate (C-008) and write budget as for every
+        write (`clock`).
+      x-required-role: installer
+      responses:
+        '429':
+          $ref: '#/components/responses/TooManyWrites'
+        '200':
+          description: The clock was set (confirmed by the inverter's echo)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [set_to, time_zone]
+                properties:
+                  set_to: { type: string, description: 'The wall time written, 2006-01-02T15:04:05 (site zone).' }
+                  time_zone: { type: string }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '409':
+          description: >-
+            No site time zone yet (`zone_unset`); this machine's clock is not
+            synchronised (`host_clock_unsynced`); or a command is in flight
+            (`command_in_flight`).
+        '501':
+          $ref: '#/components/responses/WriteUnsupported'
+        '503':
+          $ref: '#/components/responses/InverterOffline'
+        '504':
+          $ref: '#/components/responses/CommandFailed'
   /maintenance:
     get:
       tags: [Maintenance]
@@ -1810,13 +1875,15 @@ components:
         work_mode:
           $ref: '#/components/schemas/WorkMode'
         active_mode:
-          type: object
+          type: [object, 'null']
           required: [mode, source]
           description: >-
             What runs now. With the scheduler on, the first enabled group (by
             index) whose window holds the time (end exclusive); otherwise the
             base work_mode. Precedence and end handling are inferred from the
-            inverter's behaviour, not documented.
+            inverter's behaviour, not documented. The time is the inverter's
+            own wall clock (a reading under 15 min old), else the site zone's;
+            null while neither is known.
           properties:
             mode: {type: string, description: "a ScheduleGroup work mode"}
             source: {type: string, enum: [schedule, base]}
@@ -2501,8 +2568,8 @@ components:
           description: >-
             The host's IANA time-zone name (e.g. Australia/Sydney), from TZ,
             /etc/timezone or the /etc/localtime link; null when it cannot be
-            told. Schedule windows run in this zone; compare it with Home
-            Assistant's to catch a mismatch.
+            told. Informational: the schedule runs on the inverter's clock,
+            kept to `site_time_zone`.
         raw_hours:
           type: integer
           description: Dense raw telemetry retention (hours).
@@ -2534,18 +2601,23 @@ components:
         time_zone:
           type: string
           description: >-
-            The host time zone the schedule windows are evaluated in
-            (name and abbreviation, e.g. "Australia/Sydney (AEDT)").
+            This machine's own time zone (name and abbreviation, e.g.
+            "Australia/Sydney (AEDT)"). Informational: the schedule and the
+            inverter's clock follow `site_time_zone`.
         utc_offset_s:
           type: integer
           description: The host zone's current offset from UTC (seconds).
+        site_time_zone:
+          type: [string, 'null']
+          description: The site's IANA zone (`site.time_zone`); null until chosen.
         inverter_clock_offset_s:
           type: number
           nullable: true
           description: >-
             The inverter's clock (0x9C40 ×6, read with the settings) minus
-            the host's at the last read, in seconds; positive when the
-            inverter is ahead. Null before the first read.
+            the site zone's time at the last read, in seconds; positive when
+            the inverter is ahead. Null before the first read or while no
+            site zone is chosen.
     Settings:
       type: object
       required: [settings]
@@ -2580,6 +2652,7 @@ components:
               status: { type: string, enum: [ok, warn, fail, pending] }
               detail: { type: string }
               fix: { type: string, description: 'What to do; present whenever status is not ok (except some pending checks, which only need time).' }
+              action: { type: string, enum: [set_clock], description: 'A one-press remedy (installer): set_clock = POST /clock/set.' }
         battery:
           type: object
           properties:
@@ -2860,6 +2933,9 @@ components:
             - update_not_available
             - update_not_possible
             - update_verification_failed
+            - zone_mismatch
+            - zone_unset
+            - host_clock_unsynced
         setting:
           type: string
           description: Present on write_budget — the setting whose budget is spent (a `write_budget` key).

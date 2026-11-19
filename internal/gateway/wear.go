@@ -51,7 +51,7 @@ type BudgetState struct {
 // writeKinds are the budgeted settings (every write; reads are free).
 var writeKinds = []CommandKind{
 	KindWorkMode, KindLimits, KindMeterCompensation, KindSchedule,
-	KindCurrentLimits, KindBatteryCurrents, KindPowerLimit, KindPortLimits, KindEPSMode,
+	KindCurrentLimits, KindBatteryCurrents, KindPowerLimit, KindPortLimits, KindEPSMode, KindClock,
 }
 
 // limitBlock is the 41021..41024 read covering both power limits.
@@ -135,7 +135,7 @@ func directReads(c Command) []readReq {
 		return []readReq{{regImportLim, limitBlock}}
 	case KindCurrentLimits, KindBatteryCurrents, KindPowerLimit, KindPortLimits, KindEPSMode:
 		return settingReads(c)
-	case KindSchedule, KindRead:
+	case KindSchedule, KindRead, KindClock:
 	}
 	return nil
 }

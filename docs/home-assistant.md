@@ -85,7 +85,7 @@ rest:
         device_class: current
         state_class: measurement
       - name: FoxESS work mode
-        value_template: "{{ value_json.active_mode.mode }}"
+        value_template: "{{ value_json.active_mode.mode if value_json.active_mode else 'unknown' }}"
     binary_sensor:
       - name: FoxESS inverter online
         value_template: "{{ value_json.online }}"
@@ -235,5 +235,7 @@ critical ones.
   frequent adjustments against `remaining` and keep some writes in
   reserve for the ones that matter. The limits are configurable
   (`[writes]` in the config file).
-- `GET /api/v1/config` includes `time_zone_name` (IANA, e.g.
-  `Australia/Sydney`): schedule windows run in the host's zone.
+- `GET /api/v1/config` includes `site_time_zone` (IANA, e.g.
+  `Australia/Sydney`): the inverter's clock and schedule follow it, not
+  the host's zone. `active_mode` in `/state` is null until the
+  inverter's clock has been read or a site zone chosen.

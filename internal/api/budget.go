@@ -33,6 +33,7 @@ var kindFeature = map[gateway.CommandKind]string{
 	gateway.KindPowerLimit:        "power_limit",
 	gateway.KindPortLimits:        "port_limits",
 	gateway.KindEPSMode:           "eps_mode",
+	gateway.KindClock:             "clock",
 }
 
 // KindFeature is a command kind's feature name (the config's

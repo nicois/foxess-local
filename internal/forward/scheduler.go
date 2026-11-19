@@ -89,6 +89,25 @@ type Scheduler struct {
 	fails  []int       // consecutive failed pushes per window
 	retry  []time.Time // no push before this, per window (backoff)
 	alert  func(string)
+	// wall is the inverter's wall time now (OnWallClock); nil: clock()
+	wall func() (time.Time, bool)
+}
+
+// OnWallClock sets where the windows' times are read: the inverter's
+// wall time (its clock, else the site zone); false = unknown, and the
+// tick does nothing. Without it the injected clock's zone is used
+// (tests). Set before Run.
+func (s *Scheduler) OnWallClock(f func() (time.Time, bool)) { s.wall = f }
+
+// tick evaluates once, on the wall time when it is known.
+func (s *Scheduler) tick(ctx context.Context) {
+	if s.wall == nil {
+		s.evaluate(ctx, s.clock())
+		return
+	}
+	if now, ok := s.wall(); ok {
+		s.evaluate(ctx, now)
+	}
 }
 
 // OnAlert installs the alert sink (the UI's system alert feed; nil =
@@ -170,13 +189,13 @@ func checkWindowOverlap(windows []Window) error {
 func (s *Scheduler) Run(ctx context.Context) {
 	tick := time.NewTicker(tickPeriod)
 	defer tick.Stop()
-	s.evaluate(ctx, s.clock())
+	s.tick(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			s.evaluate(ctx, s.clock())
+			s.tick(ctx)
 		}
 	}
 }

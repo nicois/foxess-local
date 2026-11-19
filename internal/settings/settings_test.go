@@ -210,3 +210,26 @@ func TestQuirkSettings(t *testing.T) {
 	assert.True(t, on.Get().Quirks[quirks.EPSDropouts])
 	assert.Equal(t, SourceFile, on.Sources()[key])
 }
+
+// TestSiteTimeZone (owner, 2026-11-19): the site's zone is its own
+// setting, unset until chosen — the host's zone is never assumed. From
+// the config file ([site] time_zone) or the UI; an IANA name only.
+func TestSiteTimeZone(t *testing.T) {
+	st, cfg := setup(t, "")
+	s, err := New(st, cfg, clock)
+	require.NoError(t, err)
+	assert.Nil(t, s.Get().SiteZone, "unset by default")
+	assert.False(t, Expert(KeySiteTimeZone), "an installer choice")
+	for _, bad := range []string{"", "Local", "Australia/Atlantis", "../etc/passwd"} {
+		require.Error(t, s.Set(KeySiteTimeZone, bad, "installer"), "%q", bad)
+	}
+	require.NoError(t, s.Set(KeySiteTimeZone, "Australia/Melbourne", "installer"))
+	require.NotNil(t, s.Get().SiteZone)
+	assert.Equal(t, "Australia/Melbourne", s.Get().SiteZone.String())
+
+	st2, cfg2 := setup(t, "[site]\ntime_zone = \"Europe/London\"\n")
+	s2, err := New(st2, cfg2, clock)
+	require.NoError(t, err)
+	assert.Equal(t, "Europe/London", s2.Get().SiteZone.String())
+	assert.Equal(t, SourceFile, s2.Sources()[KeySiteTimeZone])
+}

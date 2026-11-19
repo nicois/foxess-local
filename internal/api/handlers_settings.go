@@ -33,6 +33,7 @@ var settingsOrder = []string{
 	settings.KeyWriteDelay,
 	settings.KeySocThreshold, settings.KeySocHorizon, settings.KeySocPValue, settings.KeySocWindow,
 	settings.KeyUpdateInterval, settings.KeyUpdatePrerelease, settings.KeyUpdateAutoApply,
+	settings.KeySiteTimeZone,
 }
 
 func init() { settingsOrder = append(settingsOrder, quirks.Keys()...) }
@@ -62,6 +63,7 @@ func (s *Server) settingsRoutes(mux *http.ServeMux) {
 	s.handle(mux, "POST /api/v1/notify/test", s.protect(RoleInstaller, s.handleNotifyTest))
 	s.handle(mux, "GET /api/v1/setup", s.protect(RoleInstaller, s.handleSetup))
 	s.handle(mux, "POST /api/v1/setup/complete", s.protect(RoleInstaller, s.handleSetupComplete))
+	s.handle(mux, "POST /api/v1/clock/set", s.protect(RoleInstaller, s.handleClockSet))
 }
 
 // settingItem is one setting: its effective value and where it came from.
@@ -110,6 +112,10 @@ func (s *Server) settingsBody(a SettingsAdmin, tk Token) settingsView {
 		settings.KeyUpdateInterval:   int(v.UpdateInterval / time.Hour),
 		settings.KeyUpdatePrerelease: v.UpdatePrerelease,
 		settings.KeyUpdateAutoApply:  v.UpdateAutoApply,
+		settings.KeySiteTimeZone:     nil,
+	}
+	if v.SiteZone != nil {
+		vals[settings.KeySiteTimeZone] = v.SiteZone.String()
 	}
 	for id, on := range v.Quirks {
 		vals[quirks.Key(id)] = on
@@ -149,19 +155,13 @@ func (s *Server) handleSettingsPut(w http.ResponseWriter, r *http.Request, tk To
 		writeProblem(w, http.StatusBadRequest, *p)
 		return
 	}
-	// an expert changes only the tuning knobs: one installer key refuses
-	// the whole body (nothing is stored)
-	if roleLevel[tk.Role] < roleLevel[RoleInstaller] {
-		for _, c := range changes {
-			if !settings.Expert(c.key) {
-				writeProblem(w, http.StatusForbidden, problem{
-					Title: "Insufficient role", Code: "insufficient_role",
-					Detail:       c.key + " needs an installer token",
-					RequiredRole: string(RoleInstaller), TokenRole: string(tk.Role),
-				})
-				return
-			}
-		}
+	if p := installerKeys(tk, changes); p != nil {
+		writeProblem(w, http.StatusForbidden, *p)
+		return
+	}
+	if p := s.zoneConfirm(r, changes); p != nil {
+		writeProblem(w, http.StatusConflict, *p)
+		return
 	}
 	for _, c := range changes {
 		var err error
@@ -176,6 +176,24 @@ func (s *Server) handleSettingsPut(w http.ResponseWriter, r *http.Request, tk To
 		}
 	}
 	writeJSON(w, http.StatusOK, s.settingsBody(a, tk))
+}
+
+// installerKeys: an expert changes only the tuning knobs — one installer
+// key refuses the whole body (nothing is stored).
+func installerKeys(tk Token, changes []settingChange) *problem {
+	if roleLevel[tk.Role] >= roleLevel[RoleInstaller] {
+		return nil
+	}
+	for _, c := range changes {
+		if !settings.Expert(c.key) {
+			return &problem{
+				Title: "Insufficient role", Code: "insufficient_role",
+				Detail:       c.key + " needs an installer token",
+				RequiredRole: string(RoleInstaller), TokenRole: string(tk.Role),
+			}
+		}
+	}
+	return nil
 }
 
 // settingChange is one validated change (reset: back to the file's or
@@ -243,6 +261,8 @@ func settingValue(key string, raw json.RawMessage) (string, error) {
 			return "", err
 		}
 		return v, nil
+	case settings.KeySiteTimeZone:
+		return zoneValue(raw)
 	default: // the booleans
 		var b bool
 		if err := json.Unmarshal(raw, &b); err != nil {
@@ -250,6 +270,18 @@ func settingValue(key string, raw json.RawMessage) (string, error) {
 		}
 		return strconv.FormatBool(b), nil
 	}
+}
+
+// zoneValue is a site.time_zone value: an IANA zone name.
+func zoneValue(raw json.RawMessage) (string, error) {
+	var z string
+	if err := json.Unmarshal(raw, &z); err != nil {
+		return "", errors.New("must be a time zone name (Area/City, e.g. Australia/Melbourne), or null")
+	}
+	if err := settings.Check(settings.KeySiteTimeZone, z); err != nil {
+		return "", err
+	}
+	return z, nil
 }
 
 // Check statuses (the setup checklist's and readiness's).
@@ -276,6 +308,9 @@ type Check struct {
 	Status string `json:"status"`
 	Detail string `json:"detail"`
 	Fix    string `json:"fix,omitempty"`
+	// Action is a one-press remedy the UI offers (installer):
+	// "set_clock" sets the inverter's clock to the site's time.
+	Action string `json:"action,omitempty"`
 }
 
 type setupView struct {
@@ -388,26 +423,6 @@ func checkProfile(id Identity) Check {
 		c.Status = checkWarn
 		c.Detail = "not yet verified: live readings are shown (marked tentative); settings stay locked"
 		c.Fix = "Help verify it: More → Settings → Diagnostics → Download bundle, and share it in a GitHub issue."
-	}
-	return c
-}
-
-// clockTolerance is the inverter-vs-host difference the check accepts.
-const clockTolerance = time.Minute
-
-func (s *Server) checkClock() Check {
-	c := Check{ID: "clock", Title: "Clocks agree"}
-	zone, _ := s.clock().In(time.Local).Zone()
-	d, ok := s.inverterClockOffset()
-	switch {
-	case !ok:
-		c.Status, c.Detail = checkPending, "the inverter's clock is read within 5 minutes of connecting"
-	case time.Duration(d*float64(time.Second)).Abs() < clockTolerance:
-		c.Status, c.Detail = checkOK, fmt.Sprintf("the inverter's clock matches this machine's (%s %s)", time.Local, zone)
-	default:
-		c.Status = checkWarn
-		c.Detail = fmt.Sprintf("the inverter's clock is %.0f s off this machine's (%s %s); schedules run on this machine's clock", d, time.Local, zone)
-		c.Fix = "Check this machine's time zone (`timedatectl`) and the inverter's own clock setting."
 	}
 	return c
 }

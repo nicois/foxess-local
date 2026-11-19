@@ -21,6 +21,17 @@ version; anything else bumps the patch version.
 ## [Unreleased]
 
 ### Added
+- A site time zone, and foxess-local keeps the inverter's clock. Setup
+  asks where the inverter is (`site.time_zone`, or `[site] time_zone`):
+  the inverter's clock and schedule follow that zone, never the zone of
+  the machine foxess-local runs on, so a gateway on UTC works. The
+  FoxESS cloud used to set the inverter's clock; with its writes blocked
+  the clock drifted and would have missed daylight saving. foxess-local
+  now corrects drift and daylight-saving changes by itself, from an
+  NTP-synchronised clock, at most hourly and audited; a larger
+  difference waits for you (Setup offers to set the clock,
+  `POST /api/v1/clock/set`). A zone the inverter's clock disagrees with
+  needs confirming.
 - Cloud firmware updates are visible. When the cloud asks the inverter to
   update a firmware component (master, slave, manager or the
   datalogger), Frame messages shows a "Firmware update
@@ -90,6 +101,13 @@ version; anything else bumps the patch version.
   of its last 5 readings. Problem reports say which quirks were on.
 
 ### Changed
+- The schedule's "active now" (`/state.active_mode`) and the app's own
+  force-charge windows (`[scheduler]`) follow the inverter's clock (else
+  the site time zone) instead of the host's zone; `active_mode` is null
+  until either is known. `/config.inverter_clock_offset_s` is measured
+  against the site time zone (null until one is chosen), and `/config`
+  gains `site_time_zone`. A missing site zone does not make `/readyz`
+  fail.
 - Release checks run weekly by default (they were daily).
 - Frame-level data needs the expert or installer role. The raw frame
   log (`GET /messages`, More → Frame messages) refuses read-only tokens

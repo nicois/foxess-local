@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"foxesslocal/internal/settings"
 )
 
 // TestForwardModeSet: PUT (installer) changes the seam, responds with
@@ -94,14 +96,17 @@ func TestConfigView(t *testing.T) {
 	}
 }
 
-// TestConfigClock (audit R8): /config names the host time zone the
-// schedule windows are evaluated in and, once the inverter's clock
-// (0x9C40 ×6, year…second) has been read, how far it is from the host's.
+// TestConfigClock (audit R8; owner 2026-11-19): /config names the host's
+// zone (informational) and the site's, and — once the inverter's clock
+// (0x9C40 ×6, year…second) has been read and a site zone chosen — how
+// far the inverter's clock is from the site's time.
 func TestConfigClock(t *testing.T) {
 	h := newHarness(t)
+	set := withSettings(t, h)
 	var body struct {
 		TimeZone    string   `json:"time_zone"`
 		UTCOffsetS  *int     `json:"utc_offset_s"`
+		SiteZone    *string  `json:"site_time_zone"`
 		ClockOffset *float64 `json:"inverter_clock_offset_s"`
 	}
 	get := func() {
@@ -114,7 +119,14 @@ func TestConfigClock(t *testing.T) {
 	if body.TimeZone == "" || body.UTCOffsetS == nil || body.ClockOffset != nil {
 		t.Fatalf("before an RTC read: %+v", body)
 	}
-	rtc := testBase.In(time.Local).Add(90 * time.Second) // inverter 90 s fast
+	if body.SiteZone != nil {
+		t.Fatalf("site zone before one is chosen: %v", *body.SiteZone)
+	}
+	if err := set.Set(settings.KeySiteTimeZone, testZone, "installer"); err != nil {
+		t.Fatal(err)
+	}
+	mel, _ := time.LoadLocation(testZone)
+	rtc := testBase.In(mel).Add(90 * time.Second) // inverter 90 s fast
 	//nolint:gosec // G115: calendar fields of a 2026 date fit uint16
 	h.st.RecordRegisters(testBase, 40000, []uint16{
 		uint16(rtc.Year()), uint16(rtc.Month()), uint16(rtc.Day()),
@@ -122,7 +134,7 @@ func TestConfigClock(t *testing.T) {
 	})
 	h.st.Flush()
 	get()
-	if body.ClockOffset == nil || *body.ClockOffset != 90 {
+	if body.ClockOffset == nil || *body.ClockOffset != 90 || body.SiteZone == nil || *body.SiteZone != testZone {
 		t.Fatalf("inverter_clock_offset_s: %v, want 90", body.ClockOffset)
 	}
 }

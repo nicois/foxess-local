@@ -17,6 +17,7 @@ import (
 const (
 	pathSettings      = "/api/v1/settings"
 	pathSetup         = "/api/v1/setup"
+	pathClockSet      = "/api/v1/clock/set"
 	pathSetupComplete = "/api/v1/setup/complete"
 )
 

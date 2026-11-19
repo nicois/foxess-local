@@ -131,9 +131,16 @@ inverter's address.
 5. **Open the web UI** at `http://<this machine>:18080` and sign in with
    the token. The **setup** page opens: it checks that the inverter is
    connected and identified and that the clocks agree (each failed check
-   says what to fix), and asks for the battery capacity, what the cloud
-   may receive, and what visitors without a token may see. It is under
-   More → Setup afterwards. The header shows `live` once data flows.
+   says what to fix), and asks for the inverter's time zone, the battery
+   capacity, what the cloud may receive, and what visitors without a
+   token may see. It is under More → Setup afterwards. The header shows
+   `live` once data flows.
+
+   The time zone is where the inverter is; this machine's own zone does
+   not matter (an OpenStick can stay on UTC). The inverter's clock has
+   no zone of its own: the FoxESS cloud used to set it, and while the
+   cloud cannot change anything foxess-local keeps it to this zone,
+   correcting drift and daylight-saving changes automatically.
 
 ### On an OpenStick (a low-cost dedicated gateway)
 

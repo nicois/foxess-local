@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"foxesslocal/internal/driver"
 	"foxesslocal/internal/fmdata"
@@ -49,6 +50,7 @@ const (
 	FeaturePowerLimit        = "power_limit"      // 41016
 	FeaturePortLimits        = "port_limits"      // 41200 / 41201
 	FeatureEPSMode           = "eps_mode"         // 41015
+	FeatureClock             = "clock"            // 40000 ×6
 )
 
 // Register addresses the checks read (protocol profile §5).
@@ -74,7 +76,7 @@ const (
 var Features = []string{
 	FeatureLiveValues, FeatureSettingsRead, FeatureWorkMode, FeaturePowerLimits,
 	FeatureCurrentLimits, FeatureMeterCompensation, FeatureSchedule,
-	FeatureBatteryCurrents, FeaturePowerLimit, FeaturePortLimits, FeatureEPSMode,
+	FeatureBatteryCurrents, FeaturePowerLimit, FeaturePortLimits, FeatureEPSMode, FeatureClock,
 }
 
 // Input is what the evaluation needs.
@@ -175,6 +177,7 @@ func evaluateKHPre133(in Input, r reader) Report {
 			inRange(r, "generation_limit_read", regGenLimit, 0, maxU16),
 		},
 		FeatureEPSMode: {inRange(r, "eps_mode_enum", regEPSMode, epsModeMin, epsModeMax)},
+		FeatureClock:   {clockPlausible(r)},
 	}
 	for _, name := range Features {
 		f := Feature{Name: name, Checks: checks[name]}
@@ -659,6 +662,34 @@ func inRange(r reader, name string, addr, lo, hi int) Check {
 		return pending(name)
 	case int(v) < lo || int(v) > hi:
 		return fail(name, "%d = %d (want %d..%d)", addr, v, lo, hi)
+	}
+	return pass(name)
+}
+
+// The clock block (40000 ×6: year, month, day, hour, minute, second)
+// and the years it may plausibly read.
+const (
+	regClock     = 40000
+	clockRegs    = 6
+	clockYearMin = 2020
+	clockYearMax = 2099
+)
+
+// clockPlausible: the clock block reads as a real date and time.
+func clockPlausible(r reader) Check {
+	const name = "clock_plausible"
+	var v [clockRegs]int
+	for i := range clockRegs {
+		x, ok := r.get(regClock + i)
+		if !ok {
+			return pending(name)
+		}
+		v[i] = int(x)
+	}
+	t := time.Date(v[0], time.Month(v[1]), v[2], v[3], v[4], v[5], 0, time.UTC)
+	if v[0] < clockYearMin || v[0] > clockYearMax || t.Month() != time.Month(v[1]) || t.Day() != v[2] ||
+		t.Hour() != v[3] || t.Minute() != v[4] || t.Second() != v[5] {
+		return fail(name, "%d ×6 = %v (not a date and time)", regClock, v)
 	}
 	return pass(name)
 }

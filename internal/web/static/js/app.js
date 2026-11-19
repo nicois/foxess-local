@@ -2269,6 +2269,11 @@ async function renderSetup() {
   const fwd = val("forward.mode") ?? S.forwardMode?.mode;
   const capWh = val("battery.capacity_wh");
   const modules = s.battery?.modules;
+  const zone = val("site.time_zone");
+  const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+  const zones = Intl.supportedValuesOf?.("timeZone") ?? [];
+  const pick = zone ?? browserZone;
+  if (pick && !zones.includes(pick)) zones.unshift(pick);
 
   const checks = s.checks.map((c) => {
     const [txt, cls] = CHECK_CHIP[c.status] ?? [c.status, "muted"];
@@ -2277,6 +2282,7 @@ async function renderSetup() {
         <div class="item-title">${esc(CHECK_TITLE[c.id] ?? c.title)} <span class="chip ${cls}">${esc(txt)}</span></div>
         <div class="item-meta muted small">${esc(c.detail)}</div>
         ${c.fix && c.status !== "ok" ? `<p class="small">${esc(c.fix)}</p>` : ""}
+        ${c.action === "set_clock" ? `<button type="button" class="ghost" data-action="setup-set-clock">${esc(tr("Set the inverter's clock"))}</button>` : ""}
       </div></li>`;
   }).join("");
   // waiting checks need only time; a failed one needs the owner
@@ -2290,7 +2296,17 @@ async function renderSetup() {
     <button type="button" class="ghost" data-action="setup-refresh">${esc(tr("Check again"))}</button>
   </article>
   <article class="panel">
-    <h3>2 · ${esc(tr("Battery capacity"))}</h3>
+    <h3>2 · ${esc(tr("Time zone"))}</h3>
+    <p class="muted small">${esc(tr("The inverter's clock has no time zone: it shows local time, and its schedule runs on it. Choose where the inverter is — this machine's own time zone does not matter. foxesslocal keeps the inverter's clock to this zone, daylight saving included."))}</p>
+    <label>${esc(tr("Time zone"))}${zones.length
+      ? `<select id="setup-zone">${zones.map((z) => `<option value="${esc(z)}" ${z === pick ? "selected" : ""}>${esc(z)}</option>`).join("")}</select>`
+      : `<input type="text" id="setup-zone" placeholder="Australia/Melbourne" value="${esc(pick)}">`}</label>
+    <p class="muted small">${esc(zone ? tr("Currently {zone} ({source}).", { zone, source: SOURCE_TEXT[src("site.time_zone")] ?? "" })
+      : browserZone ? tr("Not set yet. Suggested from this browser: {zone}.", { zone: browserZone }) : tr("Not set yet."))}</p>
+    <button type="button" class="cmd" data-action="setup-zone">${esc(tr("Save time zone"))}</button>
+  </article>
+  <article class="panel">
+    <h3>3 · ${esc(tr("Battery capacity"))}</h3>
     <p class="muted small">${esc(tr("The battery's usable energy, used to show how much is stored. It is the number of battery modules times the energy of one module."))} ${esc(modules
         ? tr("The inverter reports {n} modules — for EQ4800 modules (4.66 kWh each) that is {kwh} kWh.", { n: modules, kwh: (modules * 4.66).toFixed(2) })
         : tr("An EQ4800 module is 4.66 kWh. The module count shows here once the inverter has sent its battery details."))}</p>
@@ -2299,7 +2315,7 @@ async function renderSetup() {
     <button type="button" class="cmd" data-action="setup-capacity">${esc(tr("Save capacity"))}</button>
   </article>
   <article class="panel">
-    <h3>3 · ${esc(tr("Cloud forwarding"))}</h3>
+    <h3>4 · ${esc(tr("Cloud forwarding"))}</h3>
     <p class="muted small">${esc(tr("What reaches the FoxESS cloud and the FoxESS app, and whether they can change anything. The same setting as More → Cloud & maintenance; a maintenance window overrides it for a while."))}</p>
     <div class="radio-list">${FORWARD_CHOICES.map(([m, t, d]) => `
       <label class="radio-row"><input type="radio" name="setup-forward" value="${m}" ${fwd === m ? "checked" : ""}>
@@ -2308,7 +2324,7 @@ async function renderSetup() {
     <button type="button" class="cmd" data-action="setup-forward">${esc(tr("Save cloud choice"))}</button>
   </article>
   <article class="panel">
-    <h3>4 · ${esc(tr("Visitors without a token"))}</h3>
+    <h3>5 · ${esc(tr("Visitors without a token"))}</h3>
     <p class="muted small">${esc(tr("Separate from cloud forwarding: this is about people on your own network opening this web page."))}</p>
     <label class="radio-row"><input type="checkbox" id="setup-public" ${val("access.public_read_only") ? "checked" : ""}>
       <span>${esc(tr("Can see the dashboard (read only)"))}</span></label>
@@ -2318,7 +2334,7 @@ async function renderSetup() {
     <button type="button" class="cmd" data-action="setup-access">${esc(tr("Save access"))}</button>
   </article>
   <article class="panel">
-    <h3>5 · ${esc(tr("Done"))}</h3>
+    <h3>6 · ${esc(tr("Done"))}</h3>
     <p class="muted small">${esc(tr("Each section above takes effect as soon as you save it; this changes no setting. Marking setup as done only stops this page opening by itself when an installer signs in — it stays under More → Setup."))}
       ${esc(allOk ? tr("Everything needed is in place.") : tr("Some checks still need attention: you can mark it done now and come back."))}</p>
     ${s.completed ? `<p class="small">${esc(tr("Setup is marked as done."))}</p>`
@@ -2340,6 +2356,42 @@ async function setupSave(path, method, body, okMsg) {
   return true;
 }
 
+// saveZone stores the site time zone; when the inverter's clock
+// disagrees with it (409 zone_mismatch), the owner confirms and the
+// inverter's clock is set to it.
+async function saveZone(z) {
+  const body = JSON.stringify({ "site.time_zone": z });
+  const put = (q) => apiFetch("/settings" + q, { method: "PUT", headers: { "Content-Type": "application/json" }, body });
+  let r = await put("");
+  if (r.status === 409) {
+    const p = await problemOf(r);
+    if (p.code !== "zone_mismatch") { toast(tr("not saved"), "err", p.detail ?? p.title); return false; }
+    if (!(await confirmDlg(tr("The inverter's clock disagrees"), `${p.detail ?? ""}\n\n${tr("Save this time zone anyway and set the inverter's clock to it?")}`,
+      tr("Save and set the clock")))) return false;
+    r = await put("?confirm=zone");
+    if (!r.ok) { const q = await problemOf(r); toast(tr("not saved"), "err", q.detail ?? q.title); return false; }
+    toast(tr("time zone saved"));
+    await setInverterClock();
+    return true;
+  }
+  if (!r.ok) { const p = await problemOf(r); toast(tr("not saved"), "err", (CODE_TEXT[p.code] ?? (() => p.detail ?? p.title))(p)); return false; }
+  toast(tr("time zone saved"));
+  return true;
+}
+
+// setInverterClock sets the inverter's clock to the site's time now.
+async function setInverterClock() {
+  const r = await apiFetch("/clock/set", { method: "POST" });
+  if (!r.ok) {
+    const p = await problemOf(r);
+    toast(tr("the inverter's clock was not set"), "err", (CODE_TEXT[p.code] ?? (() => p.detail ?? p.title))(p));
+    return false;
+  }
+  const b = await r.json();
+  toast(tr("inverter clock set to {time}", { time: b.set_to.replace("T", " ") }));
+  return true;
+}
+
 async function setupAction(action) {
   switch (action) {
     case "setup-refresh":
@@ -2349,6 +2401,21 @@ async function setupAction(action) {
       const kwh = parseFloat(byId("setup-capacity").value);
       if (!(kwh > 0)) { toast(tr("enter the usable capacity in kWh"), "warn"); return; }
       if (await setupSave("/settings", "PUT", { "battery.capacity_wh": Math.round(kwh * 1000) }, tr("battery capacity saved"))) render();
+      break;
+    }
+    case "setup-zone": {
+      const z = byId("setup-zone").value.trim();
+      if (!z) { toast(tr("choose the inverter's time zone"), "warn"); return; }
+      if (await saveZone(z)) render();
+      break;
+    }
+    case "setup-set-clock": {
+      const set = await apiFetch("/settings");
+      const z = set.ok ? (await set.json()).settings.find((x) => x.key === "site.time_zone")?.value : null;
+      if (!z) { toast(tr("choose the inverter's time zone"), "warn"); return; }
+      if (!(await confirmDlg(tr("Set the inverter's clock?"),
+        tr("The inverter's clock will be set to {zone} time now. Its schedule runs on this clock.", { zone: z }), tr("Set the clock")))) return;
+      if (await setInverterClock()) render();
       break;
     }
     case "setup-forward": {
@@ -2711,8 +2778,9 @@ async function renderSettings() {
         <div><dt>${esc(tr("Detailed history kept"))}</dt><dd>${cfg ? cfg.raw_hours + " h" : "—"}</dd></div>
         <div><dt>${esc(tr("Hourly history kept"))}</dt><dd>${cfg ? esc(tr("{n} days", { n: cfg.bucket_days })) : "—"}</dd></div>
         <div><dt>${esc(tr("Read-only access without a token"))}</dt><dd>${esc(S.cfg?.public_access ? tr("on") : tr("off"))}</dd></div>
-        <div><dt>${esc(tr("Schedule time zone"))}</dt><dd>${cfg ? esc(cfg.time_zone) + " " + utcOffset(cfg.utc_offset_s) : "—"}</dd></div>
-        <div><dt>${esc(tr("Inverter clock"))}</dt><dd>${clockOffsetText(cfg?.inverter_clock_offset_s)}</dd></div>
+        <div><dt>${esc(tr("Site time zone"))}</dt><dd>${cfg ? esc(cfg.site_time_zone ?? tr("not chosen yet (Setup)")) : "—"}</dd></div>
+        <div><dt>${esc(tr("Inverter clock"))}</dt><dd>${clockOffsetText(cfg?.inverter_clock_offset_s, cfg?.site_time_zone)}</dd></div>
+        <div><dt>${esc(tr("This machine's time zone"))}</dt><dd>${cfg ? esc(cfg.time_zone) + " " + utcOffset(cfg.utc_offset_s) : "—"}</dd></div>
         <div><dt>${esc(tr("API description"))}</dt><dd><a href="${API}/openapi.yaml" target="_blank" rel="noopener">openapi.yaml</a></dd></div>
       </dl>
     </article>
@@ -2838,14 +2906,15 @@ function utcOffset(s) {
 // clockOffsetText: the inverter's clock against this machine's (audit
 // R8). Schedule windows run on this machine's clock; a large difference
 // means a wrong host zone or an inverter clock to set.
-function clockOffsetText(d) {
+function clockOffsetText(d, zone) {
+  if (!zone) return esc(tr("not compared: no site time zone"));
   if (d == null) return esc(tr("not read yet"));
   const a = Math.abs(d);
-  if (a < 60) return esc(tr("in step with this machine"));
+  if (a < 60) return esc(tr("in step with the site's time"));
   const t = a >= 3600 ? (a / 3600).toFixed(1) + " h" : Math.round(a / 60) + " min";
   return `<span class="warn">${esc(d > 0
-    ? tr("{d} ahead of this machine — check the host time zone or the inverter's clock", { d: t })
-    : tr("{d} behind this machine — check the host time zone or the inverter's clock", { d: t }))}</span>`;
+    ? tr("{d} ahead of the site's time — see Setup", { d: t })
+    : tr("{d} behind the site's time — see Setup", { d: t }))}</span>`;
 }
 
 // languagePanel: the UI language (kept on this device; the browser's
@@ -3233,6 +3302,8 @@ document.addEventListener("click", async (e) => {
       scanStart();
       break;
     case "setup-refresh":
+    case "setup-zone":
+    case "setup-set-clock":
     case "setup-capacity":
     case "setup-forward":
     case "setup-access":

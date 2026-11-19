@@ -91,6 +91,10 @@ type ServerInfo struct {
 	Energy func() Energy `json:"-"`
 	// WriteBudget is the host's write budget (nil: the server's gateway).
 	WriteBudget func() map[string]WriteBudget `json:"-"`
+	// HostClockSynced reports whether this machine's clock is
+	// synchronised (NTP): only then may it set the inverter's. nil: not
+	// known (treated as synchronised).
+	HostClockSynced func() bool `json:"-"`
 }
 
 // SettingsView is the live settings source (settings.Settings).

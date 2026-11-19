@@ -57,6 +57,10 @@ func reference() regs {
 		r[41007+i] = set[41007+i]
 	}
 	r[41000] = 1
+	// the clock 40000 ×6: 2026-11-19 16:17:26
+	for i, v := range []uint16{2026, 11, 19, 16, 17, 26} {
+		r[40000+i] = v
+	}
 	// grid-port limits 41200 ×2 (the 2026-11-17 values)
 	r[41200], r[41201] = 10000, 7000
 	// scheduler: master on; group 1 force charge 11:02-13:58, groups 2-8
@@ -155,6 +159,9 @@ func TestFailedCheckIsUnknown(t *testing.T) {
 		{"charge current", func(r regs) { r[41007] = 600 }, FeatureBatteryCurrents, "max_charge_current_range"},
 		{"power limit", func(r regs) { r[41016] = 150 }, FeaturePowerLimit, "power_limit_range"},
 		{"EPS mode", func(r regs) { r[41015] = 7 }, FeatureEPSMode, "eps_mode_enum"},
+		{"clock month", func(r regs) { r[40001] = 13 }, FeatureClock, checkClockPlausible},
+		{"clock year", func(r regs) { r[40000] = 1970 }, FeatureClock, checkClockPlausible},
+		{"clock 31 Nov", func(r regs) { r[40002] = 31 }, FeatureClock, checkClockPlausible},
 	}
 	for _, c := range cases {
 		in := ref()
@@ -210,6 +217,9 @@ func TestIdlePVSkipsProduct(t *testing.T) {
 		t.Fatalf("idle string: %s %+v", f.Level, f.Checks)
 	}
 }
+
+// checkClockPlausible is the clock feature's check.
+const checkClockPlausible = "clock_plausible"
 
 func failed(f Feature, check string) bool {
 	for _, c := range f.Checks {

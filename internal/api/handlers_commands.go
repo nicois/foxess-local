@@ -308,6 +308,12 @@ func submitResponse(err error) commandResponse {
 			Code:   "write_budget",
 			Detail: err.Error(),
 		}}
+	case errors.Is(err, gateway.ErrNoFlow): // a clock value is never queued
+		return commandResponse{status: http.StatusServiceUnavailable, body: problem{
+			Title:  "Inverter offline",
+			Code:   "inverter_offline",
+			Detail: "no active inverter flow",
+		}}
 	case errors.Is(err, gateway.ErrInFlight):
 		return commandResponse{status: http.StatusConflict, body: problem{
 			Title:  "Command in flight",

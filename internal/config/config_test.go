@@ -375,3 +375,11 @@ func TestQuirksTable(t *testing.T) {
 		t.Fatal("an unknown quirk loaded")
 	}
 }
+
+// TestSiteTimeZoneChecked: a config file's site zone must be a zone.
+func TestSiteTimeZoneChecked(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.toml")
+	require.NoError(t, os.WriteFile(p, []byte("[site]\ntime_zone = \"Mars/Olympus\"\n"), 0o600))
+	_, err := config.Load(p)
+	require.Error(t, err)
+}

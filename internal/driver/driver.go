@@ -69,6 +69,9 @@ var drivers = []Driver{
 			"power_limit":      Verified,
 			"port_limits":      Verified,
 			"eps_mode":         Verified,
+			// fn10 40000 ×6: the cloud's clock write, echoed
+			// (2026-11-04/05 sessions, profile §5)
+			"clock": Verified,
 			// fn06 41037 → Modbus exception 2 on fw 1.73 (2026-11-16)
 			"eps_recover_soc": NotSupported,
 		},

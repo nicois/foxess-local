@@ -139,6 +139,8 @@ func Feature(k gateway.CommandKind) string {
 		return compat.FeaturePortLimits
 	case gateway.KindEPSMode:
 		return compat.FeatureEPSMode
+	case gateway.KindClock:
+		return compat.FeatureClock
 	case gateway.KindRead:
 		// reads are never gated
 	}

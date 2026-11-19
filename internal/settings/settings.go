@@ -20,6 +20,7 @@ import (
 
 	"foxesslocal/internal/config"
 	"foxesslocal/internal/policy"
+	"foxesslocal/internal/siteclock"
 )
 
 // The setting keys (the config file's names for the same values).
@@ -39,6 +40,8 @@ const (
 	KeyUpdateInterval   = "update.check_interval_h"
 	KeyUpdatePrerelease = "update.prerelease"
 	KeyUpdateAutoApply  = "update.auto_apply"
+
+	KeySiteTimeZone = "site.time_zone"
 
 	keySetupCompleted = "setup.completed_at"
 	dbPrefix          = "ui."     // database keys: ui.<key>
@@ -114,6 +117,9 @@ type Values struct {
 	UpdateInterval   time.Duration // 0 = no scheduled release checks
 	UpdatePrerelease bool
 	UpdateAutoApply  bool
+	// SiteZone is the site's time zone (the inverter clock's and
+	// schedule's); nil until chosen.
+	SiteZone *time.Location
 	// Quirks are the known inverter quirks, on or off, by id.
 	Quirks map[string]bool
 }
@@ -176,6 +182,7 @@ func New(st Store, cfg *config.Config, clock func() time.Time) (*Settings, error
 			KeyUpdateInterval:   strconv.Itoa(cfg.Update.IntervalHours()),
 			KeyUpdatePrerelease: strconv.FormatBool(cfg.Update.Prerelease),
 			KeyUpdateAutoApply:  strconv.FormatBool(cfg.Update.AutoApply),
+			KeySiteTimeZone:     cfg.Site.TimeZone,
 		},
 		src: map[string]Source{},
 		ui:  map[string]string{},
@@ -363,6 +370,18 @@ func (s *Settings) recomputeLocked() {
 	for _, q := range quirks.All() {
 		s.val.Quirks[q.ID], _ = strconv.ParseBool(get(quirks.Key(q.ID)))
 	}
+	if z := get(KeySiteTimeZone); z != "" {
+		s.val.SiteZone, _ = siteclock.Zone(z)
+	}
+}
+
+// validateForwardMode checks a forward mode name.
+func validateForwardMode(key, value string) error {
+	switch policy.ForwardMode(value) {
+	case policy.ModeOff, policy.ModeTelemetryOnly, policy.ModeFull:
+		return nil
+	}
+	return fmt.Errorf("settings: %s must be off, telemetry_only or full, got %q", key, value)
 }
 
 // validateBool checks a true/false setting.
@@ -390,12 +409,12 @@ func validate(key, value string) error {
 		if err := ValidateURL(value); err != nil {
 			return fmt.Errorf("settings: %s %w", key, err)
 		}
-	case KeyForwardMode:
-		switch policy.ForwardMode(value) {
-		case policy.ModeOff, policy.ModeTelemetryOnly, policy.ModeFull:
-		default:
-			return fmt.Errorf("settings: %s must be off, telemetry_only or full, got %q", key, value)
+	case KeySiteTimeZone:
+		if _, err := siteclock.Zone(value); err != nil {
+			return fmt.Errorf("settings: %s: %w", key, err)
 		}
+	case KeyForwardMode:
+		return validateForwardMode(key, value)
 	default:
 		r, ok := numeric[key]
 		if !ok {

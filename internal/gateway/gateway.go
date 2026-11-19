@@ -236,8 +236,8 @@ func (g *Gateway) Submit(ctx context.Context, c Command) (string, error) {
 		}
 	}
 	poll := c.Origin == OriginPoll
-	if poll && g.flow == "" {
-		return "", ErrNoFlow
+	if (poll || c.Kind == KindClock) && g.flow == "" {
+		return "", ErrNoFlow // a poll and a clock value are only worth sending now
 	}
 	if poll && g.rt != nil {
 		return "", fmt.Errorf("%w: %s", ErrInFlight, g.rt.id)
@@ -316,6 +316,10 @@ func (g *Gateway) startLocked(rt *rtCommand) error {
 		rt.reads = []readReq{{p[ParamAddr], p[ParamCount]}}
 		//nolint:gosec // G115: fn validated to 3 or 4.
 		frs = []frame.Frame{modbusFrame(g.envFn, readPDU(byte(p[ParamFn]), p[ParamAddr], p[ParamCount]))}
+	case KindClock:
+		// never read first: the clock is always behind or ahead by now
+		frs, rt.writes = clockFrames(rt.cmd, g.envFn)
+		writing = true
 	case KindWorkMode, KindLimits, KindMeterCompensation,
 		KindCurrentLimits, KindBatteryCurrents, KindPowerLimit, KindPortLimits, KindEPSMode:
 		if g.skipUnchanged {
@@ -515,6 +519,12 @@ func validate(c Command) error {
 		return check(map[Param]bool{ParamFn: true, ParamAddr: true, ParamCount: true}, validateRead)
 	case KindCurrentLimits, KindBatteryCurrents, KindPowerLimit, KindPortLimits, KindEPSMode:
 		return validateSetting(c)
+	case KindClock:
+		allowed := map[Param]bool{}
+		for _, k := range clockParams {
+			allowed[k] = true
+		}
+		return check(allowed, validateClock)
 	default:
 		return fmt.Errorf("%w: %q", ErrUnknownKind, c.Kind)
 	}

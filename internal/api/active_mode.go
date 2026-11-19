@@ -23,6 +23,17 @@ const (
 	activeFromBase     = "base"
 )
 
+// activeModeNow is the running mode on the inverter's wall time; nil
+// while that time is unknown (no fresh clock reading, no site zone).
+func (s *Server) activeModeNow(sched Schedule, base string) *ActiveMode {
+	now, ok := s.wallNow()
+	if !ok {
+		return nil
+	}
+	am := activeMode(sched, base, now)
+	return &am
+}
+
 // activeMode resolves the running mode at now (inverter-local time).
 func activeMode(s Schedule, base string, now time.Time) ActiveMode {
 	if s.Enabled {

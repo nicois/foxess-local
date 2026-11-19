@@ -151,7 +151,7 @@ func (g *Gateway) BuildFrames(c Command, current []RegisterValue, envFn byte) ([
 		}
 		return append(reads, writes...), nil
 	case KindWorkMode, KindLimits, KindMeterCompensation,
-		KindCurrentLimits, KindBatteryCurrents, KindPowerLimit, KindPortLimits, KindEPSMode:
+		KindCurrentLimits, KindBatteryCurrents, KindPowerLimit, KindPortLimits, KindEPSMode, KindClock:
 		frs, _, err := writeFrames(c, nil, envFn)
 		return frs, err
 	case KindRead:
@@ -217,6 +217,9 @@ func writeFrames(c Command, current []RegisterValue, envFn byte) ([]frame.Frame,
 		return scheduleWriteFrames(c, current, envFn)
 	case KindCurrentLimits, KindBatteryCurrents, KindPowerLimit, KindPortLimits, KindEPSMode:
 		frs, wrs := settingFrames(c, envFn)
+		return frs, wrs, nil
+	case KindClock:
+		frs, wrs := clockFrames(c, envFn)
 		return frs, wrs, nil
 	}
 	return nil, nil, fmt.Errorf("gateway: writeFrames: unknown kind %q", c.Kind)

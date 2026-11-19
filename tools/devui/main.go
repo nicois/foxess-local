@@ -224,6 +224,21 @@ var epsW int32
 
 // live appends a telemetry row every 5 s (the poller's cadence) and
 // publishes the snapshot event the UI's live view runs on (the app's
+// seedClock records the inverter's clock reading Melbourne wall time (no
+// site zone is set, so Setup asks for one).
+func seedClock(st *store.Store, now time.Time) {
+	mel, err := time.LoadLocation("Australia/Melbourne")
+	if err != nil {
+		return
+	}
+	w := now.In(mel)
+	//nolint:gosec // G115: calendar fields fit uint16
+	st.RecordRegisters(now, 0x9C40, []uint16{
+		uint16(w.Year()), uint16(w.Month()), uint16(w.Day()),
+		uint16(w.Hour()), uint16(w.Minute()), uint16(w.Second()),
+	})
+}
+
 // shape: api.SnapshotEvent, as cmd/foxess-local publishes it).
 func live(st *store.Store, bus *api.Bus) {
 	for t := range time.Tick(5 * time.Second) {
@@ -260,6 +275,7 @@ func seed(st *store.Store, now time.Time, model string, master uint16) {
 	}
 	st.RecordRegisters(now, 30000, regs)
 	st.RecordRegisters(now, 30016, []uint16{master, 0x103, 0x171})
+	seedClock(st, now)
 	st.RecordRegisters(now, 41000, []uint16{0})
 	block := make([]uint16, 40)
 	for a, v := range map[int]uint16{

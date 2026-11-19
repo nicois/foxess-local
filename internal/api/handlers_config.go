@@ -20,43 +20,20 @@ type configView struct {
 	ForwardMode    string `json:"forward_mode"`
 	// IssueURL is where to file a problem report (absent when unknown).
 	IssueURL string `json:"issue_url,omitempty"`
-	// TimeZone and UTCOffsetS: the host zone the schedule windows are
-	// evaluated in (audit R8).
+	// TimeZone and UTCOffsetS: the host's own zone (informational: the
+	// schedule and the inverter's clock follow the site zone).
 	TimeZone   string `json:"time_zone"`
 	UTCOffsetS int    `json:"utc_offset_s"`
 	// TimeZoneName is the host's IANA zone (e.g. Australia/Sydney); null
 	// when it cannot be told.
 	TimeZoneName *string `json:"time_zone_name"`
-	// InverterClockOffsetS: the inverter's clock minus the host's at the
-	// last read (positive: the inverter is ahead); null before a read.
+	// SiteTimeZone is the site's IANA zone (the inverter clock's and
+	// schedule's); null until chosen.
+	SiteTimeZone *string `json:"site_time_zone"`
+	// InverterClockOffsetS: the inverter's clock minus the site's time at
+	// the last read (positive: the inverter is ahead); null before a
+	// read or while no site zone is chosen.
 	InverterClockOffsetS *float64 `json:"inverter_clock_offset_s"`
-}
-
-// regRTCAddr is the inverter clock block (0x9C40 ×6: year, month, day,
-// hour, minute, second — profile §5), read with the settings.
-const (
-	regRTCAddr  = 0x9C40
-	regRTCCount = 6
-)
-
-// inverterClockOffset is the inverter's clock minus the host's, from the
-// newest RTC read (the inverter keeps local wall time; it is read in the
-// host's zone). false: no complete read yet.
-func (s *Server) inverterClockOffset() (float64, bool) {
-	var v [regRTCCount]int
-	var at time.Time
-	for i := range regRTCCount {
-		val, ts, ok, err := s.st.RegisterRead(regRTCAddr + i)
-		if err != nil || !ok {
-			return 0, false
-		}
-		v[i] = val
-		if i == regRTCCount-1 {
-			at = ts
-		}
-	}
-	rtc := time.Date(v[0], time.Month(v[1]), v[2], v[3], v[4], v[5], 0, time.Local)
-	return rtc.Sub(at).Round(time.Second).Seconds(), true
 }
 
 // handleConfig is GET /config (spec getConfig).
@@ -78,6 +55,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request, _ Token) {
 		TimeZone:       time.Local.String() + " (" + zone + ")",
 		UTCOffsetS:     offset,
 		TimeZoneName:   ianaZone(hostZoneSources, os.Getenv("TZ")),
+	}
+	if z := s.siteZone(); z != nil {
+		name := z.String()
+		view.SiteTimeZone = &name
 	}
 	if d, ok := s.inverterClockOffset(); ok {
 		view.InverterClockOffsetS = &d

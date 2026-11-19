@@ -214,7 +214,9 @@ type State struct {
 	Battery  Battery    `json:"battery"`
 	WorkMode string     `json:"work_mode"`
 	// ActiveMode is what runs now: a schedule group's mode, or WorkMode
-	ActiveMode ActiveMode `json:"active_mode"`
+	// (null while the inverter's wall time is unknown: no fresh clock
+	// reading and no site time zone).
+	ActiveMode *ActiveMode `json:"active_mode"`
 	// EpsMode is the EPS (backup) port setting: ups | eps | disabled
 	// ("" unknown)
 	EpsMode     string   `json:"eps_mode"`
@@ -313,7 +315,7 @@ func (s *Server) buildState(st store.State) (State, error) {
 	body.EpsMode = cfg.epsMode
 	body.Schedule = scheduleOf(st.Schedule, cfg.schedOn)
 	s.groupParams(body.Schedule.Groups)
-	body.ActiveMode = activeMode(body.Schedule, body.WorkMode, s.clock().In(time.Local))
+	body.ActiveMode = s.activeModeNow(body.Schedule, body.WorkMode)
 
 	mode, _, err := s.fwd.Get()
 	if err != nil {

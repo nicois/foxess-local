@@ -39,6 +39,13 @@ var (
 	// KindPortLimits: the grid-port load / generation limit, W.
 	ParamLoad       = Param{"load"}
 	ParamGeneration = Param{"generation"}
+	// KindClock: the site's local wall time.
+	ParamYear   = Param{"year"}
+	ParamMonth  = Param{"month"}
+	ParamDay    = Param{"day"}
+	ParamHour   = Param{"hour"}
+	ParamMinute = Param{"minute"}
+	ParamSecond = Param{"second"}
 )
 
 // SlotField names one field of a schedule slot (see SlotParam).
