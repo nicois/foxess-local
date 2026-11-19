@@ -151,6 +151,11 @@ it from source.
 `tools/probe-registers.sh` reads register blocks through
 `POST /api/v1/registers/read` (installer token).
 
+`tools/socreplay` replays a database's telemetry through the SoC
+estimate (`internal/socest`): invariant checks, plus how far the
+estimate is clamped at each tick, split by direction and reversal. Run
+it as `foxess` on the gateway (read-only); it is not shipped.
+
 ## Project knowledge
 
 - **Wire protocol, known:** [`docs/recon/protocol-profile.md`](docs/recon/protocol-profile.md)
