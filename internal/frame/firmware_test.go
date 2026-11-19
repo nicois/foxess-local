@@ -127,12 +127,14 @@ func TestFwTransferIncomplete(t *testing.T) {
 	}
 }
 
-// TestParseJSONMsg: the cloud's upgrade task and the dongle's status
-// notes are JSON behind a 3-byte head (meaning open).
+// TestParseJSONMsg: the two JSON message forms. The cloud's upgrade
+// task: 17 + the JSON length u16 BE (the 2026-11-19 datalogger task, 328
+// B: 17 01 48). The dongle's notes: 0b 01 + the length of what follows
+// u8 + a control byte (the status note 0b 01 1d 03, RSSI 0b 01 0b 01).
 func TestParseJSONMsg(t *testing.T) {
-	task := []byte("\x17\x01\x3d" + `{"task_type":"upgrade","data":{"mcu_type":"A","url":"https://example.invalid/fw","filename":"10-300-11057-37_K10_Manager_V1.71.bin","crc":59102,"size":764904}}`)
+	task := JSONMsg(0x17, []byte(`{"task_type":"upgrade","data":{"mcu_type":"A","url":"https://example.invalid/fw","filename":"10-300-11057-37_K10_Manager_V1.71.bin","crc":59102,"size":764904}}`))
 	head, body, ok := ParseJSONMsg(task)
-	if !ok || head != [3]byte{0x17, 0x01, 0x3d} || body[0] != '{' {
+	if !ok || !bytes.Equal(head, task[:3]) || !bytes.Equal(JSONMsg(0x17, body), task) {
 		t.Fatalf("task: %x %q %v", head, body, ok)
 	}
 	ft, ok := ParseFwTask(task)
@@ -140,16 +142,43 @@ func TestParseJSONMsg(t *testing.T) {
 		ft.Filename != "10-300-11057-37_K10_Manager_V1.71.bin" || ft.URL != "https://example.invalid/fw" {
 		t.Fatalf("task: %+v %v", ft, ok)
 	}
-	note := []byte("\x0b\x01\x1d" + `{"msgs":"485_data_abnormal"}`)
-	if _, _, ok := ParseJSONMsg(note); !ok {
-		t.Error("status note not recognised")
+
+	dl := []byte(`{"task_type":"upgrade","data":{"mcu_type":"X","url":"https://example.invalid/fw","filename":"app_dlesp32_v1_12_10AD9F52_10-300-31012-12.bin","crc":30417,"size":1858400}}`)
+	dl = append(dl, bytes.Repeat([]byte(" "), 328-len(dl))...) // the observed length
+	dlTask := append([]byte{0x17, 0x01, 0x48}, dl...)
+	if ft, ok := ParseFwTask(dlTask); !ok || FwMCUName(ft.MCU) != "datalogger" || ft.Size != 1858400 {
+		t.Fatalf("datalogger task: %+v %v", ft, ok)
 	}
-	if _, ok := ParseFwTask(note); ok {
-		t.Error("a status note parsed as an upgrade task")
+	if !bytes.Equal(JSONMsg(0x17, dl), dlTask) {
+		t.Errorf("JSONMsg: %x", JSONMsg(0x17, dl)[:3])
 	}
-	for _, bad := range [][]byte{[]byte("\x01\x03{x"), []byte("abc"), {0x01, 0x03, 0x79, 0x18}} {
+}
+
+// TestParseJSONNotes: the dongle's notes parse (and are no upgrade task);
+// a length field that disagrees with the frame is not JSON.
+func TestParseJSONNotes(t *testing.T) {
+	for name, note := range map[string][]byte{
+		"status": []byte("\x0b\x01\x1d\x03" + `{"msgs":"485_data_abnormal"}`),
+		"rssi":   []byte("\x0b\x01\x0b\x01" + `{"RSSI":0}`),
+	} {
+		head, body, ok := ParseJSONMsg(note)
+		if !ok || len(head) != 4 || body[0] != '{' {
+			t.Errorf("%s note: %x %q %v", name, head, body, ok)
+		}
+		if _, ok := ParseFwTask(note); ok {
+			t.Errorf("a %s note parsed as an upgrade task", name)
+		}
+	}
+
+	for name, bad := range map[string][]byte{
+		"task, wrong length": append([]byte{0x17, 0x01, 0x3d}, `{"task_type":"upgrade"}`...),
+		"note, wrong length": []byte("\x0b\x01\x1e\x03" + `{"msgs":"485_data_abnormal"}`),
+		"not JSON":           []byte("\x17\x00\x02{x"),
+		"short":              []byte("abc"),
+		"modbus read":        {0x01, 0x03, 0x79, 0x18},
+	} {
 		if _, _, ok := ParseJSONMsg(bad); ok {
-			t.Errorf("%x recognised as JSON", bad)
+			t.Errorf("%s: recognised as JSON", name)
 		}
 	}
 }

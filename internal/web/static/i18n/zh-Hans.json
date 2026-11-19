@@ -423,6 +423,7 @@
   "could not record setup": "无法记录设置状态",
   "created {time}": "创建于 {time}",
   "current": "当前",
+  "datalogger": "数据采集器",
   "default: {v}": "默认：{v}",
   "delete": "删除",
   "delete this capture?": "删除此抓包记录？",

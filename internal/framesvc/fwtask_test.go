@@ -6,13 +6,15 @@ import (
 	"testing/synctest"
 	"time"
 
+	"foxesslocal/internal/frame"
+
 	"github.com/nicois/prox/pkg/capture"
 	"github.com/stretchr/testify/require"
 )
 
 // fwTaskPayload is a cloud upgrade task (profile §6) with a placeholder
 // URL.
-var fwTaskPayload = []byte("\x17\x01\x3d" + `{"task_type":"upgrade","data":{"mcu_type":"A","notify_url":"https://example.invalid/status","url":"https://example.invalid/fw/1","filename":"10-300-11057-37_K10_Manager_V1.71.bin","crc":59102,"size":764904}}`)
+var fwTaskPayload = frame.JSONMsg(0x17, []byte(`{"task_type":"upgrade","data":{"mcu_type":"A","notify_url":"https://example.invalid/status","url":"https://example.invalid/fw/1","filename":"10-300-11057-37_K10_Manager_V1.71.bin","crc":59102,"size":764904}}`))
 
 // TestFirmwareTaskObserved (owner, 2026-11-19): a cloud upgrade task is
 // dropped in telemetry_only, recorded with a readable decode (the

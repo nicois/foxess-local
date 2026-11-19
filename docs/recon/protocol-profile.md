@@ -517,8 +517,11 @@ component from the FoxESS portal). Decoded by `frame.ParseFwTask`,
 `tools/mon150`. All frames are payload layouts; the envelope device/fn
 bytes were not recorded (open, §8).
 
-**1. Upgrade task (s2c), JSON** behind a 3-byte head (`17 01 3d`; meaning
-open — a dongle status note had `0b 01 1d`):
+**1. Upgrade task (s2c), JSON** behind a 3-byte head: `17` + the JSON's
+length u16 BE (`17 01 3d` = 317 B; four tasks, 315–328 B, all fit). The
+dongle's own JSON notes (c2s) use the other form, `0b 01 <len> <ctl>`
+(§4: `<len>` counts what follows it). `frame.ParseJSONMsg` takes a frame
+only when its length field matches.
 
 ```json
 {"task_type":"upgrade","data":{"mcu_type":"M","notify_url":"https://www.foxesscloud.com/generic/v0/firmware/status/<inverter SN>",
@@ -526,7 +529,9 @@ open — a dongle status note had `0b 01 1d`):
  "crc":26948,"size":267078}}
 ```
 
-- `mcu_type`: `M` master, `S` slave, `A` manager (one task per component).
+- `mcu_type`: `M` master, `S` slave, `A` manager, `X` datalogger (one
+  task per component; the datalogger task, requested later the same day,
+  names `app_dlesp32_v1_12_10AD9F52_10-300-31012-12.bin`, 1 858 400 B).
 - `crc` is the Modbus CRC-16 (init FFFF, poly A001 reflected — the frame
   CRC) of the whole file; `size` its length.
 - `url` serves the file without a login (HTTP 200, `application/octet-stream`).
@@ -565,6 +570,16 @@ their tasks' URLs; the manager and slave tasks were dropped in
 | master 1.73 (`M`) | `10-300-11056-39_K10_Master_V1.73.bin` | 267 078 | 26948 | `5f9d34483f0e0bf9e5511239a6a6a0685b5fa0a06c56cb97c133bd2f78085ea0` |
 | manager 1.71 (`A`) | `10-300-11057-37_K10_Manager_V1.71.bin` | 764 904 | 59102 | `83fbcd1f67441be3a0ed2f7fc546d4ff3cda6116aed87c50c99e4818b224ab5b` |
 | slave 1.03 (`S`) | `10-300-11058-03_K10_Slave_V1.03.bin` | 48 246 | 40149 | `1627797c72ba9d6ad53fdb82564847b1150e0bfe56cbf5fb13c3cd9bb0a6520b` |
+| datalogger 1.12 (`X`) | `app_dlesp32_v1_12_10AD9F52_10-300-31012-12.bin` | 1 858 400 | 30417 | `180a6de3e3d872355ff19a5b1445a254a5378d3f5182665005a1cde5561dab0b` |
+
+The datalogger file is an ESP32 application image (magic `e9`, 5
+segments; ESP-IDF app descriptor: project `app_dlesp32_`, version string
+`V1.00` despite the file's v1.12, built 2026-09-07 15:33:43, IDF
+`v5.1-1-g6d223be1a3-dirty`). So the dongle is an ESP32. Its task came ~30 s
+after a 57 B s2c frame (the inverter serial + zeros + `5a 00 05 00 05`),
+which also preceded the master task by ~5 min: meaning open (§8). A first
+datalogger request was lost: this app restarted (a self-upgrade) about
+when the task was due, and the cloud did not resend it on reconnect.
 
 Prior expectation (`firmware.py`, same vendor platform; superseded): envelope
 func `0xA2`/`0x99` with a 5-byte transfer ID ending `… 4d`, metadata → ACK →
@@ -696,8 +711,10 @@ surface.
       oracles: snap61 SoC + stored energy, pack voltage, PV ≈ 0 at night.
 
 - [ ] Firmware (§6): the envelope device/fn of the task, transfer and
-  acknowledgement frames (only payloads were recorded); the JSON head
-  bytes; acknowledgement status values other than `05`; whether the
+  acknowledgement frames (only payloads were recorded); the 57 B
+  serial-led frame before a task; acknowledgement status values other
+  than `05`; how the datalogger (`X`) flashes when its HTTPS fetch fails
+  (in-band like the master, or not at all); whether the
   transfer ID is random per transfer; whether the inverter reports flash
   progress or the result over this channel after the reboot.
 

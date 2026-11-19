@@ -423,6 +423,7 @@
   "could not record setup": "Einrichtung konnte nicht gespeichert werden",
   "created {time}": "erstellt {time}",
   "current": "aktuell",
+  "datalogger": "Datenlogger",
   "default: {v}": "Standard: {v}",
   "delete": "löschen",
   "delete this capture?": "diesen Mitschnitt löschen?",

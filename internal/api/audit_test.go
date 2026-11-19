@@ -337,7 +337,7 @@ func TestLowLevelNeedsExpert(t *testing.T) {
 // firmware update — the file and the component — instead of "other"
 // (the URL stays on the expert-only Messages page).
 func TestSummarizeFirmware(t *testing.T) {
-	task := []byte("\x17\x01\x3d" + `{"task_type":"upgrade","data":{"mcu_type":"A","url":"https://example.invalid/fw","filename":"10-300-11057-37_K10_Manager_V1.71.bin","crc":59102,"size":764904}}`)
+	task := frame.JSONMsg(0x17, []byte(`{"task_type":"upgrade","data":{"mcu_type":"A","url":"https://example.invalid/fw","filename":"10-300-11057-37_K10_Manager_V1.71.bin","crc":59102,"size":764904}}`))
 	meta := append([]byte{0xa2, 0x35, 0x46, 0x7b, 0x4d, 0x00, 0x04, 0x13, 0x46, 0x69, 0x44, 0x10}, "K10_Master_V1.73"...)
 	for p, want := range map[string]string{
 		string(task): "firmware update task: 10-300-11057-37_K10_Manager_V1.71.bin (manager)",

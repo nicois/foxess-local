@@ -22,7 +22,8 @@ version; anything else bumps the patch version.
 
 ### Added
 - Cloud firmware updates are visible. When the cloud asks the inverter to
-  update a firmware component, Frame messages shows a "Firmware update
+  update a firmware component (master, slave, manager or the
+  datalogger), Frame messages shows a "Firmware update
   task" with the component, file, size, CRC and download address (expert
   and installer); Activity names the file and component instead of
   "other"; and a notification says what was requested and whether it was

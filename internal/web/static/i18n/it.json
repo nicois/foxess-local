@@ -423,6 +423,7 @@
   "could not record setup": "impossibile registrare la configurazione",
   "created {time}": "creato {time}",
   "current": "attuale",
+  "datalogger": "datalogger",
   "default: {v}": "predefinito: {v}",
   "delete": "elimina",
   "delete this capture?": "eliminare questa acquisizione?",

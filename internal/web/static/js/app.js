@@ -2178,7 +2178,7 @@ function msgStatus(m) {
 }
 
 // FW_COMPONENT: the firmware components an upgrade task names
-const FW_COMPONENT = { master: tr("master"), slave: tr("slave"), manager: tr("manager") };
+const FW_COMPONENT = { master: tr("master"), slave: tr("slave"), manager: tr("manager"), datalogger: tr("datalogger") };
 
 // msgFirmware: a readable line for a firmware upgrade task or in-band
 // firmware announcement (profile §6), "" for any other frame. The task's

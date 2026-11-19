@@ -211,7 +211,7 @@ func seedActivity(st *store.Store, seq int, now time.Time) {
 // a maintenance window (profile §6; placeholder address), for the
 // Messages and Activity pages.
 func seedFirmwareTask(st *store.Store, seq int, now time.Time) {
-	task := []byte("\x17\x01\x3d" + `{"task_type":"upgrade","data":{"mcu_type":"A","notify_url":"https://example.invalid/status","url":"https://example.invalid/private/firmware/00000000-0000-0000-0000-000000000000?taskId=1","filename":"10-300-11057-37_K10_Manager_V1.71.bin","crc":59102,"size":764904}}`)
+	task := frame.JSONMsg(0x17, []byte(`{"task_type":"upgrade","data":{"mcu_type":"A","notify_url":"https://example.invalid/status","url":"https://example.invalid/private/firmware/00000000-0000-0000-0000-000000000000?taskId=1","filename":"10-300-11057-37_K10_Manager_V1.71.bin","crc":59102,"size":764904}}`))
 	st.RecordFrame(store.FrameRecord{
 		ConnID: devuiConn, Seq: seq, Dir: capture.DirS2C, TS: now.Add(-30 * time.Second),
 		Class: frame.KindOther, Plen: len(task), Payload: task, Decision: store.DecisionDropped,

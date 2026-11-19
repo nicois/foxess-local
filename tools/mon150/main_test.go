@@ -198,7 +198,7 @@ func TestFirmwareFrames(t *testing.T) {
 	chunk := append(append(append([]byte{}, id...), 0, 0), img...)
 	ack := append(append([]byte{}, id...), 0, 0, 0x05)
 	end := append(append([]byte{}, id...), 0)
-	task := []byte("\x17\x01\x3d" + `{"task_type":"upgrade","data":{"mcu_type":"M","url":"https://example.invalid/x","filename":"Test.bin","crc":1,"size":2}}`)
+	task := protocol.JSONMsg(0x17, []byte(`{"task_type":"upgrade","data":{"mcu_type":"M","url":"https://example.invalid/x","filename":"Test.bin","crc":1,"size":2}}`))
 
 	if !fwS2C("t", task) || !fwS2C("t", meta) || fwXfer == nil {
 		t.Fatal("task or announcement not recognised")

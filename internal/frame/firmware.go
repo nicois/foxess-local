@@ -10,7 +10,8 @@ import (
 // Firmware update messages (profile §6; observed 2026-11-19 on a KH10,
 // fw 1.73/1.03/1.71, during a maintenance window):
 //
-//   - the cloud's upgrade task: JSON behind a 3-byte head (ParseFwTask).
+//   - the cloud's upgrade task: JSON behind 17 + its length u16 BE
+//     (ParseFwTask).
 //     The dongle first tries the task's HTTPS url; failing that, the
 //     cloud pushes the file over this channel, ~5 min later:
 //   - announcement (s2c): ID(5) + size u32 BE + crc u16 BE + name length
@@ -24,13 +25,14 @@ import (
 // The ID is random per transfer. The crc is the Modbus CRC-16 of the
 // whole file: the same algorithm as the frame CRC (CRC16).
 const (
-	fwIDLen     = 5
-	fwMetaHead  = fwIDLen + 4 + 2 + 1 // ID, size, crc, name length
-	fwSeqHead   = fwIDLen + 2         // ID, seq
-	fwAckLen    = fwSeqHead + 1       // + status
-	fwEndLen    = fwIDLen + 1         // + 00
-	fwMaxChunk  = 1024
-	jsonHeadLen = 3
+	fwIDLen      = 5
+	fwMetaHead   = fwIDLen + 4 + 2 + 1 // ID, size, crc, name length
+	fwSeqHead    = fwIDLen + 2         // ID, seq
+	fwAckLen     = fwSeqHead + 1       // + status
+	fwEndLen     = fwIDLen + 1         // + 00
+	fwMaxChunk   = 1024
+	jsonTaskHead = 3 // 17 + length u16 BE
+	jsonNoteHead = 4 // 0b 01 + length u8 + control
 )
 
 // FwMeta is an in-band transfer's announcement.
@@ -145,14 +147,34 @@ func (t *FwTransfer) Image() ([]byte, error) {
 	return img, nil
 }
 
-// ParseJSONMsg recognises a JSON message: a 3-byte head (meaning open:
-// "17 01 3d" on the upgrade task, "0b 01 1d" on a status note) and a
-// JSON object.
-func ParseJSONMsg(p []byte) (head [jsonHeadLen]byte, body []byte, ok bool) {
-	if len(p) <= jsonHeadLen || p[jsonHeadLen] != '{' || !json.Valid(p[jsonHeadLen:]) {
-		return head, nil, false
+// ParseJSONMsg recognises the two JSON message forms, by the length its
+// head gives:
+//
+//   - the cloud's (the upgrade task): a type byte (17) + the JSON's length
+//     u16 BE (4 tasks, 315–328 B);
+//   - the dongle's notes (profile §4): 0b 01 + the length of what follows
+//     u8 + a control byte (03 a status note, 01 RSSI).
+func ParseJSONMsg(p []byte) (head, body []byte, ok bool) {
+	switch {
+	case len(p) > jsonTaskHead && p[jsonTaskHead] == '{' &&
+		int(binary.BigEndian.Uint16(p[1:jsonTaskHead])) == len(p)-jsonTaskHead:
+		head, body = p[:jsonTaskHead], p[jsonTaskHead:]
+	case len(p) > jsonNoteHead && p[jsonNoteHead] == '{' && int(p[2]) == len(p)-3:
+		head, body = p[:jsonNoteHead], p[jsonNoteHead:]
+	default:
+		return nil, nil, false
 	}
-	return [jsonHeadLen]byte(p[:jsonHeadLen]), p[jsonHeadLen:], true
+	if !json.Valid(body) {
+		return nil, nil, false
+	}
+	return head, body, true
+}
+
+// JSONMsg is a message in the cloud's JSON form: the type byte, the
+// body's length u16 BE, the body.
+func JSONMsg(kind byte, body []byte) []byte {
+	p := binary.BigEndian.AppendUint16([]byte{kind}, uint16(len(body))) //nolint:gosec // G115: bodies are a frame's size
+	return append(p, body...)
 }
 
 // FwTask is the cloud's upgrade task: which component, the file the
@@ -189,8 +211,9 @@ func ParseFwTask(p []byte) (FwTask, bool) {
 	return FwTask{MCU: d.MCU, Filename: d.Filename, URL: d.URL, Size: d.Size, CRC: d.CRC}, true
 }
 
-// FwMCUName names an upgrade task's mcu_type (the three KH10 components
-// requested 2026-11-19: master 1.73, slave 1.03, manager 1.71).
+// FwMCUName names an upgrade task's mcu_type (the KH10 components
+// requested 2026-11-19: master 1.73, slave 1.03, manager 1.71, and the
+// datalogger: the dongle's ESP32 application).
 func FwMCUName(code string) string {
 	switch code {
 	case "M":
@@ -199,6 +222,8 @@ func FwMCUName(code string) string {
 		return "slave"
 	case "A":
 		return "manager"
+	case "X":
+		return "datalogger"
 	}
 	return "unknown (" + code + ")"
 }
