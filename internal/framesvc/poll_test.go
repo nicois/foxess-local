@@ -366,3 +366,33 @@ func countAddr(log []int, addr int) int {
 	}
 	return n
 }
+
+// TestPollerKeepsLayoutOnLostRead (owner, 2026-11-19: an OpenStick on
+// Wi-Fi lost data for minutes at a time): a re-classification whose
+// version read is lost keeps the session's established layout — live
+// polling never stops for settingsEvery because one read went missing,
+// however long the session has run.
+func TestPollerKeepsLayoutOnLostRead(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := &fakePollDeps{ready: true}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() { f.poller().run(ctx); close(done) }()
+		// past the classification burst: many re-classifications in
+		time.Sleep(90 * time.Minute)
+		synctest.Wait()
+		f.mu.Lock()
+		f.failAddr = 30016 // the version block's read is lost from now on
+		before := len(f.recorded)
+		f.mu.Unlock()
+		time.Sleep(settingsEvery + time.Minute)
+		synctest.Wait()
+		cancel()
+		<-done
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if got, want := len(f.recorded)-before, int((settingsEvery+time.Minute)/pollEvery)-2; got < want {
+			t.Fatalf("%d live rows in the %s after the version read was lost, want at least %d", got, settingsEvery+time.Minute, want)
+		}
+	})
+}

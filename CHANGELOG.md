@@ -128,6 +128,10 @@ version; anything else bumps the patch version.
   the tag. Each draft release's notes are its changelog section.
 
 ### Fixed
+- Live data no longer stops for five minutes after one lost read. On a
+  lossy link (an OpenStick on Wi-Fi) a lost version read during the
+  5-minute model check threw away the inverter's identified layout, and
+  live polling paused until the next check.
 - The first install could leave the egress gate failed, or with every
   rule doubled: the installer starts the gate and its rule-loss check
   together, and the check re-applies a missing gate at the same moment.

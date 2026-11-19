@@ -149,18 +149,13 @@ func (p *poller) classifyDue(connID string) bool {
 // while no layout is established (one minute at pollEvery).
 const classifyBurst = 12
 
-// classify reads the identity blocks and establishes the layout: the
-// verified KH_PRE133 layout when the 30016 version block answers on a
-// KH (or an unreadable model — the legacy assumption), else the first
-// foxess_modbus candidate map whose live readings pass the checks.
-func (p *poller) classify(ctx context.Context, connID string) {
-	p.classConn, p.classAt = connID, p.clock()
-	p.classTries++
-	var model string
-	versions := false
+// readIdentity reads the identity blocks: the model (or ""), whether
+// the version block answered, and whether its read was lost.
+func (p *poller) readIdentity(ctx context.Context) (model string, versions, lost bool) {
 	for _, b := range identityBlocks {
 		vals, err := p.read(ctx, fnHoldingRead, b.addr, b.count)
 		if err != nil {
+			lost = lost || b.addr == identity.VersionAddr
 			continue
 		}
 		p.recordRegs(p.clock(), b.addr, vals)
@@ -171,8 +166,25 @@ func (p *poller) classify(ctx context.Context, connID string) {
 			versions = true
 		}
 	}
+	return model, versions, lost
+}
+
+// classify reads the identity blocks and establishes the layout: the
+// verified KH_PRE133 layout when the 30016 version block answers on a
+// KH (or an unreadable model — the legacy assumption), else the first
+// foxess_modbus candidate map whose live readings pass the checks.
+func (p *poller) classify(ctx context.Context, connID string) {
+	p.classConn, p.classAt = connID, p.clock()
+	p.classTries++
+	model, versions, lost := p.readIdentity(ctx)
 	if versions && (model == "" || khModel.MatchString(model)) {
 		p.layout = driver.LayoutKHPre133
+		return
+	}
+	if lost && p.layout == driver.LayoutKHPre133 {
+		// a lost read on a lossy link (an OpenStick on Wi-Fi, 2026-11-19)
+		// is no evidence of another layout: the session keeps its own (a
+		// different inverter comes with a new session)
 		return
 	}
 	if p.layout != "" && p.layout != driver.LayoutKHPre133 && p.cand.Key != "" && p.failures == 0 {
