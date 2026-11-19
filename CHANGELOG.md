@@ -20,6 +20,11 @@ version; anything else bumps the patch version.
 
 ## [Unreleased]
 
+### Fixed
+
+- History charts: a legend entry's line sample no longer wraps away from
+  its name on narrow screens.
+
 ## [v0.2.0] - 2026-11-19
 
 ### Added

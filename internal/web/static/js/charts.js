@@ -213,7 +213,11 @@ export function smallMultiples(root, data) {
           const n = document.createElement("span");
           n.className = "sm-series-name";
           n.textContent = s.title;
-          legend.append(k, n);
+          // one unit: the legend may wrap between series, never inside one
+          const item = document.createElement("span");
+          item.className = "sm-series";
+          item.append(k, n);
+          legend.append(item);
         }
       } else {
         legend.textContent = row.legend ?? "";

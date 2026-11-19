@@ -951,7 +951,13 @@ dl.kv {
   stroke-linecap: round;
   &.dash { stroke-dasharray: 5 4; }
 }
-.sm-series-name { margin-right: 0.5rem; }
+.sm-series {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+  margin-right: 0.5rem;
+}
 .sm-area { fill: var(--c); fill-opacity: 0.1; stroke: none; }
 .sm-xhair { stroke: var(--muted); stroke-width: 1; }
 .sm-dot { fill: var(--c); stroke: var(--panel); stroke-width: 2; }
