@@ -228,6 +228,23 @@ server {
   = "127.0.0.1:18080"`), so the plain-HTTP port is not reachable from
   the network.
 
+**Under a path** (for example `https://home.example.lan/foxess/` beside
+other services): strip the prefix in the proxy. Every URL the web UI
+uses is relative to the page, so it needs no setting of its own.
+
+```nginx
+location = /foxess { return 301 /foxess/; }   # the trailing slash matters
+location /foxess/ {
+    proxy_pass http://127.0.0.1:18080/;       # the trailing slash strips /foxess
+    proxy_set_header Host $host;
+    proxy_http_version 1.1;
+    proxy_read_timeout 1h;
+}
+```
+
+The API is then at `/foxess/api/v1`, which is the base URL to give Home
+Assistant or other clients.
+
 ## Uninstall
 
 ```bash

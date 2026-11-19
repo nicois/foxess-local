@@ -2,7 +2,7 @@
 // notifications stay English.
 //
 // tr("English text", {name: value}) looks the English text up in the
-// chosen language's catalogue (/static/i18n/<lang>.json, a flat
+// chosen language's catalogue (static/i18n/<lang>.json, a flat
 // English → translation map) and fills {name} placeholders; a missing
 // entry falls back to the English. index.html marks its static text with
 // data-i18n="English" (and data-i18n-aria-label, -title, -placeholder).
@@ -80,7 +80,7 @@ lang = detect();
 document.documentElement.lang = lang;
 if (lang !== "en") {
   try {
-    const r = await fetch(`/static/i18n/${lang}.json`);
+    const r = await fetch(new URL(`static/i18n/${lang}.json`, document.baseURI));
     if (r.ok) cat = await r.json();
   } catch { /* offline or blocked: English */ }
 }

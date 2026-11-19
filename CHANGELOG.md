@@ -89,6 +89,9 @@ version; anything else bumps the patch version.
   the tag. Each draft release's notes are its changelog section.
 
 ### Fixed
+- The web UI works behind a reverse proxy under a path prefix
+  (`/foxess/`): it loaded its files and called the API at absolute
+  paths. INSTALL.md has the nginx block.
 - The dashboard's main-board load (household − backup port) never shows
   below 0, and the history's backup line never rises above the household
   line: the difference is measurement error (the grid meter's offset),

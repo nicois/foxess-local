@@ -19,7 +19,10 @@
 import { tr, locale, LANGS, currentLang, setLang } from "./i18n.js";
 import { smallMultiples } from "./charts.js";
 
-const API = "/api/v1";
+// API is the API's path, relative to the page: the UI also works behind
+// a reverse proxy under a path prefix (/foxess/ → /foxess/api/v1). A
+// path, not a URL: the htmx hooks compare it with request paths.
+const API = new URL("api/v1", document.baseURI).pathname;
 const TOKEN_KEY = "fl.token";
 
 const IMMEDIATE_MODES = ["self-use", "feed-in"];
