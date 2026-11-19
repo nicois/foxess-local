@@ -106,6 +106,31 @@ func TestGateWithoutMAC(t *testing.T) {
 	}
 }
 
+// TestGateConcurrentUp: the installer's `enable --now` starts the gate
+// and the rule-loss check together, and the check re-applies a gate it
+// finds missing: two `up`s at once. Both must succeed (the loser's
+// `ip rule add` failed with "File exists", leaving foxess-gate.service
+// failed — seen on an OpenStick, 2026-11-19), and the result is one
+// gate, not two copies of its rules.
+func TestGateConcurrentUp(t *testing.T) {
+	out := gateNS(t, gateEnv(t, ""), `
+fail=0
+for i in 1 2 3 4 5 6 7 8; do bash apply-gate.sh up 2>&1 & done
+for i in 1 2 3 4 5 6 7 8; do wait -n || fail=1; done
+echo "== failed=$fail"
+nft list ruleset; ip rule show
+`)
+	if !strings.Contains(out, "== failed=0") {
+		t.Fatalf("a concurrent up failed:\n%s", out)
+	}
+	if n := strings.Count(out, "ip saddr 192.0.2.10 tcp dport 14431 tproxy"); n != 1 {
+		t.Errorf("tproxy rule %d times, want 1:\n%s", n, out)
+	}
+	if n := strings.Count(out, "fwmark 0x1 lookup 100"); n != 1 {
+		t.Errorf("fwmark rule %d times, want 1:\n%s", n, out)
+	}
+}
+
 func section(s, from, to string) string {
 	i := strings.Index(s, from)
 	j := strings.Index(s, to)

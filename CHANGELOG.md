@@ -21,6 +21,14 @@ version; anything else bumps the patch version.
 ## [Unreleased]
 
 ### Added
+- OpenStick provisioning (`provision-openstick.sh`, in every release): turns
+  a UZ801-class MSM8916 4G USB stick running the OpenStick Debian image
+  into the inverter's gateway, then installs foxess-local. Idempotent
+  (`--check` reports only). It builds the TPROXY modules the stick's
+  kernel lacks from pinned kernel.org source, pins the package sources
+  to the installed Debian release, adds zram swap, caps the journal,
+  turns Wi-Fi power saving off, and warns about the image's default
+  password (`--ssh-keys-only`). INSTALL.md: "On an OpenStick".
 - A write delay for fragile storage (SD cards, eMMC: OpenStick-class
   boards). New readings wait in memory and are written in fewer, larger
   batches, every 60 s by default (`[store] write_delay_s`, 0–900;
@@ -94,6 +102,11 @@ version; anything else bumps the patch version.
   the tag. Each draft release's notes are its changelog section.
 
 ### Fixed
+- The first install could leave the egress gate failed, or with every
+  rule doubled: the installer starts the gate and its rule-loss check
+  together, and the check re-applies a missing gate at the same moment.
+  Gate changes now take a lock. Seen on an OpenStick; any slow machine
+  could hit it.
 - The web UI works behind a reverse proxy under a path prefix
   (`/foxess/`): it loaded its files and called the API at absolute
   paths. INSTALL.md has the nginx block.

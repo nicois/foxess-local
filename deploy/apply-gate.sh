@@ -208,6 +208,18 @@ cmd_show() {
     ip route show table "$ROUTE_TABLE"
 }
 
+# one change at a time: the installer starts the gate and the rule-loss
+# check together, and the check re-applies a gate it finds missing. Two
+# concurrent `up`s both computed "no table yet" (doubling every rule)
+# and raced on `ip rule add` (the loser failed: "File exists").
+case "${1:-up}" in
+    early | up | down)
+        mkdir -p "$STATE_DIR"
+        exec 9>"$STATE_DIR/lock"
+        flock 9
+        ;;
+esac
+
 case "${1:-up}" in
     early) cmd_early ;;
     up) cmd_up ;;

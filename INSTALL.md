@@ -24,7 +24,9 @@ inverter's address.
 ## What you need
 
 - A Linux machine with systemd on the same network as the inverter:
-  a Raspberry Pi 4/5 (64-bit OS), a Pi 2/3 (32-bit), a mini PC, or a VM.
+  a Raspberry Pi 4/5 (64-bit OS), a Pi 2/3 (32-bit), a mini PC, a VM,
+  or an [OpenStick](#on-an-openstick-a-low-cost-dedicated-gateway) USB
+  stick.
   Architectures: amd64, arm64, armv7.
 - `nftables` with TPROXY support (standard on current Debian, Ubuntu,
   Raspberry Pi OS, Fedora) and `iproute2`. Optional: `conntrack`, which
@@ -132,6 +134,54 @@ inverter's address.
    says what to fix), and asks for the battery capacity, what the cloud
    may receive, and what visitors without a token may see. It is under
    More → Setup afterwards. The header shows `live` once data flows.
+
+### On an OpenStick (a low-cost dedicated gateway)
+
+A UZ801-class 4G USB stick (Qualcomm MSM8916) flashed with the
+OpenStick Debian image makes a cheap, low-power gateway that does
+nothing else: plug it into a USB charger within Wi-Fi range.
+`provision-openstick.sh` (in every release) prepares it and then runs
+the installer. It is idempotent: re-running it changes only what is
+missing.
+
+1. Flash the stick with the OpenStick Debian image, join it to your
+   Wi-Fi (`sudo nmtui`) and log in over SSH. **Reserve its address on
+   your router** (a DHCP reservation): the inverter will use it as its
+   gateway, so it must not change.
+2. Download `provision-openstick.sh`, `SHA256SUMS` and
+   `SHA256SUMS.minisig` from the release, verify them as in step 2
+   above, and copy the script to the stick (`scp provision-openstick.sh
+   user@<stick>:`).
+3. On the stick, see what it would change, then run it with your
+   inverter's address:
+
+   ```bash
+   sudo bash provision-openstick.sh --check
+   sudo bash provision-openstick.sh --inverter-ip 192.168.1.50
+   ```
+
+   It pins the package sources to the installed Debian release (the
+   image names `stable`, which has since moved on), installs the gate's
+   tools, adds compressed swap in RAM (the stick has ~320 MB), caps the
+   system log, turns Wi-Fi power saving off and turns on IPv4
+   forwarding. Then it downloads this release, checks its signature
+   against the release key above and runs the installer.
+
+   **TPROXY:** the stick's kernel has no TPROXY support, which the gate
+   needs. The script builds the three modules on the stick, from the
+   kernel.org source of the running kernel's version (checksum pinned in
+   the script) with the kernel's own configuration, and tests that they
+   load. This takes about 5 minutes the first time. UDP transparent
+   proxying is left out (the kernel does not export what it needs; the
+   gate uses TCP only). If the kernel is ever replaced, run the script
+   again: it rebuilds them.
+4. Continue with steps 4 (point the inverter at the stick) and 5 above.
+
+The script warns if the image's well-known default password is still
+set: change it (`passwd`). Once you log in with an SSH key,
+`--ssh-keys-only` turns password logins off. It leaves the stick's modem,
+hotspot and USB networking alone. `--hostname NAME` renames the stick;
+`--version vX.Y.Z` installs a specific release.
 
 Configuration lives in `/etc/foxess-local/config.toml` — every setting is
 optional and documented in the file. The battery capacity, the cloud

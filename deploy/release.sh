@@ -49,6 +49,7 @@ for arch in ${ARCHES:-amd64 arm64 armv7}; do
 		-o "$DIST/foxess-local_linux_$arch" ./cmd/foxess-local
 done
 bash deploy/gen-installer.sh >"$DIST/installer.sh"
-chmod +x "$DIST/installer.sh"
-(cd "$DIST" && sha256sum foxess-local_linux_* installer.sh >SHA256SUMS)
+cp deploy/provision-openstick.sh "$DIST/provision-openstick.sh"
+chmod +x "$DIST/installer.sh" "$DIST/provision-openstick.sh"
+(cd "$DIST" && sha256sum foxess-local_linux_* installer.sh provision-openstick.sh >SHA256SUMS)
 echo "release: $DIST/ ready ($VERSION for $REPO) — next: make sign, then make verify-release"
