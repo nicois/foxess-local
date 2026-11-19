@@ -82,10 +82,13 @@ type Event struct {
 // SnapshotEvent is one 150 B telemetry frame (~5 s): the immediate
 // sensor feed (spec).
 type SnapshotEvent struct {
-	TS           time.Time `json:"ts"`
-	Power        Power     `json:"power"`
-	SocPct       int       `json:"soc_pct"`
-	BatteryState string    `json:"battery_state"`
+	TS     time.Time `json:"ts"`
+	Power  Power     `json:"power"`
+	SocPct int       `json:"soc_pct"`
+	// SocEstimatePct is the SoC estimate (D-028; Battery.SocEstimatePct);
+	// null without the battery capacity.
+	SocEstimatePct *float64 `json:"soc_estimate_pct"`
+	BatteryState   string   `json:"battery_state"`
 	// Energy is the lifetime counters, in every snapshot once read (small;
 	// a subscriber need not poll /state for them).
 	Energy *Energy `json:"energy,omitempty"`

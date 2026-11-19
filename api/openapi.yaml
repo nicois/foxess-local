@@ -2162,12 +2162,21 @@ components:
           type: integer
           minimum: 0
           maximum: 100
-          description: 5 s cadence (150 B frame).
+          description: The inverter's SoC, whole percent; 5 s cadence (150 B frame).
+        soc_estimate_pct:
+          type: [number, 'null']
+          minimum: 0
+          maximum: 100
+          description: The SoC between the inverter's whole-percent readings, two decimals — the battery power integrated since the last reading, held within [soc_pct − 0.5, soc_pct + 0.494] (D-028), scaled by the measured energy per percent once known (measured_capacity). Null while the capacity is not set, and before the first reading of the current soc_pct.
+        measured_capacity:
+          oneOf:
+            - $ref: '#/components/schemas/MeasuredCapacity'
+            - type: 'null'
         state:
           $ref: '#/components/schemas/BatteryState'
         stored_energy_wh:
           type: [integer, 'null']
-          description: Usable energy = SoC × capacity_wh (Wh). Null until the first SoC reading, and while the capacity is not set.
+          description: Usable energy = SoC × capacity_wh (Wh), from soc_estimate_pct when there is one, else soc_pct. Null until the first SoC reading, and while the capacity is not set.
         capacity_wh:
           type: [integer, 'null']
           description: The pack's usable energy across SoC 0–100 % (the battery.capacity_wh setting — UI value, else config file). Null while not set (no built-in default).
@@ -2177,6 +2186,15 @@ components:
         bms_charge_limit_a:
           type: [number, 'null']
           description: The BMS's charge-current limit (register 31025), A — set by the battery from its coldest cell's temperature (temperatures.cell_min_c) and its SoC. Null until the first register reading.
+    MeasuredCapacity:
+      type: object
+      description: The pack's capacity measured between SoC readings (D-028) — the energy the battery power shows between two consecutive single-step SoC changes in one direction, × 100. Below capacity_wh on a pack that has lost health; it includes the losses between the inverter's measurement and the cells, so charging and discharging differ. A direction's Wh is null until 3 clean intervals agree; soc_estimate_pct applies it from then on.
+      required: [charging_wh, discharging_wh, charging_intervals, discharging_intervals]
+      properties:
+        charging_wh: { type: [integer, 'null'] }
+        discharging_wh: { type: [integer, 'null'] }
+        charging_intervals: { type: integer, minimum: 0, description: The clean intervals measured. }
+        discharging_intervals: { type: integer, minimum: 0 }
     BatteryState:
       type: string
       enum: [charging, discharging, idle, unknown]
@@ -2813,6 +2831,11 @@ components:
           type: integer
           minimum: 0
           maximum: 100
+        soc_estimate_pct:
+          type: [number, 'null']
+          minimum: 0
+          maximum: 100
+          description: As Battery.soc_estimate_pct (null while the capacity is not set).
         battery_state:
           $ref: '#/components/schemas/BatteryState'
     ConfigEvent:

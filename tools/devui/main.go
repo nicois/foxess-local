@@ -39,6 +39,7 @@ import (
 	"foxesslocal/internal/notify"
 	"foxesslocal/internal/policy"
 	"foxesslocal/internal/settings"
+	"foxesslocal/internal/socest"
 	"foxesslocal/internal/store"
 	"foxesslocal/internal/web"
 	"foxesslocal/internal/wincap"
@@ -88,11 +89,12 @@ func main() {
 		return notify.Targets{WebhookURL: v.NotifyWebhook, NtfyURL: v.NotifyNtfy}
 	}, time.Now)
 	go notifier.Run(context.Background())
-	apiH := api.New(st, gw, maint, tok, fwd, bus, time.Now, api.WithInfo(api.ServerInfo{
+	var est socest.Estimator
+	apiH := api.New(st, gw, maint, tok, fwd, bus, time.Now, api.WithSocEstimate(&est), api.WithInfo(api.ServerInfo{
 		Version: "devui", RawHours: 72, BucketDays: 365, Settings: set,
 	}), api.WithNotifier(notifier),
 		api.WithCaptures(wincap.New(filepath.Join(dir, "captures"), 256<<20, time.Now, "devui")))
-	go live(st, bus)
+	go live(st, bus, &est, func() int { return set.Get().CapacityWh })
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/{rest...}", apiH)
 	if m, err := mcp.New(apiH, apispec.OpenAPI, "devui"); err == nil {
@@ -240,7 +242,7 @@ func seedClock(st *store.Store, now time.Time) {
 }
 
 // shape: api.SnapshotEvent, as cmd/foxess-local publishes it).
-func live(st *store.Store, bus *api.Bus) {
+func live(st *store.Store, bus *api.Bus, est *socest.Estimator, capWh func() int) {
 	for t := range time.Tick(5 * time.Second) {
 		maybeSnap61(st, t, 5)
 		tl := tele(t)
@@ -258,9 +260,19 @@ func live(st *store.Store, bus *api.Bus) {
 				PVW: int(tl.Sol), GridW: int(tl.Grid), LoadW: int(tl.Haus),
 				AcPortW: int(tl.Acport), BatteryW: int(tl.Batt), EpsW: int(tl.Eps),
 			},
-			SocPct: int(tl.Soc), BatteryState: state,
+			SocPct: int(tl.Soc), SocEstimatePct: estimate(est, t, tl, capWh()), BatteryState: state,
 		})
 	}
+}
+
+// estimate feeds the SoC estimate as the service does (D-028).
+func estimate(est *socest.Estimator, t time.Time, tl frame.Tele, capWh int) *float64 {
+	v := est.Observe(t, int(tl.Soc), int(tl.Batt), capWh)
+	if capWh <= 0 {
+		return nil
+	}
+	v = api.RoundPct(v)
+	return &v
 }
 
 func seed(st *store.Store, now time.Time, model string, master uint16) {

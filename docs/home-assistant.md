@@ -74,6 +74,11 @@ rest:
         unit_of_measurement: "%"
         device_class: battery
         state_class: measurement
+      - name: FoxESS battery SoC estimate   # between the whole-percent readings, 2 decimals
+        value_template: "{{ value_json.battery.soc_estimate_pct }}"
+        unit_of_measurement: "%"
+        device_class: battery
+        state_class: measurement
       - name: FoxESS battery coldest cell
         value_template: "{{ value_json.temperatures.cell_min_c }}"
         unit_of_measurement: °C

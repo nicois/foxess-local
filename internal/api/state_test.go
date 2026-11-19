@@ -3,10 +3,12 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"foxesslocal/internal/frame"
+	"foxesslocal/internal/socest"
 )
 
 // seedFullState seeds a store exercising every /state source: the 5 s
@@ -284,6 +286,13 @@ type powerBody struct {
 
 type battery struct {
 	SocPct         int      `json:"soc_pct"`
+	SocEstimatePct *float64 `json:"soc_estimate_pct"`
+	Measured       *struct {
+		ChargingWh           *int `json:"charging_wh"`
+		DischargingWh        *int `json:"discharging_wh"`
+		ChargingIntervals    int  `json:"charging_intervals"`
+		DischargingIntervals int  `json:"discharging_intervals"`
+	} `json:"measured_capacity"`
 	State          string   `json:"state"`
 	StoredEnergyWh *int     `json:"stored_energy_wh"`
 	CapacityWh     *int     `json:"capacity_wh"`
@@ -454,3 +463,79 @@ func TestStateInverterState(t *testing.T) {
 		}
 	}
 }
+
+// socEstHarness is a harness with the full state seeded (SoC 58 %, from
+// the snap61) and the default capacity, and a GET /state.
+func socEstHarness(t *testing.T) (*harness, func() stateBody) {
+	t.Helper()
+	h := newHarness(t)
+	h.srv.info.BatteryCapacityWh = 41930
+	h.seedFullState()
+	h.clk.advance(5 * time.Second)
+	return h, func() stateBody {
+		t.Helper()
+		rr := h.do(t, httpGet, "/api/v1/state", RoleReadOnly, nil)
+		var st stateBody
+		if err := json.Unmarshal(rr.Body.Bytes(), &st); err != nil {
+			t.Fatalf("state body: %v", err)
+		}
+		return st
+	}
+}
+
+// TestStateSocEstimate (owner, 2026-11-20; D-028): /state carries the
+// SoC estimate between ticks beside the reported SoC, the stored energy
+// follows it, and /metrics exports it. An estimate of another tick (the
+// snap61 is newer) or none leaves it null.
+func TestStateSocEstimate(t *testing.T) {
+	h, get := socEstHarness(t)
+	if st := get(); st.Battery.SocEstimatePct != nil || st.Battery.Measured != nil {
+		t.Fatalf("no estimator: %+v", st.Battery)
+	}
+	est := &fakeSocEst{r: socest.Reading{Raw: 58, Pct: 57.7349, At: testBase}}
+	WithSocEstimate(est)(h.srv)
+	st := get()
+	if st.Battery.SocEstimatePct == nil || *st.Battery.SocEstimatePct != 57.73 || st.Battery.SocPct != 58 {
+		t.Fatalf("soc_estimate_pct %v, soc_pct %d: want 57.73 beside the reported 58", st.Battery.SocEstimatePct, st.Battery.SocPct)
+	}
+	// the 57.73 % shown, of 41 930 Wh
+	if st.Battery.StoredEnergyWh == nil || *st.Battery.StoredEnergyWh != 24206 {
+		t.Fatalf("stored_energy_wh: %v, want 24206", *st.Battery.StoredEnergyWh)
+	}
+	if rr := h.do(t, httpGet, "/metrics", RoleReadOnly, nil); !strings.Contains(rr.Body.String(), "foxess_battery_soc_estimate_percent 57.73") {
+		t.Fatalf("metrics:\n%s", rr.Body.String())
+	}
+	est.r.Raw = 59
+	if st := get(); st.Battery.SocEstimatePct != nil || *st.Battery.StoredEnergyWh != 24319 {
+		t.Fatalf("another tick: %v %v", st.Battery.SocEstimatePct, *st.Battery.StoredEnergyWh)
+	}
+}
+
+// TestStateMeasuredCapacity (owner, 2026-11-20; D-028): the learnt
+// energy per percent × 100, per direction once enough intervals agree,
+// in /state and /metrics.
+func TestStateMeasuredCapacity(t *testing.T) {
+	h, get := socEstHarness(t)
+	WithSocEstimate(&fakeSocEst{r: socest.Reading{Raw: 58, Pct: 58}, l: socest.Learned{
+		Charging:    socest.Dir{WhPerPct: 400, N: 2},     // too few intervals: null
+		Discharging: socest.Dir{WhPerPct: 377.374, N: 7}, // 90 % of 41 930 Wh
+	}})(h.srv)
+	if m := get().Battery.Measured; m == nil || m.ChargingWh != nil || m.ChargingIntervals != 2 ||
+		m.DischargingWh == nil || *m.DischargingWh != 37737 || m.DischargingIntervals != 7 {
+		t.Fatalf("measured_capacity %+v", m)
+	}
+	body := h.do(t, httpGet, "/metrics", RoleReadOnly, nil).Body.String()
+	if !strings.Contains(body, `foxess_battery_measured_capacity_wh{direction="discharging"} 37737`) ||
+		strings.Contains(body, `direction="charging"`) {
+		t.Fatalf("metrics:\n%s", body)
+	}
+}
+
+// fakeSocEst is a fixed SoC estimate.
+type fakeSocEst struct {
+	r socest.Reading
+	l socest.Learned
+}
+
+func (f *fakeSocEst) Latest() (socest.Reading, bool) { return f.r, true }
+func (f *fakeSocEst) Learned() socest.Learned        { return f.l }

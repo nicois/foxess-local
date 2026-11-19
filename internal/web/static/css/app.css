@@ -815,7 +815,9 @@ dl.kv {
     font-size: 3rem;
     font-weight: 650;
     line-height: 1.05;
+    font-variant-numeric: tabular-nums;
   }
+  .hero-frac { font-size: 0.55em; font-weight: 550; }
   .batt-phrase { margin: 0.2rem 0 0; font-weight: 550; }
   p { margin: 0; }
   dl.kv { margin-top: 0.4rem; }

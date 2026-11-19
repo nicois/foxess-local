@@ -114,6 +114,10 @@ func (s *Server) writeMetrics(m *metricsWriter, checks []Check, st State, mode p
 			m.sample("foxess_power_watts", float64(f.w), "flow", f.flow)
 		}
 		m.gauge("foxess_battery_soc_percent", "Battery state of charge, %.", float64(st.Battery.SocPct))
+		if e := st.Battery.SocEstimatePct; e != nil {
+			m.gauge("foxess_battery_soc_estimate_percent", "Battery state of charge between the whole-percent readings (from the battery power), %.", *e)
+		}
+		writeMeasured(m, st.Battery.MeasuredCapacity)
 	}
 	if e := st.Battery.StoredEnergyWh; e != nil {
 		m.gauge("foxess_battery_stored_energy_wh", "Usable stored energy (SoC × capacity), Wh.", float64(*e))
@@ -145,5 +149,21 @@ func (s *Server) writeTemps(m *metricsWriter, t Temperatures) {
 			first = false
 		}
 		m.sample("foxess_temperature_celsius", *x.v, "sensor", x.name)
+	}
+}
+
+// writeMeasured exports the measured capacity, per direction once known.
+func writeMeasured(m *metricsWriter, c *MeasuredCapacity) {
+	if c == nil || (c.ChargingWh == nil && c.DischargingWh == nil) {
+		return
+	}
+	m.family("foxess_battery_measured_capacity_wh", "The pack's capacity measured between SoC ticks, Wh, by direction (D-028).")
+	for _, d := range []struct {
+		dir string
+		wh  *int
+	}{{batteryStateCharging, c.ChargingWh}, {batteryStateDischarging, c.DischargingWh}} {
+		if d.wh != nil {
+			m.sample("foxess_battery_measured_capacity_wh", float64(*d.wh), "direction", d.dir)
+		}
 	}
 }

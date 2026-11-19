@@ -2,7 +2,8 @@
 //
 //   - battery-low: the state of charge is at or below the threshold;
 //   - battery-forecast-low: a least-squares line through the last window
-//     of readings, projected to now + horizon, has its one-sided upper
+//     of estimates (socest: the SoC between whole-percent ticks — D-028),
+//     projected to now + horizon, has its one-sided upper
 //     prediction bound (confidence 1 − p) at or below the threshold —
 //     the charge will be there within the horizon, with that confidence.
 //
@@ -71,12 +72,15 @@ type Watch struct {
 	forecastSoc  int // the charge when the forecast fired
 }
 
-// Observe takes one reading and returns the alerts it triggers.
-func (w *Watch) Observe(now time.Time, soc int, p Params) []Alert {
+// Observe takes one reading — the reported SoC and its estimate — and
+// returns the alerts it triggers. battery-low and the re-arming follow
+// the reported SoC (what the inverter and the UI show); the forecast
+// fits the estimate.
+func (w *Watch) Observe(now time.Time, soc int, est float64, p Params) []Alert {
 	if n := len(w.samples); n > 0 && now.Before(w.samples[n-1].at) {
 		w.samples = w.samples[:0] // the clock went back: start afresh
 	}
-	w.samples = append(w.samples, sample{now, float64(soc)})
+	w.samples = append(w.samples, sample{now, est})
 	cut := 0
 	for cut < len(w.samples) && now.Sub(w.samples[cut].at) > p.Window {
 		cut++

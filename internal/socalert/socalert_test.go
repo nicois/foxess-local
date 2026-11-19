@@ -12,15 +12,37 @@ var t0 = time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
 
 var params = Params{Threshold: 20, Horizon: 2 * time.Hour, Window: 30 * time.Minute, P: 0.05}
 
-// feed runs SoC samples every 5 s from t0 for d, soc(t) given in hours,
-// rounded as the inverter reports it, and returns every alert.
+// feed runs SoC samples every 5 s from t0 for d, soc(t) given in hours:
+// rounded as the inverter reports it, and as the estimate (exact: what
+// socest tracks between ticks). It returns every alert.
 func feed(w *Watch, p Params, d time.Duration, soc func(h float64) float64) []Alert {
 	var out []Alert
 	for at := time.Duration(0); at <= d; at += 5 * time.Second {
-		v := int(math.Round(soc(at.Hours())))
-		out = append(out, w.Observe(t0.Add(at), v, p)...)
+		est := soc(at.Hours())
+		out = append(out, w.Observe(t0.Add(at), int(math.Round(est)), est, p)...)
 	}
 	return out
+}
+
+// TestForecastSlowDischarge (owner, 2026-11-20): a night's discharge of
+// about 1 %/h moves the reported SoC once an hour, so a 30 min window of
+// whole percents is flat or one step; the estimate between the ticks
+// forecasts it about two hours ahead. (2026-11-20 on the KH10: 48 % at
+// 20:30, 40 % at 03:40, and only battery-low was sent.)
+func TestForecastSlowDischarge(t *testing.T) {
+	p := params
+	p.Threshold = 40
+	var w Watch
+	// 48 % falling 1.1 %/h: 40 % after 7 h 16 min
+	got := feed(&w, p, 8*time.Hour, func(h float64) float64 { return 48 - 1.1*h })
+	if len(got) != 2 || got[0].Kind != KindForecastLow || got[1].Kind != KindLow {
+		t.Fatalf("alerts %+v", got)
+	}
+	// the 2 h forecast reaches 40 % from about 42.2 %, never from a step
+	// read as a steep fall (the raw-only fit warned at 45 %, "2.8 %/h")
+	if !strings.Contains(got[0].Detail, "Battery 42 %") || !strings.Contains(got[0].Detail, "falling 1.1 %/h") {
+		t.Fatalf("detail %q", got[0].Detail)
+	}
 }
 
 // TestForecastAlerts (owner, 2026-11-18): a discharge that will reach the
@@ -82,7 +104,7 @@ func TestLowAndRearm(t *testing.T) {
 	p := params
 	var got []Alert
 	for i, soc := range []int{22, 21, 20, 19, 20, 21, 24, 25, 26, 20} {
-		got = append(got, w.Observe(t0.Add(time.Duration(i)*time.Minute), soc, p)...)
+		got = append(got, w.Observe(t0.Add(time.Duration(i)*time.Minute), soc, float64(soc), p)...)
 	}
 	if len(got) != 2 || got[0].Kind != KindLow || got[1].Kind != KindLow {
 		t.Fatalf("alerts %+v", got)
@@ -124,7 +146,7 @@ func TestOffAndClockJump(t *testing.T) {
 	}
 	var w2 Watch
 	feed(&w2, params, 20*time.Minute, func(h float64) float64 { return 60 - 15*h })
-	w2.Observe(t0.Add(-time.Hour), 55, params)
+	w2.Observe(t0.Add(-time.Hour), 55, 55, params)
 	if n := len(w2.samples); n != 1 {
 		t.Fatalf("after a backward jump %d samples, want 1", n)
 	}

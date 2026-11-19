@@ -423,6 +423,7 @@ func tokenStoreOpen(path string, clk func() time.Time) (*api.TokenStore, error) 
 // gw → svc → gw cycle (the method dereferences the service slot once
 // it is built).
 func (h *handle) buildService(p *prox.Prox) error {
+	h.restoreSocLearned() // before the first reading
 	budget, err := budgetOptions(h.cfg.Writes)
 	if err != nil {
 		return err
@@ -485,7 +486,7 @@ func (h *handle) buildMux(cfg *config.Config, tok *api.TokenStore) http.Handler 
 	h.scanner = scan.New(scan.GatewayReader(h.gw, scanOrigin), h.clk)
 	h.notifier = notify.New(h.notifyTargets, h.clk, notify.WithOutbox(storeOutbox{h.st}))
 	apiH := api.New(h.st, h.gw, h.maint, tok, h.fwd, h.bus, h.clk, api.WithInfo(info), api.WithUpdate(h.upd), api.WithScanner(h.scanner), api.WithCaptures(h.capt),
-		api.WithReadyChecks(h.readyChecks), api.WithNotifier(h.notifier))
+		api.WithReadyChecks(h.readyChecks), api.WithNotifier(h.notifier), api.WithSocEstimate(&h.soc.est))
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/{rest...}", apiH)
 	mux.Handle("/healthz", apiH)
@@ -790,6 +791,7 @@ func (h *handle) Shutdown(ctx context.Context) error {
 			fmt.Fprintln(os.Stderr, "tokens: saving last-used times:", err)
 		}
 	}
+	h.soc.saves.Wait() // the energy per percent: saved before the store closes
 	// the clean-stop marker: the next start knows this was no power cut
 	h.st.Flush()
 	if err := h.st.SetSetting(cleanStopKey, h.clk().UTC().Format(time.RFC3339)); err != nil {
@@ -833,7 +835,7 @@ func (h *handle) svcObs(ev framesvc.Event) {
 		if gev, ok := h.grid.observe(ev.Tele.InvState, h.clk()); ok {
 			h.bus.PublishSystem(gev)
 		}
-		h.observeSoc(ev.Tele.Soc, h.clk())
+		est := h.observeSoc(ev.Tele.Soc, ev.Tele.Batt, h.clk())
 		h.bus.PublishSnapshot(api.SnapshotEvent{
 			TS: h.clk(),
 			Power: api.Power{
@@ -841,9 +843,10 @@ func (h *handle) svcObs(ev framesvc.Event) {
 				LoadW: int(ev.Tele.Haus), AcPortW: int(ev.Tele.Acport),
 				BatteryW: int(ev.Tele.Batt), EpsW: int(ev.Tele.Eps),
 			},
-			SocPct:       int(ev.Tele.Soc),
-			BatteryState: teleBatteryState(ev.Tele),
-			Energy:       h.snapshotEnergy(),
+			SocPct:         int(ev.Tele.Soc),
+			SocEstimatePct: est,
+			BatteryState:   teleBatteryState(ev.Tele),
+			Energy:         h.snapshotEnergy(),
 		})
 	case framesvc.EventEnergy:
 		for _, f := range h.energy.observe(*ev.Energy, h.clk()) {

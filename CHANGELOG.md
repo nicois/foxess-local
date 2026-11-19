@@ -20,8 +20,26 @@ version; anything else bumps the patch version.
 
 ## [Unreleased]
 
+### Added
+
+- The state of charge between the inverter's whole-percent readings,
+  estimated from the battery power (as the foxess-control integration
+  does) and kept within half a percent of the reported value. The
+  dashboard shows it with two decimals; the API has it as
+  `battery.soc_estimate_pct` beside `soc_pct` (in `/state` and the live
+  events), and `/metrics` as `foxess_battery_soc_estimate_percent`. It
+  needs the battery capacity.
+- The battery's measured capacity: the energy between whole-percent
+  steps, learnt separately for charging and discharging and kept across
+  restarts. It corrects the estimate for a pack that has lost health or
+  a capacity set wrong, and is in `/state` (`battery.measured_capacity`)
+  and `/metrics`.
+
 ### Fixed
 
+- The "battery running low" forecast works on a slow discharge. It fits
+  the estimated state of charge: whole-percent readings at about 1 %/h
+  never warned, or warned early from a single step.
 - History charts: a legend entry's line sample no longer wraps away from
   its name on narrow screens.
 

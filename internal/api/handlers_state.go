@@ -2,10 +2,12 @@ package api
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"time"
 
 	"foxesslocal/internal/frame"
+	"foxesslocal/internal/socest"
 	"foxesslocal/internal/store"
 )
 
@@ -84,11 +86,18 @@ type Power struct {
 
 // Battery is the spec's Battery schema.
 type Battery struct {
-	SocPct         int      `json:"soc_pct"`
-	State          string   `json:"state"`
-	StoredEnergyWh *int     `json:"stored_energy_wh"`
-	CapacityWh     *int     `json:"capacity_wh"`
-	PackVoltageV   *float64 `json:"pack_voltage_v"`
+	SocPct int `json:"soc_pct"`
+	// SocEstimatePct is the SoC between the inverter's whole-percent
+	// ticks (socest, D-028): within [soc_pct − 0.5, soc_pct + 0.44], two
+	// decimals. Null without an estimate for the reported tick.
+	SocEstimatePct *float64 `json:"soc_estimate_pct"`
+	// MeasuredCapacity is the pack's capacity measured between SoC ticks
+	// (D-028); null without an estimator.
+	MeasuredCapacity *MeasuredCapacity `json:"measured_capacity"`
+	State            string            `json:"state"`
+	StoredEnergyWh   *int              `json:"stored_energy_wh"`
+	CapacityWh       *int              `json:"capacity_wh"`
+	PackVoltageV     *float64          `json:"pack_voltage_v"`
 	// BMSChargeLimitA is the BMS's charge-current limit (31025): it
 	// follows the coldest cell's temperature and the SoC. Null without a
 	// register reading.
@@ -264,10 +273,15 @@ func (s *Server) batteryOf(st store.State) Battery {
 	if capWh > 0 {
 		b.CapacityWh = &capWh
 	}
+	b.SocEstimatePct = s.socEstimate(b.SocPct)
+	b.MeasuredCapacity = s.measuredCapacity()
 	if capWh > 0 && (!st.SnapTS.IsZero() || !st.TeleTS.IsZero()) {
 		// usable energy = SoC × capacity (the snap61 1907 counter's unit
-		// is undetermined — profile §4)
+		// is undetermined — profile §4), from the estimate when there is one
 		wh := (b.SocPct*capWh + 50) / 100
+		if e := b.SocEstimatePct; e != nil {
+			wh = int(math.Round(*e * float64(capWh) / percent))
+		}
 		b.StoredEnergyWh = &wh
 	}
 	if !st.SnapTS.IsZero() && len(st.BusVoltage) > 0 {
@@ -276,6 +290,63 @@ func (s *Server) batteryOf(st store.State) Battery {
 	}
 	return b
 }
+
+// socEstimate is the SoC estimate for the reported tick, rounded to two
+// decimals; nil without one (no estimator, no capacity, or an estimate
+// of another tick — the snap61 burst is newer than the telemetry).
+func (s *Server) socEstimate(socPct int) *float64 {
+	if s.socEst == nil {
+		return nil
+	}
+	r, ok := s.socEst.Latest()
+	if !ok || r.Raw != socPct {
+		return nil
+	}
+	v := RoundPct(r.Pct)
+	return &v
+}
+
+// percent is 100 %; hundredths rounds to two decimals.
+const (
+	percent    = 100
+	hundredths = 100
+)
+
+// MeasuredCapacity is the energy between two consecutive single-step
+// SoC ticks, × 100, per direction (D-028): the pack's capacity as the
+// inverter's battery power sees it — less than the nominal on a pack
+// that has lost health, and it includes the losses between the
+// measurement and the cells. A direction is null until enough clean
+// intervals agree (the estimate applies it from then on).
+type MeasuredCapacity struct {
+	ChargingWh           *int `json:"charging_wh"`
+	DischargingWh        *int `json:"discharging_wh"`
+	ChargingIntervals    int  `json:"charging_intervals"`
+	DischargingIntervals int  `json:"discharging_intervals"`
+}
+
+// measuredCapacity is the learnt capacity; nil without an estimator.
+func (s *Server) measuredCapacity() *MeasuredCapacity {
+	if s.socEst == nil {
+		return nil
+	}
+	l := s.socEst.Learned()
+	wh := func(d socest.Dir) *int {
+		if !d.Ready() {
+			return nil
+		}
+		v := int(math.Round(d.WhPerPct * percent))
+		return &v
+	}
+	return &MeasuredCapacity{
+		ChargingWh: wh(l.Charging), DischargingWh: wh(l.Discharging),
+		ChargingIntervals: l.Charging.N, DischargingIntervals: l.Discharging.N,
+	}
+}
+
+// RoundPct rounds an estimated percentage to the two decimals the API
+// carries.
+func RoundPct(v float64) float64 { return math.Round(v*hundredths) / hundredths }
 
 func (s *Server) buildState(st store.State) (State, error) {
 	body := State{TS: s.clock()}
@@ -430,7 +501,12 @@ func (s *Server) scanConfigRegs(newest time.Time) configRegs {
 // sign as the fallback for an unknown code).
 // batteryStateUnknown is the spec's BatteryState for a store with no
 // telemetry yet.
-const batteryStateUnknown = "unknown"
+// The battery states (the spec's BatteryState).
+const (
+	batteryStateUnknown     = "unknown"
+	batteryStateCharging    = "charging"
+	batteryStateDischarging = "discharging"
+)
 
 func batteryState(st store.State) string {
 	if st.TeleTS.IsZero() {
@@ -438,15 +514,15 @@ func batteryState(st store.State) string {
 	}
 	switch st.ChargeState {
 	case chargeStateCharging:
-		return "charging"
+		return batteryStateCharging
 	case chargeStateIdle:
 		return "idle"
 	}
 	switch {
 	case st.Batt > 0:
-		return "charging"
+		return batteryStateCharging
 	case st.Batt < 0:
-		return "discharging"
+		return batteryStateDischarging
 	}
 	return "idle"
 }

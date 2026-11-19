@@ -16,6 +16,7 @@ import (
 	"foxesslocal/internal/policy"
 	"foxesslocal/internal/scan"
 	"foxesslocal/internal/settings"
+	"foxesslocal/internal/socest"
 	"foxesslocal/internal/store"
 	"foxesslocal/internal/wincap"
 )
@@ -138,6 +139,8 @@ type Server struct {
 	// offered).
 	captures *wincap.Capturer
 	mux      *http.ServeMux
+	// socEst is the SoC estimate (WithSocEstimate); nil = none.
+	socEst SocEstimator
 }
 
 // ServeHTTP makes *Server an http.Handler (New returns the server; the
@@ -148,6 +151,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // ServerOption customises the handler set at construction.
 type ServerOption func(*Server)
+
+// SocEstimator is the SoC estimate between whole-percent ticks and the
+// energy per percent it has learnt (socest.Estimator; D-028).
+type SocEstimator interface {
+	Latest() (socest.Reading, bool)
+	Learned() socest.Learned
+}
+
+// WithSocEstimate gives /state and /metrics the SoC estimate and the
+// measured capacity; without it both are null.
+func WithSocEstimate(e SocEstimator) ServerOption {
+	return func(s *Server) { s.socEst = e }
+}
 
 // WithInfo overrides the /config server facts (version, retention)
 // with the host's real values; the default New keeps the dev defaults.

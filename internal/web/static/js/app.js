@@ -758,7 +758,7 @@ function queueSnapshot(d) {
     snapPending = null;
     if (!s || !S.state) return;
     S.state.power = s.power;
-    S.state.battery = { ...(S.state.battery || {}), soc_pct: s.soc_pct, state: s.battery_state };
+    S.state.battery = { ...(S.state.battery || {}), soc_pct: s.soc_pct, soc_estimate_pct: s.soc_estimate_pct, state: s.battery_state };
     S.state.as_of = s.ts;
     if (routeName() === "dashboard") paintNow(S.state);
     if (routeName() === "control") { paintNow(S.state); paintLimits(S.state); }
@@ -1231,13 +1231,27 @@ function paintNow(st) {
 function paintBattery(st) {
   const b = st?.battery;
   const w = nowPower(st)?.battery_w;
-  const soc = b?.soc_pct;
+  // the estimate between the inverter's whole-percent readings (two
+  // decimals, D-028) when there is one, else the reported SoC
+  const est = b?.soc_estimate_pct;
+  const soc = est ?? b?.soc_pct;
+  const socTxt = soc == null ? null : est != null ? est.toFixed(2) : String(Math.round(soc));
   const socEl = byId("soc");
-  if (socEl) socEl.textContent = soc == null ? "—" : Math.round(soc) + " %";
+  if (socEl) {
+    if (socTxt == null) socEl.textContent = "—";
+    else {
+      // the decimals smaller than the whole percent
+      const [whole, frac] = socTxt.split(".");
+      const small = document.createElement("span");
+      small.className = "hero-frac";
+      small.textContent = frac ? "." + frac : "";
+      socEl.replaceChildren(whole, small, " %");
+    }
+  }
   const meter = byId("soc-meter");
   if (meter) {
-    meter.setAttribute("aria-valuenow", soc == null ? 0 : Math.round(soc));
-    meter.setAttribute("aria-valuetext", soc == null ? tr("unknown") : tr("{n} percent", { n: Math.round(soc) }));
+    meter.setAttribute("aria-valuenow", soc == null ? 0 : soc);
+    meter.setAttribute("aria-valuetext", soc == null ? tr("unknown") : tr("{n} percent", { n: socTxt }));
   }
   const bar = byId("soc-bar");
   if (bar) {
@@ -1253,7 +1267,8 @@ function paintBattery(st) {
       : f.d === "fwd" ? tr("Charging {w}", { w: fmtPower(w) }) : tr("Discharging {w}", { w: fmtPower(w) });
   }
   // usable energy = SoC × the configured capacity (the API's capacity_wh;
-  // recomputed here because live snapshots carry only the SoC)
+  // recomputed here because live snapshots carry only the SoC and its
+  // estimate)
   const cap = b?.capacity_wh;
   const stored = soc != null && cap ? Math.round(soc * cap / 100) : b?.stored_energy_wh;
   const eta = byId("batt-eta");
