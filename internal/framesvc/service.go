@@ -804,11 +804,23 @@ func (s *Service) onDataS2C(connID string, fl *flow, data []byte) hooks.Result {
 			}
 		}
 		s.st.RecordFrame(rec)
+		s.observeFirmwareTask(connID, kind, f.Payload, rec.Decision)
 	}
 	if len(out) == 0 {
 		return hooks.Result{Data: []byte{}, Reason: dropReason}
 	}
 	return hooks.Result{Data: out}
+}
+
+// observeFirmwareTask reports a cloud firmware upgrade task and what
+// happened to it (profile §6).
+func (s *Service) observeFirmwareTask(connID string, kind frame.Kind, payload []byte, d store.Decision) {
+	if kind != frame.KindOther {
+		return
+	}
+	if t, ok := frame.ParseFwTask(payload); ok {
+		s.observe(Event{Kind: EventFirmwareTask, ConnID: connID, FwTask: &t, Decision: d})
+	}
 }
 
 // observeSession pins the session identity from the first s2c frames:
@@ -1008,7 +1020,9 @@ func decodedJSON(kind frame.Kind, raw []byte) json.RawMessage {
 			return nil
 		}
 		v = pdu
-	case frame.KindKeepalive, frame.KindRSSI, frame.KindCfg40, frame.KindRegister, frame.KindCfg91, frame.KindSerialQuery, frame.KindBootstrapResp, frame.KindOther:
+	case frame.KindOther:
+		return frame.DescribeOther(raw)
+	case frame.KindKeepalive, frame.KindRSSI, frame.KindCfg40, frame.KindRegister, frame.KindCfg91, frame.KindSerialQuery, frame.KindBootstrapResp:
 		return nil
 	default: // the remaining snapNN classes carry no structured decode
 		return nil

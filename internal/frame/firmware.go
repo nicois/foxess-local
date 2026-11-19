@@ -202,3 +202,28 @@ func FwMCUName(code string) string {
 	}
 	return "unknown (" + code + ")"
 }
+
+// DescribeOther is the structured decode of an unclassified frame with a
+// known layout, as JSON: {"firmware_task": …} (component, mcu_type,
+// filename, size, crc, url), {"firmware_push": …} (name, size, crc) or
+// {"json": …} (a JSON note). nil for the rest.
+func DescribeOther(p []byte) json.RawMessage {
+	var v any
+	if t, ok := ParseFwTask(p); ok {
+		v = map[string]any{"firmware_task": map[string]any{
+			"component": FwMCUName(t.MCU), "mcu_type": t.MCU, "filename": t.Filename,
+			"size": t.Size, "crc": t.CRC, "url": t.URL,
+		}}
+	} else if m, ok := ParseFwMeta(p); ok {
+		v = map[string]any{"firmware_push": map[string]any{"name": m.Name, "size": m.Size, "crc": m.CRC}}
+	} else if _, body, ok := ParseJSONMsg(p); ok {
+		v = map[string]json.RawMessage{"json": body}
+	} else {
+		return nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	return b
+}

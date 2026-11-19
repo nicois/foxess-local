@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"foxesslocal/internal/api"
+	"foxesslocal/internal/frame"
+	"foxesslocal/internal/framesvc"
 	"foxesslocal/internal/notify"
+	"foxesslocal/internal/store"
 	"foxesslocal/internal/update"
 )
 
@@ -90,10 +93,11 @@ func TestNoticeWatcherSystem(t *testing.T) {
 		ch <- sys(api.SystemMaintenanceExtended, "re-armed")
 		ch <- sys(api.SystemMaintenanceClosed, "closed")
 		ch <- sys(api.SystemForwardModeChanged, "off")
+		ch <- sys(api.SystemFirmwareTask, "manager: blocked")
 		synctest.Wait()
 		cancel()
 		<-done
-		want := []string{"alert", "gate-rule-loss", "upgrade-rolled-back", "maintenance-opened", "maintenance-closed", "forward-mode-changed"}
+		want := []string{"alert", "gate-rule-loss", "upgrade-rolled-back", "maintenance-opened", "maintenance-closed", "forward-mode-changed", "firmware-task"}
 		got := log.events()
 		if len(got) != len(want) {
 			t.Fatalf("notices %v, want %v", got, want)
@@ -231,5 +235,24 @@ func TestRestartNotice(t *testing.T) {
 	var c connWatch
 	if n, ok := c.noticeFor(api.Event{Kind: api.EventSystem, Data: ev}); !ok || n.Severity != notify.Warning {
 		t.Fatalf("notice: %+v %v", n, ok)
+	}
+}
+
+// TestFirmwareTaskEvent (owner, 2026-11-19): a cloud firmware update
+// becomes a system event saying which component and file, and whether
+// it was blocked or passed — never the download URL (notices leave the
+// LAN, through ntfy or a webhook).
+func TestFirmwareTaskEvent(t *testing.T) {
+	task := &frame.FwTask{MCU: "A", Filename: "10-300-11057-37_K10_Manager_V1.71.bin", URL: "https://example.invalid/secret", Size: 764904, CRC: 59102}
+	blocked := firmwareTaskEvent(framesvc.Event{Kind: framesvc.EventFirmwareTask, FwTask: task, Decision: store.DecisionDropped})
+	passed := firmwareTaskEvent(framesvc.Event{Kind: framesvc.EventFirmwareTask, FwTask: task, Decision: store.DecisionForwarded})
+	for _, ev := range []api.SystemEvent{blocked, passed} {
+		if ev.Type != api.SystemFirmwareTask || !strings.Contains(ev.Detail, "manager") ||
+			!strings.Contains(ev.Detail, "10-300-11057-37_K10_Manager_V1.71.bin") || strings.Contains(ev.Detail, "example.invalid") {
+			t.Errorf("event %+v", ev)
+		}
+	}
+	if !strings.Contains(blocked.Detail, "Blocked") || !strings.Contains(passed.Detail, "maintenance window") {
+		t.Errorf("blocked %q / passed %q", blocked.Detail, passed.Detail)
 	}
 }

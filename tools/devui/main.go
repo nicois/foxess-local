@@ -191,8 +191,31 @@ func maybeSnap61(st *store.Store, t time.Time, stepS int64) {
 	binary.LittleEndian.PutUint16(p[66:], uint16(200+50*warm)) // highest cell
 	binary.LittleEndian.PutUint16(p[68:], uint16(160+40*warm)) // lowest cell
 	st.RecordFrame(store.FrameRecord{
-		ConnID: "devui-1", Seq: int(t.Unix()), Dir: capture.DirC2S, TS: t,
+		ConnID: devuiConn, Seq: int(t.Unix()), Dir: capture.DirC2S, TS: t,
 		Class: frame.KindSnap61, Plen: len(p), Payload: p, Decision: store.DecisionForwarded,
+	})
+}
+
+// devuiConn is the demo store's one connection.
+const devuiConn = "devui-1"
+
+// seedActivity seeds the Activity page: two operator actions and a
+// blocked firmware upgrade task.
+func seedActivity(st *store.Store, seq int, now time.Time) {
+	seedFirmwareTask(st, seq, now)
+	st.RecordAudit(now.Add(-40*time.Minute), "forward-mode", "→ off by installer")
+	st.RecordAudit(now.Add(-20*time.Minute), "write-override", "revoked by installer")
+}
+
+// seedFirmwareTask records a cloud firmware upgrade task, blocked outside
+// a maintenance window (profile §6; placeholder address), for the
+// Messages and Activity pages.
+func seedFirmwareTask(st *store.Store, seq int, now time.Time) {
+	task := []byte("\x17\x01\x3d" + `{"task_type":"upgrade","data":{"mcu_type":"A","notify_url":"https://example.invalid/status","url":"https://example.invalid/private/firmware/00000000-0000-0000-0000-000000000000?taskId=1","filename":"10-300-11057-37_K10_Manager_V1.71.bin","crc":59102,"size":764904}}`)
+	st.RecordFrame(store.FrameRecord{
+		ConnID: devuiConn, Seq: seq, Dir: capture.DirS2C, TS: now.Add(-30 * time.Second),
+		Class: frame.KindOther, Plen: len(task), Payload: task, Decision: store.DecisionDropped,
+		Reason: "mode:telemetry_only deny:kind=other", Decoded: frame.DescribeOther(task),
 	})
 }
 
@@ -206,7 +229,7 @@ func live(st *store.Store, bus *api.Bus) {
 	for t := range time.Tick(5 * time.Second) {
 		maybeSnap61(st, t, 5)
 		tl := tele(t)
-		st.RecordTelemetry("devui-1", t, tl)
+		st.RecordTelemetry(devuiConn, t, tl)
 		state := "idle"
 		switch {
 		case tl.Batt > 0:
@@ -228,7 +251,7 @@ func live(st *store.Store, bus *api.Bus) {
 func seed(st *store.Store, now time.Time, model string, master uint16) {
 	for t := now.Add(-2 * time.Hour); t.Before(now); t = t.Add(30 * time.Second) {
 		maybeSnap61(st, t, 30)
-		st.RecordTelemetry("devui-1", t, tele(t))
+		st.RecordTelemetry(devuiConn, t, tele(t))
 	}
 	regs := make([]uint16, 15)
 	padded := model + "               "
@@ -292,11 +315,10 @@ func seed(st *store.Store, now time.Time, model string, master uint16) {
 	}
 	for i, f := range frames {
 		st.RecordFrame(store.FrameRecord{
-			ConnID: "devui-1", Seq: i, Dir: f.dir, TS: now.Add(time.Duration(i-len(frames)) * time.Minute),
+			ConnID: devuiConn, Seq: i, Dir: f.dir, TS: now.Add(time.Duration(i-len(frames)) * time.Minute),
 			Class: f.class, Plen: len(f.p), Payload: f.p, Decision: store.DecisionForwarded,
 		})
 	}
-	st.RecordAudit(now.Add(-40*time.Minute), "forward-mode", "→ off by installer")
-	st.RecordAudit(now.Add(-20*time.Minute), "write-override", "revoked by installer")
+	seedActivity(st, len(frames), now)
 	st.Flush()
 }

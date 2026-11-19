@@ -847,6 +847,8 @@ func (h *handle) svcObs(ev framesvc.Event) {
 		}
 	case framesvc.EventWrite:
 		h.publishConfig(api.SectionsOf(writtenAddrs(ev.PDU)))
+	case framesvc.EventFirmwareTask:
+		h.bus.PublishSystem(firmwareTaskEvent(ev))
 	}
 }
 

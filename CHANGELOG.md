@@ -21,6 +21,13 @@ version; anything else bumps the patch version.
 ## [Unreleased]
 
 ### Added
+- Cloud firmware updates are visible. When the cloud asks the inverter to
+  update a firmware component, Frame messages shows a "Firmware update
+  task" with the component, file, size, CRC and download address (expert
+  and installer); Activity names the file and component instead of
+  "other"; and a notification says what was requested and whether it was
+  blocked (outside a maintenance window) or passed. The notification and
+  Activity leave out the download address, which is tied to your account.
 - OpenStick provisioning (`provision-openstick.sh`, in every release): turns
   a UZ801-class MSM8916 4G USB stick running the OpenStick Debian image
   into the inverter's gateway, then installs foxess-local. Idempotent

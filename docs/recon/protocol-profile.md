@@ -573,7 +573,9 @@ details, which were never seen before.
 
 Policy (C-002, D-025): firmware passes only inside a maintenance window; in
 `off`/`telemetry_only` the task frame is dropped (and logged byte-exact),
-so the inverter never acts on it.
+so the inverter never acts on it. The app shows a task on Frame messages
+(component, file, size, CRC, the download address), names it in Activity,
+and raises the `firmware-task` system event (notified; without the URL).
 
 ## 7. Native schedule structure
 

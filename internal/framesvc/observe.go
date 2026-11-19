@@ -1,6 +1,9 @@
 package framesvc
 
-import "foxesslocal/internal/frame"
+import (
+	"foxesslocal/internal/frame"
+	"foxesslocal/internal/store"
+)
 
 // Event kinds: the spec's SSE map minus the api-handler-owned events
 // (forward-mode-changed, the maintenance transitions — those paths have
@@ -12,6 +15,9 @@ const (
 	EventTelemetry   = "telemetry"    // live values: a 150 B c2s frame or a register poll (Tele holds it)
 	EventWrite       = "write"        // a forwarded s2c Modbus write reached the inverter (PDU = its PDU)
 	EventEnergy      = "energy"       // the lifetime energy totals were read (Energy holds them)
+	// EventFirmwareTask: the cloud sent a firmware upgrade task (FwTask,
+	// and Decision: forwarded in a maintenance window, else dropped).
+	EventFirmwareTask = "firmware-task"
 )
 
 // Event is one observed stack event. The observer is called on the hook
@@ -37,6 +43,10 @@ type Event struct {
 
 	// Energy
 	Energy *frame.KHEnergy
+
+	// FirmwareTask
+	FwTask   *frame.FwTask
+	Decision store.Decision
 }
 
 // Observer observes stack events.

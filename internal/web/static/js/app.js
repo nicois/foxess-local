@@ -818,11 +818,12 @@ const SYSTEM_TITLE = {
   "unclean-restart": tr("Restarted after an unexpected stop"),
   "battery-low": tr("Battery low"),
   "battery-forecast-low": tr("Battery running low"),
+  "firmware-task": tr("The cloud requested a firmware update"),
 };
 
 onSSE("system", (d) => {
   const bad = d.type.includes("failed") || d.type.includes("error");
-  const warn = d.type.startsWith("battery-") || d.type === "grid-lost" || d.type === "unclean-restart";
+  const warn = d.type.startsWith("battery-") || d.type === "grid-lost" || d.type === "unclean-restart" || d.type === "firmware-task";
   toast(SYSTEM_TITLE[d.type] ?? d.type, bad ? "error" : warn ? "warn" : "info", d.detail || undefined);
   if (routeName() === "maintenance" &&
       ["maintenance-opened", "maintenance-extended", "maintenance-expired", "maintenance-closed"].includes(d.type)) {
@@ -2176,6 +2177,28 @@ function msgStatus(m) {
   return `<span class="chip ${cls}"${r ? ` title="${esc(r)}"` : ""}>${esc(txt)}</span>`;
 }
 
+// FW_COMPONENT: the firmware components an upgrade task names
+const FW_COMPONENT = { master: tr("master"), slave: tr("slave"), manager: tr("manager") };
+
+// msgFirmware: a readable line for a firmware upgrade task or in-band
+// firmware announcement (profile §6), "" for any other frame. The task's
+// address is the file the dongle would download (a link, https only).
+function msgFirmware(m) {
+  let d;
+  try { d = JSON.parse(m.summary ?? "null"); } catch { return ""; }
+  const t = d?.firmware_task, p = d?.firmware_push;
+  if (t) {
+    const url = typeof t.url === "string" && t.url.startsWith("https://") ? t.url : "";
+    return `<p class="small fw-task"><strong>${esc(tr("Firmware update task"))}</strong>: ${esc(tr("{component} firmware {file}, {size} bytes, CRC {crc}", {
+      component: FW_COMPONENT[t.component] ?? t.component, file: t.filename, size: t.size, crc: t.crc,
+    }))}${url ? `<br>${esc(tr("Download address"))}: <a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="mono">${esc(url)}</a>` : ""}</p>`;
+  }
+  if (p) {
+    return `<p class="small fw-task"><strong>${esc(tr("Firmware push"))}</strong>: ${esc(tr("{file}, {size} bytes, CRC {crc}", { file: p.name, size: p.size, crc: p.crc }))}</p>`;
+  }
+  return "";
+}
+
 // ---------- device scan (F8, read-only) ----------
 
 let scanTimer = 0;
@@ -2579,7 +2602,8 @@ async function renderMessages() {
       <span class="dir ${up ? "up" : "down"}" title="${esc(up ? tr("inverter → cloud") : tr("cloud → inverter"))}">${up ? "↑" : "↓"}</span>
       <div class="item-main">
         <div class="item-title"><span class="mono">${esc(m.frame)}</span> <span class="muted small num">${fmtBytes(m.length)}</span> ${msgStatus(m)}</div>
-        <div class="item-meta muted small"><time datetime="${esc(m.ts)}">${fmtTime(m.ts)}</time>${m.summary ? " · " + esc(m.summary) : ""}</div>
+        <div class="item-meta muted small"><time datetime="${esc(m.ts)}">${fmtTime(m.ts)}</time>${msgFirmware(m) ? "" : m.summary ? " · " + esc(m.summary) : ""}</div>
+        ${msgFirmware(m)}
         ${m.hex ? `<details class="hex"><summary>${esc(tr("raw bytes"))}</summary><pre>${esc(m.hex)}</pre></details>` : ""}
       </div>
     </li>`;

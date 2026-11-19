@@ -214,7 +214,7 @@ func parseCommandAudit(ev store.AuditEvent) (auditEntry, bool) {
 func summarizeFrame(rec *store.FrameRecord) string {
 	mb, err := frame.ParseModbus(rec.Payload)
 	if err != nil {
-		return string(rec.Class)
+		return summarizeOther(rec)
 	}
 	switch mb.Fn {
 	case fn06:
@@ -243,6 +243,20 @@ func summarizeFrame(rec *store.FrameRecord) string {
 		return "write (addr=" + strconv.Itoa(mb.Addr) + " x" + strconv.Itoa(mb.Count) + ")"
 	case fn03:
 		return "read (addr=" + strconv.Itoa(mb.Addr) + " x" + strconv.Itoa(mb.Count) + ")"
+	}
+	return string(rec.Class)
+}
+
+// summarizeOther names the non-Modbus frames with a known layout: a
+// firmware upgrade task (file and component; its url stays on the
+// expert-only Messages page) or an in-band firmware announcement
+// (profile §6). Anything else is its class.
+func summarizeOther(rec *store.FrameRecord) string {
+	if t, ok := frame.ParseFwTask(rec.Payload); ok {
+		return "firmware update task: " + t.Filename + " (" + frame.FwMCUName(t.MCU) + ")"
+	}
+	if m, ok := frame.ParseFwMeta(rec.Payload); ok {
+		return "firmware push: " + m.Name + " (" + strconv.Itoa(m.Size) + " B)"
 	}
 	return string(rec.Class)
 }

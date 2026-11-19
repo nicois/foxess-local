@@ -1556,3 +1556,6 @@ a.badge { text-decoration: none; &:hover { text-decoration: underline; } }
     }
   }
 }
+
+/* a firmware upgrade task on Frame messages: the download address is long */
+.fw-task { margin: 0.25rem 0 0; overflow-wrap: anywhere; }

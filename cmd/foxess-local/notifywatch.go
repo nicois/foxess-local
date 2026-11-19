@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"foxesslocal/internal/api"
+	"foxesslocal/internal/frame"
+	"foxesslocal/internal/framesvc"
 	"foxesslocal/internal/notify"
 	"foxesslocal/internal/store"
 	"foxesslocal/internal/update"
@@ -44,6 +46,22 @@ var systemNotices = map[string]struct {
 	api.SystemMaintenanceClosed:  {notify.Warning, "Maintenance window closed"},
 	api.SystemMaintenanceExpired: {notify.Warning, "Maintenance window expired"},
 	api.SystemForwardModeChanged: {notify.Warning, "Cloud forwarding changed"},
+	api.SystemFirmwareTask:       {notify.Warning, "The cloud requested a firmware update"},
+}
+
+// firmwareTaskEvent describes a cloud firmware upgrade task: the
+// component and file, and what happened to it. The download URL stays
+// out (notices leave the LAN): it is on More → Frame messages.
+func firmwareTaskEvent(ev framesvc.Event) api.SystemEvent {
+	t := ev.FwTask
+	detail := fmt.Sprintf("The cloud asked to update the inverter's %s firmware (%s, %d bytes).",
+		frame.FwMCUName(t.MCU), t.Filename, t.Size)
+	if ev.Decision == store.DecisionForwarded {
+		detail += " Passed (maintenance window): the inverter may download and flash it, then restart."
+	} else {
+		detail += " Blocked: firmware passes only in a maintenance window. The file's address is under More → Frame messages (expert)."
+	}
+	return api.SystemEvent{Type: api.SystemFirmwareTask, Detail: detail}
 }
 
 // watchNotices turns bus events into notices until ctx is done (F2):

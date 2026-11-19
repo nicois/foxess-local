@@ -49,6 +49,9 @@ const (
 	// there within the horizon.
 	SystemBatteryLow         = "battery-low"
 	SystemBatteryForecastLow = "battery-forecast-low"
+	// SystemFirmwareTask: the cloud asked the inverter to update a
+	// firmware component (blocked outside a maintenance window).
+	SystemFirmwareTask = "firmware-task"
 )
 
 // Audit event kinds (the store audit_events rows the API writes; the

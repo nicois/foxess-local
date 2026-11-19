@@ -2385,7 +2385,13 @@ components:
           type: string
         summary:
           type: [string, 'null']
-          description: Decoded summary where available.
+          description: >-
+            Decoded summary where available: the class's structured decode as
+            JSON. Unclassified frames with a known layout carry
+            {"firmware_task": {component, mcu_type, filename, size, crc, url}}
+            (a cloud firmware upgrade task; url is the file the dongle would
+            download), {"firmware_push": {name, size, crc}} (an in-band
+            firmware announcement) or {"json": …} (a JSON note).
         decision:
           type: string
           enum: [forwarded, dropped, injected, residue]
@@ -2769,7 +2775,7 @@ components:
       properties:
         type:
           type: string
-          enum: [forward-mode-changed, maintenance-opened, maintenance-extended, maintenance-expired, maintenance-closed, alert, gate-rule-loss, upgrade-rolled-back, grid-lost, grid-restored, unclean-restart, battery-low, battery-forecast-low, counter-reset]
+          enum: [forward-mode-changed, maintenance-opened, maintenance-extended, maintenance-expired, maintenance-closed, alert, gate-rule-loss, upgrade-rolled-back, grid-lost, grid-restored, unclean-restart, battery-low, battery-forecast-low, counter-reset, firmware-task]
         detail:
           type: string
     ResyncEvent:

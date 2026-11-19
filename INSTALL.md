@@ -382,7 +382,12 @@ needs attention, without the web UI open:
   Settings → Tuning; 0 turns these off);
 - a failed command or schedule, a write refused by the hourly limit,
   low disk space;
-- the cloud-forwarding mode or a maintenance window changing.
+- the cloud-forwarding mode or a maintenance window changing;
+- the cloud asking the inverter to update its firmware: which component
+  and file, and whether it was blocked (outside a maintenance window) or
+  passed. The download address is not in the message; it is under More →
+  Frame messages (expert), where the request shows as a "Firmware update
+  task".
 
 Two targets, either or both:
 
