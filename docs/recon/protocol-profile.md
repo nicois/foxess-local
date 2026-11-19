@@ -282,12 +282,15 @@ Confirmed fields (multi-burst, state-diverse; offsets within the 10 B TLV value)
 | Tag | Offset | Field | Evidence |
 |---|---|---|---|
 | `1905` | [6:8] u16 | **Battery SoC %** | 63/94/92/91/90/88/87 vs HA 63/95/93/92/91/89/88 (frame = HA − 1 in all six discharge bursts; exact in the charge burst — floor/round or one-step update lag) |
-| `1907` | [0:2] u16 | **Stored-charge counter, proportional to SoC — unit undetermined** | counter ÷ SoC fraction is constant (970–1015 at 100 % over 131 frames; 620 @ 63 % … 863 @ 87.5 %; live 989 @ 100 %). **Correction 2026-11-16**: the earlier "50 Wh units → 49.2 kWh" reading was an assumed unit (only proportionality was ever checked; the "HA cross-check" covered SoC, not energy). The pack is a Fox ESS **EQ4800-L9** = 9 × 4.66 kWh = **41.93 kWh nominal, 100 % DoD** (owner) — matching the **9 module records** in snap60/snap61. 41 930 / 989 ≈ 42.4 Wh per count is not a plausible unit; one fit is 0.1 Ah counts (98.9 Ah vs the module's nominal ~91 Ah — over-provisioning reserved outside SoC; hypothesis). foxess-local reports usable energy as SoC × `battery.capacity_wh` (default 41930) and does not convert this counter. |
+| `1907` | [0:2] u16 | **Remaining charge** (BMS coulomb count), in the unit of the lifetime counters `1879` — ≈ 0.1 % of nominal capacity, ≈ 42 Wh | **Decoded 2026-11-20** (937 snap61 over 11-16→11-19, 3.2 days, against 47 641 polled samples): between snapshots Δ`1907`[0:2] = +0.982 · Δ`1879`[0:2] (charged) − 1.009 · Δ`1879`[4:6] (discharged), rms 3.4 counts per hour; ~990 at 100 %, 337 at 30 %. The unit is the counters' (≈ 42 Wh per count against the inverter's battery power at high power); 0.1 Ah is not ruled out. "Proportional to SoC" (2026-11-05) holds only roughly: `1907` − `1908` runs from +34 at 30 % to −19 at 90 %. foxess-local reports usable energy as SoC × `battery.capacity_wh` and does not convert this counter. |
+| `1908` | [4:6] u16 | **BMS SoC, 0.1 %** | **Decoded 2026-11-20**: `1905`[6:8] (whole-percent snap61 SoC) = floor(`1908`[4:6] ÷ 10) in 935 of 937 snapshots — the BMS **truncates**. Moves +1.07 per `1879` count (SoC over the BMS's own full-charge figure). Wh per 1 % of it against the inverter's battery power: 406 above 4 kW, 635 below 0.7 kW discharge (see 31022). |
+| `1879` | [0:2] / [4:6] u16 | **Lifetime charge in / out** (monotone, one direction each), the unit of `1907` | **Decoded 2026-11-20**: per inverter-measured kWh, [0:2] +23.95 counts charging only, [4:6] +22.82 discharging only (two-regressor fit on 1 h windows, rms 0.9 / 2.6 counts). Discharge counts per inverter kWh fall with power: 13.3 below 0.7 kW vs 23.4 above 4 kW. |
+| `187a` | [0:2] / [4:6] u16 | **Lifetime energy in / out, 0.1 kWh** (unit a hypothesis) | **Decoded 2026-11-20**: +10.16 counts per inverter kWh charging only, +9.44 discharging only (rms 0.4 / 1.2). Energy-conservation check (night, PV = 0, pure discharge below 0.7 kW, 145 intervals): inverter battery power 6.20 kWh, AC output (31008) 3.12 kWh, `187a` 3.50 kWh — the BMS figure is consistent with the AC side (≈ 89 %); the inverter's battery power is not (50 %). |
 | `1903` | [6:8] u16 | ≈ SoC × 4 (0.25 % resolution; parallel SoC estimate) | 249/63 = 3.95 … 383/94.5 = 4.05 |
 | `0c05`–`0c0d` | [6:8] u16 | **Pack DC-bus voltage, 0.01 V (scale TBC)** | 540.3–540.9 V while charging @ 11 kW vs 527.0–527.8 V while discharging @ 6.3 kW; all 9 records agree within ± 0.08 V; consistent with the 45 A max_charge_current installer parameter (11 kW @ 540 V = 20 A) |
 
 Static across all 7 bursts: `1900` = `e8 03 61 10 00 00 3c 41 00 00`, `1901` (tail `33 3b`), `1909` (zero), `187f` = `01 01 01 01` + zero.
-Slow monotone counters (direction confirmed, scale open): `1902` [0:2]/[2:4], `1904`, `1906`, `1907` [4:6], `1908` [4:6] (Δ −13 / burst), and the `1872`–`187b` group (1872 [4:6] steps 94→160→416→500 between states; 1877 [6:8] −0x1000; 1878 [0:2] +0x2000). `1872` [6:8] = 500 constant — matches export limit 5000 W / 10 (hypothesis; snap02 carries the limit at full scale).
+Slow counters (direction confirmed, scale open): `1902` [0:2]/[2:4], `1904`, `1906`, `1907` [4:6] (Δ = 0.924 · Δ`1879` in − 0.939 · Δ`1879` out: a second remaining-charge figure, scale open), and the `1872`–`187b` group (1872 [4:6] steps 94→160→416→500 between states; 1877 [6:8] −0x1000; 1878 [0:2] +0x2000). `1872` [6:8] = 500 constant — matches export limit 5000 W / 10 (hypothesis; snap02 carries the limit at full scale).
 `1905` [2:4] (1343→1372→1366) and [4:6] (16481→23649→23388): track charge/discharge state, scale open.
 
 Resolved 2026-11-16: the **9 module records** are the 9 modules of the Fox ESS EQ4800-L9 pack (9 × 4.66 kWh = 41.93 kWh nominal); the 10th slot of the 280 B list is the duplicated master SN. Open: module-table sub-fields v[0:2], v[2:4] (char pair), v[4:6] vary per record — meaning open; voltage scale pending a concurrent Modbus DC-voltage read; `1902`/`1904`/`1908` counter meanings.
@@ -466,9 +469,9 @@ and **31039 ×16** (fn03).
 | 31018 / 31019 | inverter / ambient temp | 0.1 °C | 41.8 / 44.6 °C | history `t_inv` / `t_amb` |
 | 31020 | "inverter battery voltage" (foxess_modbus) | 0.1 V | 422.1 V — **disagrees** with snap61 pack 537.7 V (10 LFP modules at full ≈ 540 V); meaning open | not used |
 | 31021 | battery current | 0.1 A | 0 | |
-| 31022 | battery power (s16) | 1 W, + = discharge | −28 W | `battery_w` = −value (+ = charging) |
+| 31022 | battery power (s16) | 1 W, + = discharge | −28 W | `battery_w` = −value (+ = charging). = 31020 × 31021 (median +14 W). **Over-reads at low discharge power** (2026-11-20, rainbow 11-16→11-19): below 0.7 kW the inverter reports ~250 W more leaving the battery than the BMS counts (`187a`, `1879`) and than leaves as AC (31008); above 4 kW they agree within ~3 %. Integrating it overstates overnight discharge by up to ~50 %. Idle at 100 %: 31021 = 0.0 A, 31022 ≈ −26 W. |
 | 31023 | battery temp | 0.1 °C | 27.6 °C | history `t_batt` |
-| 31024 | battery SoC | % | 100 (snap61: 99–100) | `soc_pct` |
+| 31024 | battery SoC | % | 100 (snap61: 99–100) | `soc_pct`. **Lags the BMS with a 1 % dead band** (2026-11-20): against `1908` (BMS SoC, 0.1 %) it reads ≈ ceil while discharging and ≈ floor while charging — it changes when the BMS SoC reaches the shown value, and after a reversal only once the BMS has moved a full percent. |
 | 31025 / 31026 | BMS charge / discharge current limit | 0.1 A | 0 / 50.0 A (full: no charge) | history `bms_chg_a` (31025; the BMS derives it from battery temp + SoC) |
 | 31027 | inverter state enum | | 3 (on-grid, normal) | |
 | 31028 | BMS connected | | 1 | |
@@ -653,7 +656,7 @@ surface.
       decoded 2026-11-05** (SoC %, a stored-charge counter — unit corrected
       to undetermined 2026-11-16, see §4 `1907` — the earlier "50 Wh units
       → 49.2 kWh" reading is withdrawn), DC-bus voltage candidate — see §4. Open: snap02 (425 B)
-      layout, snap61 slow counters (1872–187b, 1902–1904, 1906–1908),
+      layout, snap61 slow counters (1872–187b, 1902–1904, 1906, 1907 [4:6]; `1879`, `187a`, `1907` [0:2] and `1908` [4:6] decoded 2026-11-20),
       module-table sub-fields. Cross-check against the
       **HA-oracle reconciliation**: the inverter's live HA sensor state
       (foxess-control integration, cloud-fed; owner-provided HA auth token)

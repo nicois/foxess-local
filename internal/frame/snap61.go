@@ -22,7 +22,7 @@ const (
 	snap61SocTag       = 0x1905
 	snap61SocValOff    = 6 // value [6:8] LE: battery SoC %
 	snap61EnergyTag    = 0x1907
-	snap61EnergyValOff = 0 // value [0:2] LE: stored energy, 50 Wh units
+	snap61EnergyValOff = 0 // value [0:2] LE: remaining charge, ≈ 0.1 % of nominal capacity
 	snap61VoltTagLo    = 0x0c05
 	snap61VoltTagHi    = 0x0c0d
 	snap61VoltValOff   = 6 // value [6:8] LE: pack DC bus, 0.01 V (scale TBC)
@@ -39,11 +39,11 @@ type Snap61 struct {
 	TLV    map[uint16][]byte // every TLV entry, tag → 10 B value; unregistered tags are carried raw
 	// Confirmed fields (profile §4):
 	SocPct uint16 // tag 0x1905, value [6:8] LE: battery SoC %
-	// EnergyUnits is tag 0x1907 [0:2] LE: a stored-charge counter
-	// proportional to SoC (989 at 100 % on the EQ4800-L9 pack). Its unit
-	// is undetermined — the earlier "50 Wh units" reading implied 49.2 kWh
-	// against the pack's 41.93 kWh nominal (profile §4) — so it is not
-	// converted to energy; usable energy is SoC × the configured capacity.
+	// EnergyUnits is tag 0x1907 [0:2] LE: the BMS's remaining charge, in
+	// the unit of its lifetime charge counters (tag 0x1879), ≈ 0.1 % of
+	// nominal capacity (~990 at 100 % on the EQ4800-L9 pack; profile §4,
+	// decoded 2026-11-20). It is not converted to energy; usable energy
+	// is SoC × the configured capacity.
 	EnergyUnits uint16
 	BusVoltage  []uint16 // tags 0x0c05-0x0c0d, value [6:8] LE: pack DC bus, 0.01 V (scale TBC)
 	// CellMinDeciC / CellMaxDeciC are the BMS's lowest and highest cell
