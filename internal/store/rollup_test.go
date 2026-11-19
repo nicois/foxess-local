@@ -258,6 +258,7 @@ func TestRepairWrappedPV(t *testing.T) {
 	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 8`); err != nil {
 		t.Fatal(err)
 	}
+	undoV13Columns(t, s)
 	undoV12Columns(t, s)
 	undoV10Columns(t, s)
 	undoV9Columns(t, s)
@@ -416,5 +417,43 @@ func TestEPSBackfill(t *testing.T) {
 	}
 	if !aggs[1].Eps.Valid || aggs[1].Eps.Int64 != 500 {
 		t.Fatalf("backfilled eps %+v", aggs[1].Eps)
+	}
+}
+
+// TestSocEstimateHistory (D-028, 2026-11-20): the SoC estimate (0.01 %)
+// is stored on the sample it was computed for — after the row, through
+// the same ordered queue — and the history carries each window's last
+// one: the 15-minute rollups and the raw minutes. A window without an
+// estimate (no capacity yet, or rows stored before it) has none.
+func TestSocEstimateHistory(t *testing.T) {
+	s := newTestStore(t)
+	b := testBase.Truncate(15 * time.Minute)
+	s.now = fixedClock(b.Add(time.Hour))
+	for i, est := range []int{6712, 6705, 6698} {
+		ts := b.Add(time.Duration(i) * 5 * time.Second)
+		s.RecordTelemetry(testConnID, ts, frame.Tele{Soc: 68})
+		s.RecordSocEstimate(testConnID, ts, est)
+	}
+	s.RecordTelemetry(testConnID, b.Add(20*time.Minute), frame.Tele{Soc: 67}) // no estimate
+	s.Flush()
+	if _, err := s.RollUp(); err != nil {
+		t.Fatal(err)
+	}
+	aggs, err := s.HistoryBuckets(b, b.Add(time.Hour))
+	if err != nil || len(aggs) != 2 {
+		t.Fatalf("buckets %+v %v", aggs, err)
+	}
+	if a := aggs[0]; !a.SocEst.Valid || a.SocEst.Int64 != 6698 {
+		t.Fatalf("bucket estimate: %+v", a.SocEst)
+	}
+	if a := aggs[1]; a.SocEst.Valid {
+		t.Fatalf("no estimate in the second bucket: %+v", a.SocEst)
+	}
+	raw, err := s.HistoryRaw(b, b.Add(30*time.Minute))
+	if err != nil || len(raw) != 2 {
+		t.Fatalf("raw %+v %v", raw, err)
+	}
+	if !raw[0].SocEst.Valid || raw[0].SocEst.Int64 != 6698 || raw[1].SocEst.Valid {
+		t.Fatalf("raw estimates: %+v %+v", raw[0].SocEst, raw[1].SocEst)
 	}
 }

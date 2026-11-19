@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -37,7 +38,10 @@ type Agg struct {
 	// whose raw samples are gone.
 	Eps     sql.NullInt64
 	SocLast int // SoC % of the newest sample in the window
-	N       int // samples in the window (windowAgg only; not stored)
+	// SocEst is the SoC estimate (0.01 %, D-028) of the newest sample in
+	// the window that has one; not Valid when none has.
+	SocEst sql.NullInt64
+	N      int // samples in the window (windowAgg only; not stored)
 }
 
 // aggSQL aggregates one window (all columns except SocLast). CAST is
@@ -70,15 +74,21 @@ FROM telemetry WHERE ts >= ? AND ts < ?`
 const socWindowSQL = `
 SELECT soc FROM telemetry WHERE ts >= ? AND ts < ? ORDER BY rowid DESC LIMIT 1`
 
+// socEstWindowSQL is the window's last SoC estimate, in the same order.
+const socEstWindowSQL = `
+SELECT soc_est FROM telemetry WHERE ts >= ? AND ts < ? AND soc_est IS NOT NULL
+ORDER BY rowid DESC LIMIT 1`
+
 const upsertSQL = `
 INSERT INTO buckets15m(bucket, sol_avg, sol_min, sol_max, sol_wh,
   haus_avg, haus_min, haus_max, haus_wh,
   grid_avg, grid_min, grid_max, grid_imp_wh, grid_exp_wh,
   batt_avg, batt_min, batt_max, batt_chg_wh, batt_dis_wh,
   acport_avg, soc_last, t_batt_avg, t_inv_avg, t_amb_avg, bms_chg_avg,
-  t_cell_min_avg, t_cell_max_avg, eps_avg)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  t_cell_min_avg, t_cell_max_avg, eps_avg, soc_est_last)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(bucket) DO UPDATE SET
+  soc_est_last = excluded.soc_est_last,
   eps_avg = excluded.eps_avg,
   t_cell_min_avg = excluded.t_cell_min_avg, t_cell_max_avg = excluded.t_cell_max_avg,
   t_batt_avg = excluded.t_batt_avg, t_inv_avg = excluded.t_inv_avg, t_amb_avg = excluded.t_amb_avg,
@@ -105,6 +115,9 @@ func (s *Store) windowAgg(from, to time.Time) (Agg, bool, error) {
 	var soc int
 	if err := s.rdb.QueryRow(socWindowSQL, encTS(from), encTS(to)).Scan(&soc); err != nil {
 		return Agg{}, false, fmt.Errorf("store: window soc: %w", err)
+	}
+	if err := s.rdb.QueryRow(socEstWindowSQL, encTS(from), encTS(to)).Scan(&a.SocEst); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return Agg{}, false, fmt.Errorf("store: window soc estimate: %w", err)
 	}
 	a.TS = from
 	a.SocLast = soc
@@ -142,7 +155,7 @@ func upsertArgs(bucket int64, a Agg) []any {
 		a.HausAvg, a.HausMin, a.HausMax, a.HausWh,
 		a.GridAvg, a.GridMin, a.GridMax, a.GridImpWh, a.GridExpWh,
 		a.BattAvg, a.BattMin, a.BattMax, a.BattChgWh, a.BattDisWh,
-		a.AcportAvg, a.SocLast, a.TBatt, a.TInv, a.TAmb, a.BMSChg, a.TCellMin, a.TCellMax, a.Eps,
+		a.AcportAvg, a.SocLast, a.TBatt, a.TInv, a.TAmb, a.BMSChg, a.TCellMin, a.TCellMax, a.Eps, a.SocEst,
 	}
 }
 
@@ -219,7 +232,7 @@ SELECT bucket, sol_avg, sol_min, sol_max, sol_wh,
   grid_avg, grid_min, grid_max, grid_imp_wh, grid_exp_wh,
   batt_avg, batt_min, batt_max, batt_chg_wh, batt_dis_wh,
   acport_avg, soc_last, t_batt_avg, t_inv_avg, t_amb_avg, bms_chg_avg,
-  t_cell_min_avg, t_cell_max_avg, eps_avg
+  t_cell_min_avg, t_cell_max_avg, eps_avg, soc_est_last
 FROM buckets15m WHERE bucket >= ? AND bucket < ? ORDER BY bucket`,
 		since.Unix(), until.Unix())
 	if err != nil {
@@ -229,7 +242,7 @@ FROM buckets15m WHERE bucket >= ? AND bucket < ? ORDER BY bucket`,
 	for rows.Next() {
 		var a Agg
 		var bucket int64
-		if err := rows.Scan(append([]any{&bucket}, aggCols(&a, &a.SocLast)...)...); err != nil {
+		if err := rows.Scan(append(append([]any{&bucket}, aggCols(&a, &a.SocLast)...), &a.SocEst)...); err != nil {
 			return nil, closeRows(rows, fmt.Errorf("store: history buckets: %w", err))
 		}
 		a.TS = time.Unix(bucket, 0).UTC()
@@ -291,7 +304,7 @@ func (s *Store) HistoryRaw(since, until time.Time) ([]Agg, error) {
 	}
 	// one grouped query for every minute (not two queries per minute:
 	// the store has one connection, so 120 queries queued behind others)
-	soc, err := s.lastSocByMinute(from, to)
+	soc, est, err := s.lastSocByMinute(from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -312,6 +325,9 @@ func (s *Store) HistoryRaw(since, until time.Time) ([]Agg, error) {
 			return nil, closeRows(rows, err)
 		}
 		a.SocLast = soc[m]
+		if v, ok := est[m]; ok {
+			a.SocEst = sql.NullInt64{Int64: v, Valid: true}
+		}
 		out = append(out, a)
 	}
 	return out, closeRows(rows, rows.Err())
@@ -327,23 +343,28 @@ var aggByMinuteSQL = "SELECT substr(ts, 1, 16) AS m, " +
 	strings.TrimPrefix(strings.TrimSpace(aggSQL), "SELECT ") + " GROUP BY m ORDER BY m"
 
 // lastSocByMinute is each minute's SoC of its last-arriving sample
-// (rowid = arrival order, as socWindowSQL).
-func (s *Store) lastSocByMinute(from, to time.Time) (map[string]int, error) {
-	rows, err := s.rdb.Query(`SELECT substr(ts, 1, 16), soc FROM telemetry
+// (rowid = arrival order, as socWindowSQL), and its last SoC estimate
+// (0.01 %; absent when no sample has one).
+func (s *Store) lastSocByMinute(from, to time.Time) (soc map[string]int, est map[string]int64, err error) {
+	rows, err := s.rdb.Query(`SELECT substr(ts, 1, 16), soc, soc_est FROM telemetry
 		WHERE ts >= ? AND ts < ? ORDER BY rowid`, encTS(from), encTS(to))
 	if err != nil {
-		return nil, fmt.Errorf("store: raw history soc: %w", err)
+		return nil, nil, fmt.Errorf("store: raw history soc: %w", err)
 	}
-	out := map[string]int{}
+	soc, est = map[string]int{}, map[string]int64{}
 	for rows.Next() {
 		var (
-			m   string
-			soc int
+			m string
+			v int
+			e sql.NullInt64
 		)
-		if err := rows.Scan(&m, &soc); err != nil {
-			return nil, closeRows(rows, err)
+		if err := rows.Scan(&m, &v, &e); err != nil {
+			return nil, nil, closeRows(rows, err)
 		}
-		out[m] = soc
+		soc[m] = v
+		if e.Valid {
+			est[m] = e.Int64
+		}
 	}
-	return out, closeRows(rows, rows.Err())
+	return soc, est, closeRows(rows, rows.Err())
 }

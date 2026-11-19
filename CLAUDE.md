@@ -151,10 +151,11 @@ it from source.
 `tools/probe-registers.sh` reads register blocks through
 `POST /api/v1/registers/read` (installer token).
 
-`tools/socreplay` replays a database's telemetry through the SoC
-estimate (`internal/socest`): invariant checks, plus how far the
-estimate is clamped at each tick, split by direction and reversal. Run
-it as `foxess` on the gateway (read-only); it is not shipped.
+`tools/socreplay` replays a database's telemetry and snap61 snapshots
+through the SoC estimate (`internal/socest`): invariant checks, the
+drift at each snapshot, and (`-no-anchors`) how far the fallback is
+clamped at each tick, by direction and reversal. Run it as `foxess` on
+the gateway (read-only); it is not shipped.
 
 ## Project knowledge
 

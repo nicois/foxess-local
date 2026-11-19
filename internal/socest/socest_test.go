@@ -47,24 +47,63 @@ func TestTrapezoid(t *testing.T) {
 	near(t, "one minute ramping 0 → 4193 W", got, 50-2096.5/60/capWh*100)
 }
 
-// TestClampsToTick: the estimate stays within the reported tick's
-// rounding bucket [raw − 0.5, raw + 0.494] (the top shows as raw + 0.49
-// at two decimals, which rounds back to raw), on a tick change and while
-// integrating.
-func TestClampsToTick(t *testing.T) {
+// TestDeadBand (profile §5 31024, 2026-11-20): the inverter's SoC
+// trails the BMS's with a 1 % dead band — it changes when the BMS SoC
+// reaches the shown value (ceil while discharging, floor while
+// charging). So at a change of the reported SoC the estimate is that
+// value, and in between it stays within 1 % of it.
+func TestDeadBand(t *testing.T) {
 	var e Estimator
-	near(t, "an hour at 500 W stops at the bucket", run(&e, t0, time.Hour, 42, -500), 41.5)
-	// the tick changes: the estimate enters the new bucket at its top
-	near(t, "tick to 41", e.Observe(t0.Add(time.Hour+5*time.Second), 41, -500, capWh), 41.494)
-	near(t, "then integrates", e.Observe(t0.Add(time.Hour+10*time.Second), 41, -500, capWh), 41.494-500.0/720/capWh*100)
+	near(t, "first reading", e.Observe(t0, 42, -500, capWh), 42)
+	near(t, "three hours at 500 W stop 1 % below", run(&e, t0, 3*time.Hour, 42, -500), 41)
+	near(t, "a tick sets the estimate", e.Observe(t0.Add(3*time.Hour+5*time.Second), 41, -500, capWh), 41)
+	near(t, "then integrates", e.Observe(t0.Add(3*time.Hour+10*time.Second), 41, -500, capWh), 41-500.0/720/capWh*100)
 	var u Estimator
 	run(&u, t0, time.Minute, 42, 0)
-	near(t, "tick down from above the bucket", u.Observe(t0.Add(time.Minute+5*time.Second), 40, 0, capWh), 40.494)
-	near(t, "tick up from below the bucket", u.Observe(t0.Add(time.Minute+10*time.Second), 45, 0, capWh), 44.5)
+	near(t, "a jump down", u.Observe(t0.Add(time.Minute+5*time.Second), 40, 0, capWh), 40)
+	near(t, "a jump up", u.Observe(t0.Add(time.Minute+10*time.Second), 45, 0, capWh), 45)
+	var c Estimator
+	near(t, "charging stops 1 % above", run(&c, t0, 3*time.Hour, 42, 500), 43)
 	var f Estimator
 	near(t, "never above 100", run(&f, t0, time.Hour, 100, 5000), 100)
 	var z Estimator
 	near(t, "never below 0", run(&z, t0, time.Hour, 0, -5000), 0)
+}
+
+// TestAnchor (profile §4 1908, 2026-11-20): the snapshot's BMS SoC (0.1 %,
+// about every 5 minutes) sets the estimate; between snapshots it
+// integrates the battery power unscaled (the learnt factor mixes the
+// over-read at low power with the true scale at high power) and is not
+// held to the reported SoC, which trails the BMS.
+func TestAnchor(t *testing.T) {
+	var e Estimator
+	e.Restore(Learned{Discharging: Dir{WhPerPct: capWh / 100 * 1.4, N: minObs}}) // a factor of 0.71
+	e.Observe(t0, 68, -5000, capWh)
+	e.Anchor(t0.Add(2*time.Second), 669)
+	got := e.Observe(t0.Add(5*time.Second), 68, -5000, capWh)
+	near(t, "anchored, then 5 s at 5 kW", got, 66.9-5000.0/720/capWh*100)
+	got = run(&e, t0.Add(5*time.Second), 5*time.Minute, 68, -5000)
+	near(t, "5 more minutes, unscaled, below the reported 68 − 1", got, 66.9-5000.0*(5*60+5)/3600/capWh*100)
+}
+
+// TestAnchorFirst: a snapshot before the first reading sets the first
+// estimate.
+func TestAnchorFirst(t *testing.T) {
+	var e Estimator
+	e.Anchor(t0, 413)
+	near(t, "first reading after a snapshot", e.Observe(t0.Add(3*time.Second), 42, 0, capWh), 41.3)
+}
+
+// TestAnchorExpires: without a snapshot for anchorMaxAge the estimate
+// falls back to the reported SoC's dead band and ticks.
+func TestAnchorExpires(t *testing.T) {
+	var e Estimator
+	e.Observe(t0, 42, 0, capWh)
+	e.Anchor(t0, 400) // 40.0 against a reported 42: outside its band
+	near(t, "fresh", e.Observe(t0.Add(5*time.Second), 42, 0, capWh), 40)
+	got := run(&e, t0.Add(10*time.Second), anchorMaxAge, 42, 0)
+	near(t, "stale: back within the band", got, 41)
+	near(t, "a tick sets it", e.Observe(t0.Add(anchorMaxAge+time.Minute), 43, 0, capWh), 43)
 }
 
 // TestGapAndClock: a gap in the readings (a lost poll, a restart of the
@@ -105,10 +144,13 @@ func TestLatest(t *testing.T) {
 
 // battery simulates a pack whose real energy per percent is whPerPct
 // (the nominal capacity says capWh/100): the true SoC follows the power,
-// the inverter reports it rounded. It feeds e every 5 s and returns the
+// and the inverter reports it as this one does — the shown value moves
+// when the true SoC reaches it (ceil while discharging, floor while
+// charging; profile §5 31024). It feeds e every 5 s and returns the
 // largest |estimate − true| over the last hour.
 func battery(e *Estimator, from time.Time, d time.Duration, soc0, whPerPct float64, battW func(h float64) int) float64 {
 	soc, worst := soc0, 0.0
+	shown := int(math.Round(soc0))
 	var prevW int
 	for at := time.Duration(0); at <= d; at += 5 * time.Second {
 		w := battW(at.Hours())
@@ -116,7 +158,13 @@ func battery(e *Estimator, from time.Time, d time.Duration, soc0, whPerPct float
 			soc += float64(prevW+w) / 2 * (5.0 / 3600) / whPerPct
 		}
 		prevW = w
-		est := e.Observe(from.Add(at), int(math.Round(soc)), w, capWh)
+		switch {
+		case soc <= float64(shown-1):
+			shown = int(math.Ceil(soc))
+		case soc >= float64(shown+1):
+			shown = int(math.Floor(soc))
+		}
+		est := e.Observe(from.Add(at), shown, w, capWh)
 		if d-at <= time.Hour {
 			worst = max(worst, math.Abs(est-soc))
 		}

@@ -2,6 +2,7 @@ package frame
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"testing"
@@ -141,5 +142,63 @@ func TestSnap61FixtureCellTemps(t *testing.T) {
 	}
 	if !s.HasCellTemps || s.CellMinDeciC > s.CellMaxDeciC || s.CellMinDeciC < 0 || s.CellMaxDeciC > 450 {
 		t.Errorf("cell temps: %v min %d max %d (0.1 °C)", s.HasCellTemps, s.CellMinDeciC, s.CellMaxDeciC)
+	}
+}
+
+// snap61With is a zero snap61 carrying the SoC tag (1905 [6:8]) and the
+// BMS SoC tag (1908 [4:6]) in their slots (1872…187b, 187f, 1900…1909).
+func snap61With(socPct, bmsDeci uint16) []byte {
+	p := make([]byte, snap61Total)
+	put := func(slot int, tag uint16, off int, v uint16) {
+		e := snap61TLVBase + slot*snap61TLVStride
+		binary.BigEndian.PutUint16(p[e:], tag)
+		binary.LittleEndian.PutUint16(p[e+2+off:], v)
+	}
+	put(16, 0x1905, 6, socPct)
+	put(19, 0x1908, 4, bmsDeci)
+	return p
+}
+
+// TestSnap61BMSSoc (profile §4, 2026-11-20): tag 1908 [4:6] is the BMS's
+// SoC in 0.1 %, and the whole-percent SoC (1905) is its floor. It is
+// taken only when the two agree — on a model where the tag means
+// something else they would not.
+func TestSnap61BMSSoc(t *testing.T) {
+	cases := []struct {
+		name     string
+		soc, bms uint16
+		ok       bool
+	}{
+		{"agrees (floor)", 67, 679, true},
+		{"exact percent", 67, 670, true},
+		{"full", 100, 1000, true},
+		{"empty", 0, 3, true},
+		{"rounded, not floored", 68, 679, false},
+		{"another meaning", 67, 4368, false},
+		{"over 100 %", 100, 1001, false},
+	}
+	for _, c := range cases {
+		s, err := ParseSnap61(snap61With(c.soc, c.bms))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.HasBMSSoc != c.ok || (c.ok && s.BMSSocDeciPct != c.bms) {
+			t.Errorf("%s: HasBMSSoc %v BMSSocDeciPct %d", c.name, s.HasBMSSoc, s.BMSSocDeciPct)
+		}
+	}
+	if s, _ := ParseSnap61(make([]byte, snap61Total)); s.HasBMSSoc {
+		t.Error("a frame without the tags has no BMS SoC")
+	}
+}
+
+// TestSnap61FixtureBMSSoc: the corpus snapshot (SoC 61) carries a BMS SoC
+// in [61.0, 62.0).
+func TestSnap61FixtureBMSSoc(t *testing.T) {
+	s, err := ParseSnap61(frameAt(t, sess1105b, dirC2S, 6461).Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.HasBMSSoc || s.BMSSocDeciPct/10 != 61 {
+		t.Errorf("BMS SoC: %v %d (0.1 %%)", s.HasBMSSoc, s.BMSSocDeciPct)
 	}
 }

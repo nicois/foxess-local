@@ -241,7 +241,7 @@ func (p *poller) tickKH(ctx context.Context, connID string) {
 	p.recordRegs(now, frame.KHRealtimeBAddr, b)
 	tele := r.Tele()
 	p.record(connID, now, tele)
-	p.observe(Event{Kind: EventTelemetry, ConnID: connID, Tele: &tele})
+	p.observe(Event{Kind: EventTelemetry, ConnID: connID, TS: now, Tele: &tele})
 	p.energy(ctx, connID)
 	p.settings(ctx, connID)
 }
@@ -286,7 +286,7 @@ func (p *poller) tickMap(ctx context.Context, connID string) {
 	tele := teleOf(lv)
 	now := p.clock()
 	p.record(connID, now, tele)
-	p.observe(Event{Kind: EventTelemetry, ConnID: connID, Tele: &tele})
+	p.observe(Event{Kind: EventTelemetry, ConnID: connID, TS: now, Tele: &tele})
 	p.tentativeSettings(ctx, connID)
 }
 

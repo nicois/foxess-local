@@ -46,6 +46,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"foxesslocal/internal/frame"
 	"foxesslocal/internal/socest"
 )
 
@@ -56,9 +57,9 @@ const tsLayout = "2006-01-02T15:04:05.000000000Z"
 var errViolations = errors.New("invariant violations")
 
 type options struct {
-	db, since, until, csv string
-	capWh                 int
-	learned, verbose      bool
+	db, since, until, csv       string
+	capWh                       int
+	learned, verbose, noAnchors bool
 }
 
 func main() {
@@ -70,6 +71,7 @@ func main() {
 	flag.BoolVar(&o.learned, "learned", false, "start from the stored energy per percent (socest.learned) instead of learning from nothing")
 	flag.StringVar(&o.csv, "csv", "", "also write every row (ts, raw, batt W, estimate) to this CSV file")
 	flag.BoolVar(&o.verbose, "v", false, "list every tick")
+	flag.BoolVar(&o.noAnchors, "no-anchors", false, "ignore the snapshots' BMS SoC (the fallback model alone)")
 	flag.Parse()
 	if err := run(o, time.Now()); err != nil {
 		log.Fatal(err)
@@ -102,7 +104,13 @@ func run(o options, now time.Time) error {
 	if len(rows) == 0 {
 		return errors.New("no telemetry in the range")
 	}
-	res := replay(rows, capWh, learned)
+	var anchors []anchor
+	if !o.noAnchors {
+		if anchors, err = loadAnchors(db, since, until); err != nil {
+			return err
+		}
+	}
+	res := replay(rows, anchors, capWh, learned)
 	fmt.Printf("%s → %s\n", rows[0].TS.UTC().Format(time.RFC3339), rows[len(rows)-1].TS.UTC().Format(time.RFC3339))
 	if err := report(os.Stdout, res, capWh, o.verbose); err != nil {
 		return err
@@ -169,6 +177,37 @@ func load(db *sql.DB, since, until time.Time) ([]row, error) {
 			return nil, fmt.Errorf("ts %q: %w", ts, err)
 		}
 		out = append(out, r)
+	}
+	return out, rs.Err()
+}
+
+// loadAnchors reads the snapshots' BMS SoC (snap61 tag 1908) in
+// [since, until), in time order.
+func loadAnchors(db *sql.DB, since, until time.Time) ([]anchor, error) {
+	rs, err := db.Query(`SELECT ts, payload FROM frames WHERE class = 'snap61' AND ts >= ? AND ts < ? ORDER BY ts`,
+		since.UTC().Format(tsLayout), until.UTC().Format(tsLayout))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rs.Close() }()
+	var out []anchor
+	for rs.Next() {
+		var (
+			ts string
+			p  []byte
+		)
+		if err := rs.Scan(&ts, &p); err != nil {
+			return nil, err
+		}
+		s, err := frame.ParseSnap61(p)
+		if err != nil || !s.HasBMSSoc {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, ts)
+		if err != nil {
+			return nil, fmt.Errorf("ts %q: %w", ts, err)
+		}
+		out = append(out, anchor{TS: at, Deci: int(s.BMSSocDeciPct)})
 	}
 	return out, rs.Err()
 }

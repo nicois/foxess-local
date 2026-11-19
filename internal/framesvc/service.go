@@ -502,12 +502,28 @@ func (s *Service) recordC2S(connID string, fl *flow, frames []frame.Frame, asker
 			}
 			fl.mu.Unlock()
 		}
-		// a 150 B tele frame (the cloud's model, no EPS field) yields to
-		// the register poll while it supplies telemetry (store.PollFresh)
-		if kind == frame.KindTele && !s.st.PollFresh(now) {
-			if t, err := frame.ParseTele(frames[i].Payload); err == nil {
-				s.observe(Event{Kind: EventTelemetry, ConnID: connID, Tele: &t})
-			}
+		s.observeC2S(connID, kind, frames[i].Payload, now)
+	}
+}
+
+// observeC2S raises the events an inverter frame carries: live values
+// (a 150 B tele frame) and the BMS's SoC (a snap61).
+func (s *Service) observeC2S(connID string, kind frame.Kind, payload []byte, now time.Time) {
+	// frame.Kind is open-ended (SnapKind): the two classes with events
+	//exhaustive:ignore
+	switch kind {
+	case frame.KindTele:
+		// the cloud's model (no EPS field) yields to the register poll
+		// while it supplies telemetry (store.PollFresh)
+		if s.st.PollFresh(now) {
+			return
+		}
+		if t, err := frame.ParseTele(payload); err == nil {
+			s.observe(Event{Kind: EventTelemetry, ConnID: connID, TS: now, Tele: &t})
+		}
+	case frame.KindSnap61:
+		if snap, err := frame.ParseSnap61(payload); err == nil && snap.HasBMSSoc {
+			s.observe(Event{Kind: EventBMSSoc, ConnID: connID, TS: now, BMSSocDeciPct: int(snap.BMSSocDeciPct)})
 		}
 	}
 }

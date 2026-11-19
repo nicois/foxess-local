@@ -490,6 +490,15 @@ const schemaV12 = `
 ALTER TABLE buckets15m ADD COLUMN eps_avg INTEGER;
 `
 
+// schemaV13 stores the SoC estimate (D-028, 2026-11-20; 0.01 %) on each
+// live sample and each 15-minute bucket's last one: the history of the
+// SoC between the inverter's whole-percent readings. NULL where none was
+// computed (no capacity, or rows stored before it).
+const schemaV13 = `
+ALTER TABLE telemetry ADD COLUMN soc_est INTEGER;
+ALTER TABLE buckets15m ADD COLUMN soc_est_last INTEGER;
+`
+
 // wrappedPVMin is the bucket sol_max that can only come from a wrapped
 // PV reading.
 const wrappedPVMin = 32768
@@ -605,6 +614,7 @@ func migrate(db *sql.DB, path string) error {
 		{10, schemaV10},
 		{11, schemaV11},
 		{12, schemaV12},
+		{13, schemaV13},
 	}
 	latest := migrations[len(migrations)-1].version
 	if n > latest {

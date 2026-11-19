@@ -156,6 +156,13 @@ func servePprof(addr string) {
 	log.Print(srv.ListenAndServe())
 }
 
+// socAt is the demo's true state of charge at t, % (the inverter
+// reports it in whole percent; the stored history has it to 0.01 %).
+func socAt(t time.Time) float64 {
+	h := float64(t.Hour()) + float64(t.Minute())/60
+	return 40 + 50*math.Max(0, math.Sin((h-6)/13*math.Pi))
+}
+
 // tele is a plausible operating point at time t (a sunny day).
 // It models the KH's measured balance (2026-11-17): a ~3 % conversion
 // loss; the EPS (backup) port load (-eps) is part of both the AC output
@@ -168,7 +175,7 @@ func tele(t time.Time) frame.Tele {
 	batt := (pv - load) / 2
 	ac := int32(float64(pv-batt) * 0.97)
 	grid := load - ac
-	soc := 40 + 50*sun
+	soc := socAt(t)
 	return frame.Tele{
 		Sol: pv, Grid: grid, Haus: load, Acport: ac, Batt: batt, Eps: epsW, Soc: byte(soc),
 		Temps: &frame.Temps{
@@ -247,6 +254,10 @@ func live(st *store.Store, bus *api.Bus, est *socest.Estimator, capWh func() int
 		maybeSnap61(st, t, 5)
 		tl := tele(t)
 		st.RecordTelemetry(devuiConn, t, tl)
+		e := estimate(est, t, tl, capWh())
+		if e != nil {
+			st.RecordSocEstimate(devuiConn, t, int(math.Round(*e*100)))
+		}
 		state := "idle"
 		switch {
 		case tl.Batt > 0:
@@ -260,7 +271,7 @@ func live(st *store.Store, bus *api.Bus, est *socest.Estimator, capWh func() int
 				PVW: int(tl.Sol), GridW: int(tl.Grid), LoadW: int(tl.Haus),
 				AcPortW: int(tl.Acport), BatteryW: int(tl.Batt), EpsW: int(tl.Eps),
 			},
-			SocPct: int(tl.Soc), SocEstimatePct: estimate(est, t, tl, capWh()), BatteryState: state,
+			SocPct: int(tl.Soc), SocEstimatePct: e, BatteryState: state,
 		})
 	}
 }
@@ -275,11 +286,17 @@ func estimate(est *socest.Estimator, t time.Time, tl frame.Tele, capWh int) *flo
 	return &v
 }
 
-func seed(st *store.Store, now time.Time, model string, master uint16) {
+// seedTelemetry stores two hours of samples, with their SoC estimates.
+func seedTelemetry(st *store.Store, now time.Time) {
 	for t := now.Add(-2 * time.Hour); t.Before(now); t = t.Add(30 * time.Second) {
 		maybeSnap61(st, t, 30)
 		st.RecordTelemetry(devuiConn, t, tele(t))
+		st.RecordSocEstimate(devuiConn, t, int(math.Round(socAt(t)*100)))
 	}
+}
+
+func seed(st *store.Store, now time.Time, model string, master uint16) {
+	seedTelemetry(st, now)
 	regs := make([]uint16, 15)
 	padded := model + "               "
 	for i := range 15 {

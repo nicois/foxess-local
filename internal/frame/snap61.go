@@ -26,6 +26,9 @@ const (
 	snap61VoltTagLo    = 0x0c05
 	snap61VoltTagHi    = 0x0c0d
 	snap61VoltValOff   = 6 // value [6:8] LE: pack DC bus, 0.01 V (scale TBC)
+	snap61BMSSocTag    = 0x1908
+	snap61BMSSocValOff = 4    // value [4:6] LE: the BMS's SoC, 0.1 %
+	snap61BMSSocMax    = 1000 // 100.0 %
 	snap61CellTempTag  = 0x1874
 	snap61CellMaxOff   = 0 // value [0:2] LE s16: highest cell temp, 0.1 °C
 	snap61CellMinOff   = 2 // value [2:4] LE s16: lowest cell temp, 0.1 °C
@@ -46,6 +49,12 @@ type Snap61 struct {
 	// is SoC × the configured capacity.
 	EnergyUnits uint16
 	BusVoltage  []uint16 // tags 0x0c05-0x0c0d, value [6:8] LE: pack DC bus, 0.01 V (scale TBC)
+	// BMSSocDeciPct is the BMS's SoC in 0.1 % (tag 0x1908 [4:6] LE;
+	// profile §4, 2026-11-20): SocPct is its floor. Valid when
+	// HasBMSSoc — set only when it agrees with SocPct, so a model where
+	// the tag means something else does not pass it on.
+	BMSSocDeciPct uint16
+	HasBMSSoc     bool
 	// CellMinDeciC / CellMaxDeciC are the BMS's lowest and highest cell
 	// temperature (tag 0x1874 [2:4] / [0:2], 0.1 °C signed); the minimum
 	// is the portal's "BMS battery temperature", from which the BMS
@@ -85,6 +94,12 @@ func ParseSnap61(p []byte) (Snap61, error) {
 		s.CellMaxDeciC = int(int16(binary.LittleEndian.Uint16(v[snap61CellMaxOff : snap61CellMaxOff+2]))) //nolint:gosec // G115: a signed 16-bit field
 		s.CellMinDeciC = int(int16(binary.LittleEndian.Uint16(v[snap61CellMinOff : snap61CellMinOff+2]))) //nolint:gosec // G115: a signed 16-bit field
 		s.HasCellTemps = true
+	}
+	if v, ok := s.TLV[snap61BMSSocTag]; ok {
+		d := binary.LittleEndian.Uint16(v[snap61BMSSocValOff : snap61BMSSocValOff+2])
+		if _, soc := s.TLV[snap61SocTag]; soc && d <= snap61BMSSocMax && d/10 == s.SocPct {
+			s.BMSSocDeciPct, s.HasBMSSoc = d, true
+		}
 	}
 	if v, ok := s.TLV[snap61EnergyTag]; ok {
 		s.EnergyUnits = binary.LittleEndian.Uint16(v[snap61EnergyValOff : snap61EnergyValOff+2])

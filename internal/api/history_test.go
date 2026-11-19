@@ -315,3 +315,38 @@ func TestHistoryEPS(t *testing.T) {
 	}
 	check(decodeHist(t, h.do(t, "GET", "/api/v1/history?range=30d", RoleReadOnly, nil)))
 }
+
+// TestHistorySocEstimate (D-028, 2026-11-20): the history carries the SoC
+// estimate per step — the last one in the step, in % with two decimals —
+// beside the reported whole percent, on the per-minute (1 h) and folded
+// hourly (30 d) paths alike; null where none was stored.
+func TestHistorySocEstimate(t *testing.T) {
+	h := newHarness(t)
+	at := testBase.Add(-10 * time.Minute)
+	for i, est := range []int{6712, 6698} {
+		ts := at.Add(time.Duration(i) * 5 * time.Second)
+		h.st.RecordTelemetry(testConnID, ts, frame.Tele{Soc: 68})
+		h.st.RecordSocEstimate(testConnID, ts, est)
+	}
+	h.st.Flush()
+	check := func(b historyBody) {
+		t.Helper()
+		if len(b.SocEst) != len(b.TS) {
+			t.Fatalf("%s: %d soc_est values for %d steps", b.Range, len(b.SocEst), len(b.TS))
+		}
+		var got []float64
+		for _, v := range b.SocEst {
+			if v != nil {
+				got = append(got, *v)
+			}
+		}
+		if len(got) != 1 || got[0] != 66.98 {
+			t.Errorf("%s soc_est: %v, want one 66.98", b.Range, got)
+		}
+	}
+	check(decodeHist(t, h.do(t, "GET", "/api/v1/history?range=1h", RoleReadOnly, nil)))
+	if _, err := h.st.RollUp(); err != nil {
+		t.Fatal(err)
+	}
+	check(decodeHist(t, h.do(t, "GET", "/api/v1/history?range=30d", RoleReadOnly, nil)))
+}

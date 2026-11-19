@@ -56,6 +56,9 @@ type historyBody struct {
 	Haus  []*int  `json:"haus"`
 	Batt  []*int  `json:"batt"`
 	Soc   []*int  `json:"soc"`
+	// SocEst is the SoC estimate (%, two decimals; D-028) of the step's
+	// last sample that has one; null where none was stored.
+	SocEst []*float64 `json:"soc_est"`
 	// Temperatures (°C) and the BMS charge-current limit (A), averaged
 	// per step; null where no sample carried them (the register poll
 	// does; the cloud-era 150 B frame does not).
@@ -93,6 +96,18 @@ func nullInt(v sql.NullInt64) *int {
 	n := int(v.Int64)
 	return &n
 }
+
+// centiPct converts a stored 0.01 % value to % (null when absent).
+func centiPct(v sql.NullInt64) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	f := float64(v.Int64) / hundredthsPerPct
+	return &f
+}
+
+// hundredthsPerPct: the SoC estimate is stored in 0.01 %.
+const hundredthsPerPct = 100
 
 // tenthsPerUnit: temperatures are stored in 0.1 °C, the charge limit in
 // 0.1 A.
@@ -264,6 +279,9 @@ func (c *hourAcc) add(b store.Agg) {
 	c.a.BattChgWh += b.BattChgWh
 	c.a.BattDisWh += b.BattDisWh
 	c.a.SocLast = b.SocLast
+	if b.SocEst.Valid {
+		c.a.SocEst = b.SocEst
+	}
 	c.addTemps(b)
 }
 
@@ -282,6 +300,7 @@ func buildHistory(rangeLabel string, rv historyRange, since, until time.Time, ag
 			Haus:     []*int{},
 			Batt:     []*int{},
 			Soc:      []*int{},
+			SocEst:   []*float64{},
 			TBatt:    []*float64{},
 			TInv:     []*float64{},
 			TAmb:     []*float64{},
@@ -302,6 +321,7 @@ func buildHistory(rangeLabel string, rv historyRange, since, until time.Time, ag
 		Haus:     make([]*int, n),
 		Batt:     make([]*int, n),
 		Soc:      make([]*int, n),
+		SocEst:   make([]*float64, n),
 		TBatt:    make([]*float64, n),
 		TInv:     make([]*float64, n),
 		TAmb:     make([]*float64, n),
@@ -326,6 +346,7 @@ func buildHistory(rangeLabel string, rv historyRange, since, until time.Time, ag
 		body.Haus[i] = &a.HausAvg
 		body.Batt[i] = &a.BattAvg
 		body.Soc[i] = &a.SocLast
+		body.SocEst[i] = centiPct(a.SocEst)
 		body.TBatt[i], body.TInv[i], body.TAmb[i], body.BMSChg[i] = tenths(a.TBatt), tenths(a.TInv), tenths(a.TAmb), tenths(a.BMSChg)
 		body.TCellMin[i], body.TCellMax[i] = tenths(a.TCellMin), tenths(a.TCellMax)
 		body.Eps[i] = nullInt(a.Eps)

@@ -2746,6 +2746,10 @@ components:
         soc:
           type: array
           items: { type: [integer, 'null'] }
+        soc_est:
+          type: array
+          description: The SoC estimate (D-028), %, two decimals — the last one in each step. Anchored to the BMS's own 0.1 % SoC from the ~5-minute battery snapshot where the inverter sends one; null where none was stored (no battery capacity set, or before 2026-11-20).
+          items: { type: [number, 'null'] }
         t_batt:
           type: array
           description: Battery temperature as the inverter reads it (register 31023), °C, mean per step. Null where no sample carried it (before 2026-11-18, and the cloud-era 150 B frame).

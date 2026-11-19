@@ -835,7 +835,11 @@ func (h *handle) svcObs(ev framesvc.Event) {
 		if gev, ok := h.grid.observe(ev.Tele.InvState, h.clk()); ok {
 			h.bus.PublishSystem(gev)
 		}
-		est := h.observeSoc(ev.Tele.Soc, ev.Tele.Batt, h.clk())
+		ts := ev.TS
+		if ts.IsZero() {
+			ts = h.clk()
+		}
+		est := h.socSample(ev.ConnID, ts, *ev.Tele)
 		h.bus.PublishSnapshot(api.SnapshotEvent{
 			TS: h.clk(),
 			Power: api.Power{
@@ -856,6 +860,8 @@ func (h *handle) svcObs(ev framesvc.Event) {
 		h.publishConfig(api.SectionsOf(writtenAddrs(ev.PDU)))
 	case framesvc.EventFirmwareTask:
 		h.bus.PublishSystem(firmwareTaskEvent(ev))
+	case framesvc.EventBMSSoc:
+		h.anchorSoc(ev.TS, ev.BMSSocDeciPct)
 	}
 }
 

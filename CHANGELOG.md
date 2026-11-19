@@ -23,9 +23,8 @@ version; anything else bumps the patch version.
 ### Added
 
 - The state of charge between the inverter's whole-percent readings,
-  estimated from the battery power (as the foxess-control integration
-  does) and kept within half a percent of the reported value. The
-  dashboard shows it with two decimals; the API has it as
+  estimated from the battery power. The dashboard shows it with two
+  decimals; the API has it as
   `battery.soc_estimate_pct` beside `soc_pct` (in `/state` and the live
   events), and `/metrics` as `foxess_battery_soc_estimate_percent`. It
   needs the battery capacity.
@@ -34,6 +33,17 @@ version; anything else bumps the patch version.
   restarts. It corrects the estimate for a pack that has lost health or
   a capacity set wrong, and is in `/state` (`battery.measured_capacity`)
   and `/metrics`.
+- The SoC estimate follows the battery's own SoC. The battery reports
+  its state of charge to 0.1 % about every 5 minutes, and the estimate
+  starts again from each report. Without those reports it follows the
+  inverter's whole-percent reading, which trails the battery by up to a
+  percent. Measured on a KH10, the estimate was within 0.04 % of the
+  battery's figure at the median and 0.14 % at the 95th percentile.
+- History: the SoC estimate is stored with each reading. The State of
+  charge chart draws it, with the inverter's whole-percent reading
+  dashed beside it; `GET /api/v1/history` has it as `soc_est`, and the
+  data table and exports as "SoC estimate". Readings stored before this
+  version have none.
 
 ### Fixed
 

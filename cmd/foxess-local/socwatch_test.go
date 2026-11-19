@@ -8,6 +8,7 @@ import (
 
 	"foxesslocal/internal/api"
 	"foxesslocal/internal/config"
+	"foxesslocal/internal/frame"
 	"foxesslocal/internal/notify"
 	"foxesslocal/internal/socalert"
 	"foxesslocal/internal/socest"
@@ -125,5 +126,37 @@ func TestSocLearnedPersists(t *testing.T) {
 	var got socest.Learned
 	if err := json.Unmarshal([]byte(v), &got); err != nil || got != h.soc.est.Learned() || got.Discharging.N != 6 {
 		t.Fatalf("saved %+v, learnt %+v (%v)", got, h.soc.est.Learned(), err)
+	}
+}
+
+// TestSocWatchAnchorAndStore (D-028, 2026-11-20): a snapshot's BMS SoC
+// anchors the estimate; each sample's estimate is stored on its row
+// (0.01 %) for the history.
+func TestSocWatchAnchorAndStore(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	set, _, err := buildSettings(st, &config.Config{Battery: config.Battery{CapacityWh: 41930}}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &handle{bus: api.NewBus(), set: set, st: st}
+	now := time.Date(2026, 11, 20, 1, 0, 0, 0, time.UTC)
+	sample := func(ts time.Time) *float64 { // the poller stores the row, then observes
+		st.RecordTelemetry("c1", ts, frame.Tele{Soc: 68})
+		return h.socSample("c1", ts, frame.Tele{Soc: 68})
+	}
+	sample(now)
+	h.anchorSoc(now.Add(time.Second), 669)
+	est := sample(now.Add(5 * time.Second))
+	if est == nil || *est != 66.9 {
+		t.Fatalf("anchored estimate %v, want 66.90", est)
+	}
+	st.Flush()
+	raw, err := st.HistoryRaw(now, now.Add(time.Minute))
+	if err != nil || len(raw) != 1 || !raw[0].SocEst.Valid || raw[0].SocEst.Int64 != 6690 {
+		t.Fatalf("stored %+v %v", raw, err)
 	}
 }

@@ -108,6 +108,21 @@ type teleItem struct {
 	tele   frame.Tele
 }
 
+// socEstItem sets the SoC estimate (0.01 %) of a stored telemetry row
+// (the row is queued before it, on the same ordered queue).
+type socEstItem struct {
+	connID string
+	ts     time.Time
+	centi  int
+}
+
+// RecordSocEstimate enqueues the SoC estimate, in 0.01 %, computed for
+// the telemetry sample of connID at ts (D-028).
+func (s *Store) RecordSocEstimate(connID string, ts time.Time, centiPct int) {
+	s.checkOpen("RecordSocEstimate")
+	s.enqueue(socEstItem{connID: connID, ts: ts, centi: centiPct})
+}
+
 // regItem persists one register block read (one registers row per
 // address).
 type regItem struct {
@@ -327,6 +342,9 @@ func (s *Store) apply(items []writeItem) error {
 			err = applyTele(tx, v.connID, v.ts, v.tele)
 		case regItem:
 			err = applyRegs(tx, v)
+		case socEstItem:
+			_, err = tx.Exec(`UPDATE telemetry SET soc_est = ? WHERE conn_id = ? AND ts = ?`,
+				v.centi, v.connID, encTS(v.ts))
 		default:
 			err = fmt.Errorf("store: unknown item %T", it)
 		}

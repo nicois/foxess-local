@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/json"
 	"log/slog"
+	"math"
 	"sync"
 	"time"
 
 	"foxesslocal/internal/api"
+	"foxesslocal/internal/frame"
 	"foxesslocal/internal/socalert"
 	"foxesslocal/internal/socest"
 )
@@ -62,6 +64,26 @@ func (h *handle) saveSocLearned() {
 			slog.Warn("soc estimate: saving the energy per percent", "err", err)
 		}
 	})
+}
+
+// socSample takes one live telemetry sample (connID's row at ts): the
+// SoC estimate moves, is stored on the row for the history (0.01 %), and
+// is returned rounded as the API carries it (nil without a capacity).
+func (h *handle) socSample(connID string, ts time.Time, t frame.Tele) *float64 {
+	est := h.observeSoc(t.Soc, t.Batt, ts)
+	if est != nil && h.st != nil && connID != "" {
+		h.st.RecordSocEstimate(connID, ts, int(math.Round(*est*centiPerPct)))
+	}
+	return est
+}
+
+// centiPerPct: the stored estimate is in 0.01 %.
+const centiPerPct = 100
+
+// anchorSoc takes the BMS's SoC (0.1 %) from a snapshot: the estimate
+// continues from it (D-028).
+func (h *handle) anchorSoc(at time.Time, deciPct int) {
+	h.soc.est.Anchor(at, deciPct)
 }
 
 // observeSoc takes one live reading (the SoC and the battery power, W,

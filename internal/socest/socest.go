@@ -1,23 +1,32 @@
 // Package socest estimates the state of charge between the inverter's
-// whole-percent readings (owner, 2026-11-20; D-028), as the foxess-control
-// integration does: the battery power is integrated between readings,
-// and the result is held within the reported tick's rounding bucket
-// [raw − 0.5, raw + 0.494] — at two decimals the estimate rounds back to
-// the reported value, and the reported value corrects the integration's
-// drift at every tick.
+// whole-percent readings (owner, 2026-11-20; D-028).
+//
+// The BMS reports its own SoC in 0.1 % in the ~5-minute snap61 snapshot
+// (profile §4, tag 1908): each snapshot anchors the estimate (Anchor),
+// and between snapshots the battery power is integrated unscaled — at
+// worst a few hundredths of a percent before the next snapshot.
+//
+// Without a fresh snapshot (another model, or none for anchorMaxAge) the
+// estimate follows the reported SoC (31024), which trails the BMS's with
+// a 1 % dead band (profile §5): it changes when the BMS SoC reaches the
+// shown value — ceil while discharging, floor while charging. So at a
+// change of the reported SoC the estimate is that value, and between
+// changes it integrates the battery power within 1 % of it.
 //
 // About 1 % of a 42 kWh pack is 420 Wh, so a slow discharge holds the
 // reported SoC for an hour; the estimate moves every reading.
 //
-// The energy per percent is learnt (owner, 2026-11-20): two consecutive
-// single-step ticks in one direction are exactly 1 % apart, whether the
-// inverter rounds or truncates, so the energy integrated between them is
-// the energy per percent — less than the nominal capacity says on a
-// pack that has lost health, or when the capacity is set wrong, and
-// different for charging and discharging (losses). It is learnt per
-// direction and applied as a factor on the integration once minObs
-// clean intervals agree, held within [kMin, kMax]; the clamp stays the
-// backstop.
+// The energy per percent is learnt for that fallback (owner,
+// 2026-11-20): two consecutive single-step changes in one direction are
+// exactly 1 % apart, so the energy integrated between them is the energy
+// per percent — less than the nominal capacity says on a pack that has
+// lost health, or when the capacity is set wrong, and different for
+// charging and discharging (losses). It is learnt per direction and
+// applied as a factor on the integration once minObs clean intervals
+// agree, held within [kMin, kMax]. On the KH10 the inverter's battery
+// power over-reads below about 1 kW of discharge (profile §5 31022), so
+// the learnt discharge factor depends on the load; snapshots supersede
+// it.
 package socest
 
 import (
@@ -27,17 +36,18 @@ import (
 )
 
 const (
-	// bucketBelow / bucketAbove bound the estimate around the reported
-	// tick: raw + 0.494 shows as raw.49 at two decimals, which rounds
-	// back to raw (foxess-control's 0.44 is the same bound at one
-	// decimal).
-	bucketBelow = 0.5
-	bucketAbove = 0.494
+	// deadBand: the true SoC is within this of the reported value (%).
+	deadBand = 1.0
+	// anchorMaxAge: a snapshot anchors the estimate for this long (the
+	// BMS pushes one about every 5 minutes).
+	anchorMaxAge = 15 * time.Minute
 	// maxGap: readings further apart than this are not integrated
 	// across (a lost poll is 5–10 s; a gap is a session restart or an
 	// outage, when the power in between is unknown).
 	maxGap = time.Minute
 	pctMax = 100
+	// deciPerPct: the snapshot's SoC is in 0.1 %.
+	deciPerPct = 10
 
 	// minObs clean intervals before the learnt energy per percent
 	// applies; alphaMin is the weight of a new one once there are more
@@ -45,10 +55,10 @@ const (
 	minObs   = 3
 	alphaMin = 0.2
 	// kMin / kMax hold the applied factor (nominal ÷ learnt energy per
-	// percent); an interval implying a factor outside [obsMin, obsMax]
-	// is not learnt from (a BMS recalibration, two ticks in quick
-	// succession).
-	kMin, kMax     = 0.7, 1.3
+	// percent; the KH10's overnight discharge needs about 0.65); an
+	// interval implying a factor outside [obsMin, obsMax] is not learnt
+	// from (a BMS recalibration, two ticks in quick succession).
+	kMin, kMax     = 0.5, 1.5
 	obsMin, obsMax = 0.5, 2.0
 	// maxReverse: the energy flowing against the tick's direction may be
 	// at most this share of the energy flowing with it.
@@ -86,7 +96,7 @@ type span struct {
 }
 
 // Estimator holds the running estimate. Safe for concurrent use (one
-// telemetry stream feeds it; the API reads it).
+// telemetry stream feeds it, snapshots anchor it; the API reads it).
 type Estimator struct {
 	mu    sync.Mutex
 	have  bool
@@ -95,6 +105,25 @@ type Estimator struct {
 	lastW int
 	span  span
 	learn Learned
+	// the newest snapshot SoC (%) and when it arrived; anchorAt zero = none
+	anchorPct float64
+	anchorAt  time.Time
+}
+
+// Anchor takes the BMS's SoC from a snapshot (0.1 %): it becomes the
+// estimate, from which the next readings integrate.
+func (e *Estimator) Anchor(at time.Time, deciPct int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.anchorPct, e.anchorAt = float64(deciPct)/deciPerPct, at
+	if e.have {
+		e.last.Pct = e.anchorPct
+	}
+}
+
+// anchored reports whether a snapshot anchors the estimate at now.
+func (e *Estimator) anchored(now time.Time) bool {
+	return !e.anchorAt.IsZero() && now.Sub(e.anchorAt) <= anchorMaxAge && e.anchorAt.Sub(now) <= maxGap
 }
 
 // Observe takes one reading — the reported SoC (%), the battery power
@@ -103,22 +132,33 @@ type Estimator struct {
 func (e *Estimator) Observe(now time.Time, raw, battW, capWh int) float64 {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	fresh := capWh > 0 && e.anchored(now)
 	est := float64(raw)
-	if e.have && capWh > 0 {
-		est = e.last.Pct + e.integrate(now, battW, capWh)
+	switch {
+	case e.have && capWh > 0:
+		est = e.last.Pct + e.integrate(now, battW, capWh, fresh)
+	case fresh:
+		est = e.anchorPct
 	}
 	if e.have && raw != e.last.Raw {
 		e.tick(raw-e.last.Raw, capWh)
+		if !fresh {
+			est = float64(raw) // the reported SoC changes when the BMS reaches it
+		}
 	}
-	est = min(max(est, float64(raw)-bucketBelow, 0), float64(raw)+bucketAbove, pctMax)
+	if !fresh {
+		est = min(max(est, float64(raw)-deadBand), float64(raw)+deadBand)
+	}
+	est = min(max(est, 0), pctMax)
 	e.have, e.ok = true, capWh > 0
 	e.last, e.lastW = Reading{Raw: raw, Pct: est, At: now}, battW
 	return est
 }
 
 // integrate is the change since the last reading, % (0 across a gap,
-// which also voids the interval being measured).
-func (e *Estimator) integrate(now time.Time, battW, capWh int) float64 {
+// which also voids the interval being measured). Anchored, the power is
+// taken as measured; otherwise the learnt factor applies.
+func (e *Estimator) integrate(now time.Time, battW, capWh int, anchored bool) float64 {
 	dt := now.Sub(e.last.At)
 	if dt <= 0 || dt > maxGap {
 		e.span.dir = 0 // the energy in between is unknown
@@ -131,7 +171,11 @@ func (e *Estimator) integrate(now time.Time, battW, capWh int) float64 {
 	} else {
 		e.span.outWh -= wh
 	}
-	return wh * e.factor(meanW, capWh) / float64(capWh) * pctMax
+	k := 1.0
+	if !anchored {
+		k = e.factor(meanW, capWh)
+	}
+	return wh * k / float64(capWh) * pctMax
 }
 
 // factor is the learnt correction for the flow's direction (1 until

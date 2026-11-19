@@ -64,6 +64,8 @@ func excluded(i int, t tick) string {
 		return "gap in interval"
 	case i == 0:
 		return "first (interval incomplete)"
+	case t.Anchored:
+		return "anchored"
 	}
 	return ""
 }
@@ -103,13 +105,45 @@ func report(w io.Writer, res result, capWh int, verbose bool) error {
 		p.f("%-20s %3d   %7.3f / %7.3f          %7.3f / %7.3f        %7.1f\n",
 			k, len(g.pinned), mean(g.pinned), median(g.pinned), mean(g.jump), median(g.jump), median(g.span))
 	}
-	p.f("\nexcluded: %d multi-step jumps, %d intervals with a gap, the first tick\n", skipped["multi-step jump"], skipped["gap in interval"])
+	p.f("\nexcluded: %d anchored by a snapshot, %d multi-step jumps, %d intervals with a gap, the first tick\n",
+		skipped["anchored"], skipped["multi-step jump"], skipped["gap in interval"])
+	driftSummary(p, res.Drift)
+	if verbose {
+		listDrifts(p, res)
+	}
 	l := res.Learned
 	p.f("learnt: charging %.1f Wh/%% (n=%d), discharging %.1f Wh/%% (n=%d)\n",
 		l.Charging.WhPerPct, l.Charging.N, l.Discharging.WhPerPct, l.Discharging.N)
 	listLines(p, "anomalies", res.Anomalies)
 	listLines(p, "violations", res.Violations)
 	return p.err
+}
+
+// driftSummary: how far the estimate had moved from the BMS SoC when the
+// next snapshot arrived (the integration's error over ~5 minutes).
+func driftSummary(p *printer, drift []float64) {
+	if len(drift) == 0 {
+		p.f("snapshots: none anchored the estimate\n")
+		return
+	}
+	abs := make([]float64, len(drift))
+	for i, d := range drift {
+		abs[i] = math.Abs(d)
+	}
+	slices.Sort(abs)
+	p.f("snapshots: %d; drift at the next one, %%: mean %+.3f, |median| %.3f, |p95| %.3f, |max| %.3f\n",
+		len(drift), mean(drift), median(abs), abs[len(abs)*95/100], abs[len(abs)-1])
+}
+
+// bigDrift: the snapshots listed with -v (%, either way).
+const bigDrift = 0.3
+
+func listDrifts(p *printer, res result) {
+	for i, d := range res.Drift {
+		if math.Abs(d) >= bigDrift {
+			p.f("  drift %+.2f %% at %s\n", d, res.DriftAt[i].UTC().Format("2006-01-02 15:04:05"))
+		}
+	}
 }
 
 func listTicks(p *printer, ticks []tick) {

@@ -1,6 +1,8 @@
 package framesvc
 
 import (
+	"time"
+
 	"foxesslocal/internal/frame"
 	"foxesslocal/internal/store"
 )
@@ -18,6 +20,9 @@ const (
 	// EventFirmwareTask: the cloud sent a firmware upgrade task (FwTask,
 	// and Decision: forwarded in a maintenance window, else dropped).
 	EventFirmwareTask = "firmware-task"
+	// EventBMSSoc: an inverter snapshot (snap61) carried the BMS's SoC in
+	// 0.1 % (BMSSocDeciPct, at TS; profile §4 1908).
+	EventBMSSoc = "bms-soc"
 )
 
 // Event is one observed stack event. The observer is called on the hook
@@ -27,6 +32,9 @@ const (
 type Event struct {
 	Kind   string
 	ConnID string
+	// TS is when the sample was taken (Telemetry: the time its row is
+	// stored under; BMSSoc: the snapshot's arrival). Zero for the rest.
+	TS time.Time
 
 	// SessionDown
 	Reason string
@@ -43,6 +51,9 @@ type Event struct {
 
 	// Energy
 	Energy *frame.KHEnergy
+
+	// BMSSoc
+	BMSSocDeciPct int
 
 	// FirmwareTask
 	FwTask   *frame.FwTask
