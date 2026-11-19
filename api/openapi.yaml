@@ -876,6 +876,9 @@ paths:
       operationId: listAudit
       summary: Policy and command decision log
       description: |
+        Below the expert role the per-frame cloud decisions (source
+        `cloud`: the cloud's Modbus requests, allowed or dropped) are left
+        out and `cloud_hidden` is true; operator actions are always shown.
         Immutable log of every upstream-to-inverter decision and operator
         command: source (token name or `cloud`), action, and whether the
         inverter confirmed the write. Newest first; page with `before`.
@@ -903,6 +906,9 @@ paths:
                 type: object
                 required: [items]
                 properties:
+                  cloud_hidden:
+                    type: boolean
+                    description: The per-frame cloud decisions were left out (a token below expert).
                   items:
                     type: array
                     items:
@@ -917,7 +923,7 @@ paths:
       operationId: listMessages
       summary: Raw frame log
       description: Both directions, all frames, with decoded summary where available. Power-user/debug view.
-      x-required-role: read-only
+      x-required-role: expert
       parameters:
         - $ref: '#/components/parameters/From'
         - $ref: '#/components/parameters/To'

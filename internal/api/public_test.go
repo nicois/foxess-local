@@ -68,7 +68,6 @@ var otherReads = []string{
 	"/api/v1/write-override",
 	"/api/v1/update",
 	"/api/v1/audit",
-	"/api/v1/messages",
 	"/api/v1/maintenance",
 }
 

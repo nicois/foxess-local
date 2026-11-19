@@ -190,7 +190,7 @@ func New(st *store.Store, gw *gateway.Gateway, maint MaintenanceState, tok *Toke
 	s.handle(mux, "GET /api/v1/forward-mode", s.protectDashboard(s.handleGetForwardMode))
 	s.handle(mux, "PUT /api/v1/forward-mode", s.protect(RoleInstaller, s.handlePutForwardMode))
 	s.handle(mux, "GET /api/v1/audit", s.protect(RoleReadOnly, s.handleAudit))
-	s.handle(mux, "GET /api/v1/messages", s.protect(RoleReadOnly, s.handleMessages))
+	s.handle(mux, "GET /api/v1/messages", s.protect(RoleExpert, s.handleMessages))
 	s.handle(mux, "GET /api/v1/maintenance", s.protect(RoleReadOnly, s.handleMaintenanceGet))
 	s.handle(mux, "POST /api/v1/maintenance", s.protect(RoleInstaller, s.handleMaintenanceOpen))
 	s.handle(mux, "DELETE /api/v1/maintenance", s.protect(RoleInstaller, s.handleMaintenanceClose))

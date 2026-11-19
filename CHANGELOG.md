@@ -75,6 +75,11 @@ version; anything else bumps the patch version.
 
 ### Changed
 - Release checks run weekly by default (they were daily).
+- Frame-level data needs the expert or installer role. The raw frame
+  log (`GET /messages`, More → Frame messages) refuses read-only tokens
+  and public access. Activity (`GET /audit`) shows them the operator
+  actions only, without the cloud's individual messages, and says so
+  (`cloud_hidden`).
 - On a very wide screen (1400 px and up) the dashboard uses two columns:
   the header, live view and footer on the left, the energy history on
   the right with its own scrolling, so the live view stays in sight.

@@ -75,7 +75,7 @@ func TestAuditEntries(t *testing.T) {
 		t.Fatalf("PUT /work-mode: got %d, want 200 (body: %s)", rr.Code, rr.Body.String())
 	}
 
-	rr = h.do(t, httpGet, "/api/v1/audit", RoleReadOnly, nil)
+	rr = h.do(t, httpGet, "/api/v1/audit", RoleExpert, nil)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("GET /audit: got %d, want 200 (body: %s)", rr.Code, rr.Body.String())
 	}
@@ -101,7 +101,7 @@ func TestAuditFilters(t *testing.T) {
 	h.seedAuditFrames()
 	h.do(t, httpPut, "/api/v1/work-mode", RoleStandard, map[string]string{jsonFieldWorkMode: workModeFeedIn})
 
-	rr := h.do(t, httpGet, "/api/v1/audit?action=drop", RoleReadOnly, nil)
+	rr := h.do(t, httpGet, "/api/v1/audit?action=drop", RoleExpert, nil)
 	var body struct {
 		Items []auditEntryBody `json:"items"`
 	}
@@ -112,7 +112,7 @@ func TestAuditFilters(t *testing.T) {
 		t.Fatalf("action=drop: got %+v, want exactly the drop", body.Items)
 	}
 
-	rr = h.do(t, httpGet, "/api/v1/audit?source=cloud", RoleReadOnly, nil)
+	rr = h.do(t, httpGet, "/api/v1/audit?source=cloud", RoleExpert, nil)
 	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
 		t.Fatalf("body: %v", err)
 	}
@@ -142,7 +142,7 @@ type auditEntryBody struct {
 // query and returns the decoded items.
 func (h *harness) messagesGet(t *testing.T, q string) []messageEntryBody {
 	t.Helper()
-	rr := h.do(t, httpGet, "/api/v1/messages"+q, RoleReadOnly, nil)
+	rr := h.do(t, httpGet, "/api/v1/messages"+q, RoleExpert, nil)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("GET /messages: got %d, want 200 (body: %s)", rr.Code, rr.Body.String())
 	}
@@ -224,7 +224,7 @@ func TestMessages(t *testing.T) {
 func TestMessagesBadFilter(t *testing.T) {
 	h := newHarness(t)
 	for _, q := range []string{"dir=both", "frame=bogus"} {
-		rr := h.do(t, httpGet, "/api/v1/messages?"+q, RoleReadOnly, nil)
+		rr := h.do(t, httpGet, "/api/v1/messages?"+q, RoleExpert, nil)
 		p := checkProblem(t, rr, http.StatusBadRequest, "invalid_value")
 		if len(p.Errors) == 0 {
 			t.Fatalf("%s: want errors[], got none", q)
@@ -266,7 +266,7 @@ func TestMessagesDecisionReasonOrigin(t *testing.T) {
 			Origin   *string `json:"origin"`
 		} `json:"items"`
 	}
-	rr := h.do(t, httpGet, "/api/v1/messages", RoleReadOnly, nil)
+	rr := h.do(t, httpGet, "/api/v1/messages", RoleExpert, nil)
 	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
@@ -283,5 +283,52 @@ func TestMessagesDecisionReasonOrigin(t *testing.T) {
 	}
 	if relayed.Reason == nil || *relayed.Reason == "" {
 		t.Errorf("relayed read: %+v", relayed)
+	}
+}
+
+// TestLowLevelNeedsExpert (owner, 2026-11-19): below expert there is no
+// frame-level data. The raw frame log refuses a read-only token (and a
+// tokenless public session); Activity shows a read-only token the
+// operator actions only, without the per-frame cloud decisions, and
+// says they are hidden.
+func TestLowLevelNeedsExpert(t *testing.T) {
+	h := newHarness(t)
+	h.seedAuditFrames()
+	h.do(t, httpPut, "/api/v1/work-mode", RoleStandard, map[string]string{jsonFieldWorkMode: workModeFeedIn})
+
+	checkProblem(t, h.do(t, httpGet, "/api/v1/messages", RoleReadOnly, nil), http.StatusForbidden, "insufficient_role")
+
+	type page struct {
+		Items       []auditEntryBody `json:"items"`
+		CloudHidden bool             `json:"cloud_hidden"`
+	}
+	get := func(role Role, q string) page {
+		t.Helper()
+		rr := h.do(t, httpGet, "/api/v1/audit"+q, role, nil)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s GET /audit%s: %d", role, q, rr.Code)
+		}
+		var p page
+		if err := json.Unmarshal(rr.Body.Bytes(), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	for _, q := range []string{"", "?source=cloud", "?action=drop"} {
+		p := get(RoleReadOnly, q)
+		if !p.CloudHidden {
+			t.Errorf("read-only %q: cloud_hidden false", q)
+		}
+		for _, e := range p.Items {
+			if e.Source == auditSourceCloud {
+				t.Errorf("read-only %q: a cloud decision leaked: %+v", q, e)
+			}
+		}
+	}
+	if p := get(RoleReadOnly, ""); len(p.Items) != 1 {
+		t.Fatalf("read-only: %d entries, want the one operator action", len(p.Items))
+	}
+	if p := get(RoleExpert, ""); p.CloudHidden || len(p.Items) != 3 {
+		t.Fatalf("expert: hidden %v, %d entries, want all 3", p.CloudHidden, len(p.Items))
 	}
 }

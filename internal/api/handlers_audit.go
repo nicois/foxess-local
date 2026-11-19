@@ -66,8 +66,11 @@ type auditEntry struct {
 }
 
 // handleAudit is GET /audit (spec listAudit): the merged policy
-// decisions + operator-command rows, filtered and paged.
-func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request, _ Token) {
+// decisions + operator-command rows, filtered and paged. The policy
+// decisions are frame-level (the cloud's Modbus requests, one per
+// frame): below expert they are left out and cloud_hidden says so
+// (owner, 2026-11-19).
+func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request, tk Token) {
 	page, pb, ok := parsePage(r)
 	if !ok {
 		writeProblem(w, http.StatusBadRequest, pb)
@@ -75,7 +78,8 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request, _ Token) {
 	}
 	q := r.URL.Query()
 	source, action := q.Get("source"), q.Get("action")
-	out, err := s.auditEntries(page, source, action)
+	hideCloud := roleLevel[tk.Role] < roleLevel[RoleExpert]
+	out, err := s.auditEntries(page, source, action, hideCloud)
 	if err != nil {
 		s.internal(w, err)
 		return
@@ -85,8 +89,9 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request, _ Token) {
 		out = out[:page.limit]
 	}
 	writeJSON(w, http.StatusOK, struct {
-		Items []auditEntry `json:"items"`
-	}{out})
+		Items       []auditEntry `json:"items"`
+		CloudHidden bool         `json:"cloud_hidden,omitempty"`
+	}{out, hideCloud})
 }
 
 // auditEntries is one page of each source, before the merge: the policy
@@ -94,9 +99,9 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request, _ Token) {
 // operator-command rows (source = the token name). Each part is at most
 // one page from the newest end, so the merged page is exact and the cost
 // follows the page size, not the log.
-func (s *Server) auditEntries(page pageParams, source, action string) ([]auditEntry, error) {
-	var out []auditEntry
-	if source == "" || source == auditSourceCloud {
+func (s *Server) auditEntries(page pageParams, source, action string, hideCloud bool) ([]auditEntry, error) {
+	out := []auditEntry{}
+	if !hideCloud && (source == "" || source == auditSourceCloud) {
 		pol, err := s.policyEntries(page, action)
 		if err != nil {
 			return nil, err

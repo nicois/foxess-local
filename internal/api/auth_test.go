@@ -32,7 +32,7 @@ var roleOps = []roleOp{
 	{httpGet, pathForwardMode, RoleReadOnly},
 	{httpPut, pathForwardMode, RoleInstaller},
 	{httpGet, "/api/v1/audit", RoleReadOnly},
-	{httpGet, "/api/v1/messages", RoleReadOnly},
+	{httpGet, "/api/v1/messages", RoleExpert}, // the raw frame log (owner, 2026-11-19)
 	{httpGet, pathMaintenance, RoleReadOnly},
 	{httpPost, pathMaintenance, RoleInstaller},
 	{httpDelete, pathMaintenance, RoleInstaller},

@@ -1746,6 +1746,7 @@ async function fetchAuditPage(before, replace) {
   if (!resp.ok) return false;
   const data = await resp.json();
   const items = data.items ?? [];
+  S.audit.cloudHidden = !!data.cloud_hidden;
   S.audit.items = replace ? items : S.audit.items.concat(items);
   S.audit.before = items.length ? items[items.length - 1].ts : null;
   S.audit.exhausted = items.length < 100;
@@ -1759,6 +1760,10 @@ async function fetchMessagesPage(before, replace) {
   if (f.frame) params.set("frame", f.frame);
   if (before) params.set("before", before);
   const resp = await apiFetch("/messages?" + params);
+  // the frame log needs the expert role: a lower token (403) or a
+  // tokenless public session (401) gets an explanation, not the gate
+  S.messages.denied = resp.status === 403 || (resp.status === 401 && S.public);
+  if (S.messages.denied) return true;
   if (resp.status === 401) { gate(tr("the token was rejected — sign in again")); return false; }
   if (!resp.ok) return false;
   const data = await resp.json();
@@ -2126,6 +2131,7 @@ async function renderAudit() {
     </div>
     <label class="search"><span class="sr-only">${esc(tr("Source"))}</span><input type="text" name="source" value="${esc(f.source)}" placeholder="${esc(tr("Filter by source (token name or cloud)"))}"></label>
   </form>
+  ${S.audit.cloudHidden ? `<p class="note muted small">${esc(tr("The cloud's individual messages, allowed or blocked, are shown to the expert and installer roles only. Sign in with such a token to see them."))}</p>` : ""}
   <ul class="list">${items || `<li class="empty muted">${esc(f.source || f.action ? tr("No activity for this filter.") : tr("No activity."))}</li>`}</ul>
   ${S.audit.exhausted ? "" : `<button type="button" class="ghost wide" data-action="audit-more">${esc(tr("Load older"))}</button>`}`;
 }
@@ -2151,7 +2157,7 @@ async function renderMore() {
     ${link("settings", tr("Settings"), esc(tr("language, access tokens, notifications, tuning, diagnostics")), '<circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>')}
     ${link("report", tr("Report a problem"), esc(tr("one file for the developers, plus a prefilled issue")), '<path d="M12 3 2 21h20zM12 9v5M12 17.5v.5"/>')}
     ${link("quirks", tr("Inverter quirks"), esc(tr("compensate for known reading quirks")), '<path d="M4 12h3l2-5 3 10 2-5h6"/><circle cx="19" cy="6" r="1.5"/>')}
-    ${link("messages", tr("Frame messages"), esc(tr("the raw message log (diagnostics)")), '<path d="M4 6h16M4 12h16M4 18h10"/>')}
+    ${link("messages", tr("Frame messages"), esc(tr("the raw message log (diagnostics; expert)")), '<path d="M4 6h16M4 12h16M4 18h10"/>')}
   </ul>`;
 }
 
@@ -2558,6 +2564,10 @@ function afterCloud() {
 async function renderMessages() {
   const first = S.messages.items.length === 0;
   if (first && !(await fetchMessagesPage(null, true))) return null;
+  if (S.messages.denied) {
+    return `${pageHead(tr("Frame messages"))}
+  <p class="muted">${esc(tr("The raw message log needs the expert or installer role. Sign in with such a token to see it."))}</p>`;
+  }
   const f = S.msgFilters;
   let lastDay = "";
   const items = S.messages.items.map((m) => {
