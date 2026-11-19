@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	protocol "foxesslocal/internal/frame"
 )
 
 // TestParseConnMeta pins the meta.jsonl contract: conn_open/conn_close ts,
@@ -181,4 +183,33 @@ func indexOfDev(cf []frame, want func(frame) bool) (int, bool) {
 		}
 	}
 	return -1, false
+}
+
+// TestFirmwareFrames: mon150 follows an in-band firmware push across
+// both directions — the task and the announcement start it, chunks fill
+// it, acknowledgements and the end frame close it (profile §6).
+func TestFirmwareFrames(t *testing.T) {
+	fwXfer = nil
+	t.Cleanup(func() { fwXfer = nil })
+	id := []byte{0xa2, 0x35, 0x46, 0x7b, 0x4d}
+	img := []byte("not a real firmware image")
+	crc := protocol.CRC16(img)
+	meta := append(append([]byte{}, id...), 0, 0, 0, byte(len(img)), byte(crc>>8), byte(crc), 4, 'T', 'e', 's', 't')
+	chunk := append(append(append([]byte{}, id...), 0, 0), img...)
+	ack := append(append([]byte{}, id...), 0, 0, 0x05)
+	end := append(append([]byte{}, id...), 0)
+	task := []byte("\x17\x01\x3d" + `{"task_type":"upgrade","data":{"mcu_type":"M","url":"https://example.invalid/x","filename":"Test.bin","crc":1,"size":2}}`)
+
+	if !fwS2C("t", task) || !fwS2C("t", meta) || fwXfer == nil {
+		t.Fatal("task or announcement not recognised")
+	}
+	if !fwS2C("t", chunk) || !fwC2S("t", ack) || !fwC2S("t", end) {
+		t.Fatal("chunk, ack or end not recognised")
+	}
+	if _, err := fwXfer.Image(); err != nil || fwXfer.Acks() != 1 || !fwXfer.Ended() {
+		t.Fatalf("transfer: %v acks %d ended %v", err, fwXfer.Acks(), fwXfer.Ended())
+	}
+	if fwS2C("t", []byte{0x01, 0x03, 0x79, 0x18, 0x00, 0x1d}) || fwC2S("t", []byte{0x01, 0x06, 0, 0, 0, 0}) {
+		t.Error("Modbus frames taken for firmware frames")
+	}
 }

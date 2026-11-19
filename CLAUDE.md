@@ -142,7 +142,8 @@ CRC validation make naive resync silently lossy.
 
 It decodes power telemetry, keepalives, registration, the fn=64 wrapper,
 Modbus reads and writes with register names, per-push Δ diffs, the 48xxx
-time-group tables and the device-info snapshot series. Its register
+time-group tables, the device-info snapshot series, and firmware
+upgrade tasks and in-band pushes (reassembled and CRC-checked, profile §6). Its register
 names come from `frame.RegName` (`internal/frame/modbus.go`): keep that in
 sync with `docs/recon/protocol-profile.md` §5 when a register is decoded. The corpus parity test (`internal/frame/corpus_test.go`) builds
 it from source.

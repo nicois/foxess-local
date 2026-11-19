@@ -510,19 +510,70 @@ source).
 
 ## 6. Firmware / update messages
 
-Mechanism (prior `firmware.py`, same vendor platform): transfer frames carry
-envelope func `0xA2` (7e7e family, magic `fa 6b 7c 7a 4d`) or func `0x99`
-(7f7f family, 5-byte transfer ID with stable tail `7c 7a 4d`); metadata frame
-(size, CRC, filename, serial) → inverter ACK → 1024 B chunks → ACK →
-flash-progress signalling. **None observed in this session.**
+**Observed 2026-11-19** (KH10, fw 1.73 / 1.03 / 1.71, `telemetry_only` +
+a maintenance window; the owner requested a same-version "update" of each
+component from the FoxESS portal). Decoded by `frame.ParseFwTask`,
+`ParseFwMeta`, `FwTransfer` (`internal/frame/firmware.go`) and by
+`tools/mon150`. All frames are payload layouts; the envelope device/fn
+bytes were not recorded (open, §8).
 
-Hold strategy (C-002), plan-2 decision:
+**1. Upgrade task (s2c), JSON** behind a 3-byte head (`17 01 3d`; meaning
+open — a dongle status note had `0b 01 1d`):
 
-- (a) **ACK-to-cloud + strip-from-inverter** — prior `FirmwareCapture`
-  approach: cloud believes the update succeeded, inverter never enters
-  updater mode. Proven prior implementation.
-- (b) Silent drop — cloud may retry or time out; inverter stays on current
-  fw.
+```json
+{"task_type":"upgrade","data":{"mcu_type":"M","notify_url":"https://www.foxesscloud.com/generic/v0/firmware/status/<inverter SN>",
+ "url":"https://www.foxesscloud.com/private/firmware/<uuid>?taskId=<n>","filename":"10-300-11056-39_K10_Master_V1.73.bin",
+ "crc":26948,"size":267078}}
+```
+
+- `mcu_type`: `M` master, `S` slave, `A` manager (one task per component).
+- `crc` is the Modbus CRC-16 (init FFFF, poly A001 reflected — the frame
+  CRC) of the whole file; `size` its length.
+- `url` serves the file without a login (HTTP 200, `application/octet-stream`).
+  It and `notify_url` are tied to the account: never commit them.
+
+**2. The dongle fetches `url` over HTTPS first.** It resolves the name
+through hard-coded public resolvers (8.8.8.8, 8.8.4.4, 1.1.1.1 — not the
+gateway's resolver), every ~5 s from the task's arrival. The egress gate
+drops them (C-007; a maintenance window opens the frame policy, not the
+gate), so the fetch fails. After ~2 min the dongle sent the status note
+`{"msgs":"485_data_abnormal"}` (c2s). The success report presumably goes to
+`notify_url` the same way and fails too: the portal stays at "initializing".
+
+**3. In-band fallback, ~5 min after the task:** the cloud pushes the file
+over this channel (all frames forwarded under the window):
+
+| Frame | Dir | Payload |
+|---|---|---|
+| announcement | s2c | ID(5) + size u32 BE + crc u16 BE + name length u8 + name (`K10_Master_V1.73`): 28 B |
+| chunk | s2c | ID(5) + seq u16 BE (from 0) + 1024 B data; the last shorter (838 B) |
+| acknowledgement | c2s | ID(5) + seq u16 BE + status u8 — `05` on every chunk |
+| end | c2s | ID(5) + `00`, after the last acknowledgement |
+
+The ID was `a2 35 46 7b 4d` (random per transfer, hypothesis: one sample).
+Stop-and-wait: the next chunk follows each acknowledgement (~0.27 s; 261
+chunks in 71 s). The inverter then rebooted to flash (the backup output
+dropped with it) and came back on the same versions.
+
+**Verified:** the 261 chunks reassemble to 267 078 B with the announced
+CRC, byte-identical to the file `url` serves. The three files (fetched from
+their tasks' URLs; the manager and slave tasks were dropped in
+`telemetry_only`, so the inverter never saw them):
+
+| Component | File | Size | CRC-16 | SHA-256 |
+|---|---|---|---|---|
+| master 1.73 (`M`) | `10-300-11056-39_K10_Master_V1.73.bin` | 267 078 | 26948 | `5f9d34483f0e0bf9e5511239a6a6a0685b5fa0a06c56cb97c133bd2f78085ea0` |
+| manager 1.71 (`A`) | `10-300-11057-37_K10_Manager_V1.71.bin` | 764 904 | 59102 | `83fbcd1f67441be3a0ed2f7fc546d4ff3cda6116aed87c50c99e4818b224ab5b` |
+| slave 1.03 (`S`) | `10-300-11058-03_K10_Slave_V1.03.bin` | 48 246 | 40149 | `1627797c72ba9d6ad53fdb82564847b1150e0bfe56cbf5fb13c3cd9bb0a6520b` |
+
+Prior expectation (`firmware.py`, same vendor platform; superseded): envelope
+func `0xA2`/`0x99` with a 5-byte transfer ID ending `… 4d`, metadata → ACK →
+1024 B chunks → ACK — consistent with the above apart from the framing
+details, which were never seen before.
+
+Policy (C-002, D-025): firmware passes only inside a maintenance window; in
+`off`/`telemetry_only` the task frame is dropped (and logged byte-exact),
+so the inverter never acts on it.
 
 ## 7. Native schedule structure
 
@@ -641,6 +692,12 @@ surface.
       Probe with `POST /api/v1/registers/read`
       (`docs/recon/tools/probe-registers.sh`) and check against the live
       oracles: snap61 SoC + stored energy, pack voltage, PV ≈ 0 at night.
+
+- [ ] Firmware (§6): the envelope device/fn of the task, transfer and
+  acknowledgement frames (only payloads were recorded); the JSON head
+  bytes; acknowledgement status values other than `05`; whether the
+  transfer ID is random per transfer; whether the inverter reports flash
+  progress or the result over this channel after the reboot.
 
 ## 9. Tooling
 

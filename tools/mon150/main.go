@@ -393,11 +393,79 @@ func printC2S(tag, kind string, f frame, ha *haPoller) {
 			}
 		}
 	default:
+		if fwC2S(line, p) {
+			return
+		}
 		fmt.Println(line)
 		if *hexOther {
 			fmt.Print(hexdump(p))
 		}
 	}
+}
+
+// fwXfer is the in-band firmware transfer being followed (profile §6):
+// announced and chunked downlink, acknowledged uplink.
+var fwXfer *protocol.FwTransfer
+
+// fwS2C renders the downlink firmware messages: the upgrade task, the
+// announcement, and the chunks (the first, then one line when the last
+// byte is in). False when p is none of them.
+func fwS2C(head string, p []byte) bool {
+	if t, ok := protocol.ParseFwTask(p); ok {
+		// the url is tied to the owner's account: not printed
+		fmt.Printf("%s  UPGRADE TASK %s: %s, %d B, crc %d (the dongle fetches it over HTTPS first)\n",
+			head, protocol.FwMCUName(t.MCU), t.Filename, t.Size, t.CRC)
+		return true
+	}
+	if _, body, ok := protocol.ParseJSONMsg(p); ok {
+		fmt.Printf("%s  JSON %s\n", head, body)
+		return true
+	}
+	if fwXfer != nil {
+		if seq, ok := fwXfer.Chunk(p); ok {
+			if seq == 0 {
+				fmt.Printf("%s  FIRMWARE chunk 0 of %s (%d B)\n", head, fwXfer.Meta.Name, len(p)-7)
+			}
+			if img, err := fwXfer.Image(); err == nil {
+				fmt.Printf("%s  FIRMWARE %s complete: %d chunks, %d B, crc %d ok\n",
+					head, fwXfer.Meta.Name, fwXfer.Received(), len(img), fwXfer.Meta.CRC)
+			}
+			return true
+		}
+	}
+	if m, ok := protocol.ParseFwMeta(p); ok {
+		fwXfer = protocol.NewFwTransfer(m)
+		fmt.Printf("%s  FIRMWARE announce %s: %d B, crc %d, transfer id %x\n", head, m.Name, m.Size, m.CRC, m.ID)
+		return true
+	}
+	return false
+}
+
+// fwC2S renders the uplink side: chunk acknowledgements (only a status
+// other than 05), the end frame, and the dongle's JSON notes.
+func fwC2S(head string, p []byte) bool {
+	if _, body, ok := protocol.ParseJSONMsg(p); ok {
+		fmt.Printf("%s  JSON %s\n", head, body)
+		return true
+	}
+	if fwXfer == nil {
+		return false
+	}
+	if seq, st, ok := fwXfer.Ack(p); ok {
+		if st != 0x05 {
+			fmt.Printf("%s  FIRMWARE ack chunk %d status %02x (05 is the usual)\n", head, seq, st)
+		}
+		return true
+	}
+	if fwXfer.End(p) {
+		state := "image complete"
+		if _, err := fwXfer.Image(); err != nil {
+			state = err.Error()
+		}
+		fmt.Printf("%s  FIRMWARE %s end: %d chunks, %d acks; %s\n", head, fwXfer.Meta.Name, fwXfer.Received(), fwXfer.Acks(), state)
+		return true
+	}
+	return false
 }
 
 func u16BE(p []byte, off int) int {
@@ -641,6 +709,9 @@ func printS2C(tag string, fr frame) {
 	}
 	if len(p) == 57 {
 		fmt.Printf("%s  57B serial query, tail=%s\n", head("QUERY"), hexSpaced(p[len(p)-17:]))
+		return
+	}
+	if fwS2C(head("FW   "), p) {
 		return
 	}
 	fmt.Printf("%s  len=%d\n%s", head("OTHER"), len(p), hexdump(p))
