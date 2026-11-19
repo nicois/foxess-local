@@ -20,6 +20,8 @@ version; anything else bumps the patch version.
 
 ## [Unreleased]
 
+## [v0.2.0] - 2026-11-19
+
 ### Added
 - A site time zone, and foxess-local keeps the inverter's clock. Setup
   asks where the inverter is (`site.time_zone`, or `[site] time_zone`):
