@@ -81,8 +81,8 @@ func RegName(addr int) string {
 		return "export limit W"
 	case 41029:
 		return "meter compensation int16 W"
-	case 57000, 57050, 57100:
-		return "window block (r2=per-window import limit, value-65536 if >65536)"
+	case 57000, 57050, 57100, 57150, 57200:
+		return "schedule group params (r1:r2 import W, r3:r4 export W, r6 PV power)"
 	}
 	return ""
 }

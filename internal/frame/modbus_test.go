@@ -99,7 +99,7 @@ func TestRegName(t *testing.T) {
 	for addr, wantEmpty := range map[int]bool{
 		48000: false, 48010: false, 10110: false, 41000: false,
 		41021: false, 41023: false, 41029: false,
-		57000: false, 57050: false, 57100: false,
+		57000: false, 57050: false, 57100: false, 57150: false, 57200: false,
 		40000: true, // RTC block, unregistered
 		15000: true,
 		53400: true,

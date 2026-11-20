@@ -47,6 +47,10 @@ version; anything else bumps the patch version.
 
 ### Fixed
 
+- Schedule: a window in groups 4–8 shows its grid import and export
+  limits and whether it uses solar. Only groups 1–3 were read, so a
+  default (remaining-time) window that the cloud placed in group 4
+  showed none of them.
 - The "battery running low" forecast works on a slow discharge. It fits
   the estimated state of charge: whole-percent readings at about 1 %/h
   never warned, or warned early from a single step.

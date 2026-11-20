@@ -50,21 +50,33 @@ var identityBlocks = []struct{ addr, count int }{
 // /state's settings — the same reads the cloud made before its config
 // pushes (profile §5): work mode, the 41007 readback (limits at
 // 41021/41023, meter compensation at 41029, current limits), the
-// scheduler master and the 48010 time-group table. Never read on another
-// layout (they mean something else there).
-var settingsBlocks = []struct{ addr, count int }{
-	{0x9C40, 6}, // the inverter's clock, year…second: compared with the host's (audit R8)
-	{41000, 1},
-	{41007, 40},
-	{41200, 3}, // LoadLimitPower / GenerationLimitPower / TBD (profile §5)
-	{48000, 10},
-	{48010, 80},
-	// schedule groups 1–3's parameter blocks: import / export limit and
-	// PV use per window (profile §5, 2026-11-18). The cloud reads and
-	// writes these three; 57150+ (groups 4–8) were never seen.
-	{57000, 50},
-	{57050, 50},
-	{57100, 50},
+// scheduler master, the 48010 time-group table and each group's
+// parameter block. Never read on another layout (they mean something
+// else there). An optional block's failure does not fail the round: it
+// is tried again with the next one.
+var settingsBlocks = []struct {
+	addr, count int
+	optional    bool
+}{
+	{0x9C40, 6, false}, // the inverter's clock, year…second: compared with the host's (audit R8)
+	{41000, 1, false},
+	{41007, 40, false},
+	{41200, 3, false}, // LoadLimitPower / GenerationLimitPower / TBD (profile §5)
+	{48000, 10, false},
+	{48010, 80, false},
+	// schedule groups' parameter blocks (57000 + 50·(k−1)): import /
+	// export limit and PV use per window (profile §5). The cloud writes
+	// groups 1–3's (2026-11-18) and 4–5's (2026-11-20).
+	{57000, 50, false},
+	{57050, 50, false},
+	{57100, 50, false},
+	{57150, 50, false},
+	{57200, 50, false},
+	// groups 6–8's, at the same stride: extrapolated, not yet seen on
+	// the wire, so a refusal leaves the other settings current
+	{57250, 50, true},
+	{57300, 50, true},
+	{57350, 50, true},
 }
 
 // tentativeFailures is how many consecutive polls a tentative map may
@@ -336,7 +348,7 @@ func teleOf(v compat.LiveValues) frame.Tele {
 // settings reads the KH settings blocks when a round is due (a new
 // session, or settingsEvery since the last complete round). Each block
 // read is recorded as it lands; a failed block leaves the round due, so
-// the next tick retries it.
+// the next tick retries it — unless it is optional.
 func (p *poller) settings(ctx context.Context, connID string) {
 	if connID == p.settingsConn && p.clock().Sub(p.settingsAt) < settingsEvery {
 		return
@@ -344,6 +356,9 @@ func (p *poller) settings(ctx context.Context, connID string) {
 	for _, b := range settingsBlocks {
 		vals, err := p.read(ctx, fnHoldingRead, b.addr, b.count)
 		if err != nil {
+			if b.optional {
+				continue
+			}
 			return
 		}
 		p.recordRegs(p.clock(), b.addr, vals)

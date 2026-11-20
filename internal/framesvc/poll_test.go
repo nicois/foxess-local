@@ -224,7 +224,7 @@ func TestPollerReadsSettings(t *testing.T) {
 		f.mu.Unlock()
 		// identity first (model 30000 ×15, versions 30016 ×3 — D-020),
 		// then the settings
-		want := []int{30000, 30016, 40000, 41000, 41007, 41200, 48000, 48010, 57000, 57050, 57100}
+		want := []int{30000, 30016, 40000, 41000, 41007, 41200, 48000, 48010, 57000, 57050, 57100, 57150, 57200, 57250, 57300, 57350}
 		if len(got) != len(want) {
 			t.Fatalf("after 3 ticks: recorded blocks %v, want one round %v", got, want)
 		}
@@ -310,7 +310,7 @@ func TestPollerIdentityBlockOptional(t *testing.T) {
 		<-done
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		want := []int{30016, 40000, 41000, 41007, 41200, 48000, 48010, 57000, 57050, 57100}
+		want := []int{30016, 40000, 41000, 41007, 41200, 48000, 48010, 57000, 57050, 57100, 57150, 57200, 57250, 57300, 57350}
 		if got := settingsRegs(f.regs); len(got) != len(want) {
 			t.Fatalf("recorded blocks %v, want one round without 30000: %v", got, want)
 		}
@@ -322,6 +322,45 @@ func TestPollerIdentityBlockOptional(t *testing.T) {
 		}
 		if n30000 != 1 {
 			t.Fatalf("30000 read %d times in 3 ticks, want 1 (no per-tick retry)", n30000)
+		}
+	})
+}
+
+// TestPollerGroupParamsOptional (2026-11-20): the parameter blocks of
+// schedule groups 6–8 (57250…57350, extrapolated from groups 1–5 —
+// profile §5) are read with each round, but a refusal of one does not
+// fail the round: the settings it holds are still read, and the block
+// is not retried every tick — it is tried again with the next round.
+func TestPollerGroupParamsOptional(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := &fakePollDeps{ready: true, failAddr: 57250}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() { f.poller().run(ctx); close(done) }()
+		time.Sleep(3*pollEvery + pollEvery/2)
+		synctest.Wait()
+		cancel()
+		<-done
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		want := []int{30000, 30016, 40000, 41000, 41007, 41200, 48000, 48010, 57000, 57050, 57100, 57150, 57200, 57300, 57350}
+		got := settingsRegs(f.regs)
+		if len(got) != len(want) {
+			t.Fatalf("recorded blocks %v, want one round without 57250: %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("blocks %v, want %v", got, want)
+			}
+		}
+		n := 0
+		for _, a := range f.reads {
+			if a == 57250 {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Fatalf("57250 read %d times in 3 ticks, want 1 (no per-tick retry)", n)
 		}
 	})
 }

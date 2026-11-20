@@ -2391,7 +2391,8 @@ components:
           readOnly: true
           description: >-
             GET only: the group's grid import limit, W, from its parameter
-            block (57000 + 50·(index−1); groups 1–3 are read). 99999 / 100000
+            block (57000 + 50·(index−1); all eight are read, groups 6–8 at
+            addresses extrapolated from groups 1–5). 99999 / 100000
             is the app's "no limit". Absent until read. PUT /schedule keeps it.
         export_limit_w:
           type: integer

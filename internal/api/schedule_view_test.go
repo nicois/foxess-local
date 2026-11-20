@@ -43,6 +43,7 @@ func TestScheduleView(t *testing.T) {
 	h.st.RecordRegisters(testBase, 48010, cloudSchedule)
 	h.st.RecordRegisters(testBase, 57000, groupParams(35000, 100000, 20000))
 	h.st.RecordRegisters(testBase, 57050, groupParams(100000, 10000, 0))
+	h.st.RecordRegisters(testBase, 57350, groupParams(12000, 5000, 20000))
 	rec := h.do(t, httpGet, "/api/v1/state", RoleReadOnly, nil)
 	var st struct {
 		Schedule struct {
@@ -59,6 +60,7 @@ func TestScheduleView(t *testing.T) {
 	checkDefaults(t, g)
 	checkAfterCutoff(t, g)
 	checkGroupParams(t, g)
+	checkLastGroupParams(t, g)
 }
 
 // viewGroup is the read-only part of a /state schedule group.
@@ -103,5 +105,14 @@ func checkGroupParams(t *testing.T, g []viewGroup) {
 	}
 	if g[2].ImportLimitW != nil || g[3].PV != nil {
 		t.Errorf("no block read: %+v %+v", g[2], g[3])
+	}
+}
+
+// checkLastGroupParams: group 8's block, the last at 57000 + 50·7
+// (2026-11-20: the poll reads groups 4–8 too).
+func checkLastGroupParams(t *testing.T, g []viewGroup) {
+	t.Helper()
+	if g[7].ImportLimitW == nil || *g[7].ImportLimitW != 12000 || *g[7].ExportLimitW != 5000 || g[7].PV == nil || !*g[7].PV {
+		t.Errorf("group 8 params: %+v", g[7])
 	}
 }
