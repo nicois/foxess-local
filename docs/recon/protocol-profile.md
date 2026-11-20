@@ -314,6 +314,14 @@ Resolved 2026-11-16: the **9 module records** are the 9 modules of the Fox ESS E
 Inverter echoes read responses with device `91 <same tail>` (request
 device[0] \| 0x80). Poll blocks: **holding 48000/48010, input 10110**.
 
+**The device lead is the request type** (2026-11-20): a read leads
+`0x11` (answered `0x91`), a write — fn06 or fn10 — leads `0x12`
+(echoed `0x92`, same tail). Across 30 days of the real cloud's traffic
+(rainbow, 11-16→11-19 plus the 11-18 mirrored session) every read (464)
+led `0x11` and every write (29 fn06, 91 fn10) led `0x12`. **The KH10
+silently ignores a write led `0x11`** — no echo, no exception (foxess-local
+before v0.3.0-rc.4: an EPS-mode write to 41015, 2026-11-19 23:53Z).
+
 2026-11-05 additions (session `1793779365405-2`, s2c 4 861 B): same poll loop (`01 03 bb80 000a`, `01 03 bb8a 0050`, `01 04 277e 001c`) plus two new classes:
 - **RTC write**: `01 10 9c40 0006 0c <yy><mo><d><h><mi><s>` — fn-`0x10` write-multiple of 6 u16 registers at **0x9C40 (40000)** = year/mon/day/h/m/s; observed `07ea 000b 0004 0015 0023 000c` (2026-11-04 21:35:12) and `07ea 000b 0005 0004 000f 000d` (2026-11-05 04:15:13), each echoed by the inverter (`01 10 9c40 0006`; also 2026-11-06 00:00:13 and 06:40:13). The cloud sets the inverter's clock to the plant's **local wall time** — the inverter keeps no time zone; the zone (and daylight saving) is the cloud's plant setting. **Corrected 2026-11-19**: an earlier note here read the values as "not true local time"; the eight writes the cloud sent after the cutover (dropped in `telemetry_only`, every ~6.5 h, 2026-11-16…19) each equal the plant's local time (UTC+11) at their arrival. With the cloud's writes blocked, foxess-local keeps the clock itself (`gateway.KindClock`, the same write; `internal/siteclock`, D-027).
 - **57 B serial query**: `7f7f 17 <tail>` func `0x10`, payload `"60KB10EXAMPLE01"` + zeros + `5a 00 05 00 05 00` — per-inverter status query every ~3–4 s.

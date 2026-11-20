@@ -107,6 +107,8 @@ var (
 	devRegB = [4]byte{0x2c, 0, 0x7b, 0xce}
 	devRegC = [4]byte{0x2b, 0, 0x7b, 0xd3}
 	devS2C  = [4]byte{0x11, 0xaa, 0xbb, 0xcc}
+	// a write leads 0x12 (echoed 0x92; profile §5).
+	devS2CWrite = [4]byte{0x12, 0xaa, 0xbb, 0xcc}
 	// the inverter echoes the request's device tail in its answer (11-05
 	// write echoes and 11-15 read answers, every frame).
 	devEcho = [4]byte{0x92, 0xaa, 0xbb, 0xcc}

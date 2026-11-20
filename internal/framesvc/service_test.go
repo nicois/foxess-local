@@ -265,7 +265,7 @@ func TestOffModeLocalCommand(t *testing.T) {
 		r.endFlow(t, fl, upCloudEnd, 0)
 	})
 	require.True(t, done)
-	require.Equal(t, [4]byte{0x11, frame.SessionDev1, 0xeb, 0x66}, devTail,
+	require.Equal(t, [4]byte{0x12, frame.SessionDev1, 0xeb, 0x66}, devTail,
 		"device must carry the inverter's own session tail")
 	require.Equal(t, byte(0x10), fn, "envelope fn: the gateway's default (no upstream s2c to observe)")
 	require.Equal(t, pduWriteWM, payload)
@@ -383,7 +383,7 @@ func TestGatewayCommandAtTPlus3(t *testing.T) {
 		require.Equal(t, keepaliveFrame(t), fl.upBytes)
 	})
 	require.True(t, ackDone)
-	require.Equal(t, devS2C, devTail, "device tail must be the session's")
+	require.Equal(t, devS2CWrite, devTail, "a write's lead, with the session's device tail")
 	require.Equal(t, byte(envFnS2C), fn, "envelope fn must be the session's")
 	require.Equal(t, pduWriteWM, payload)
 
@@ -649,7 +649,7 @@ func s2cFn10(t *testing.T, addr, cnt int, vals []uint16) []byte {
 		p[7+2*i] = byte(vals[i] >> 8)
 		p[8+2*i] = byte(vals[i] & 0xff)
 	}
-	return mkFrame(t, startS2C, devS2C, envFnS2C, p)
+	return mkFrame(t, startS2C, devS2CWrite, envFnS2C, p)
 }
 
 // Scenario: TCP coalescing — a schedule push whose 13 read responses

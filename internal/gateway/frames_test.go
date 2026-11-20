@@ -10,7 +10,7 @@ import (
 
 // ---------- shared test helpers ----------
 
-var invDev = [4]byte{0x91, 0, 0, 0} // inverter-originated device lead (request dev0 0x11 | 0x80)
+var invDev = [4]byte{0x91, 0, 0, 0} // inverter-originated device lead (a read answer: 0x11 | 0x80; a write echo is 0x92)
 
 func hex(b []byte) string { return fmt.Sprintf("%x", b) }
 
@@ -156,8 +156,8 @@ func TestFrameWorkModeByteExact(t *testing.T) {
 	clk := &vclock{now: fixedNow()}
 	gw, _ := newTestGW(t, clk)
 	for mode, want := range map[int]string{
-		0: "7f7f110000001000060106a0280000bfe3f7f7",
-		1: "7f7f110000001000060106a02800017e23f7f7",
+		0: "7f7f120000001000060106a0280000ba20f7f7",
+		1: "7f7f120000001000060106a02800017be0f7f7",
 	} {
 		frs, err := gw.BuildFrames(Command{Kind: KindWorkMode, Params: map[Param]int{pMode: mode}}, nil, 0x10)
 		if err != nil {
@@ -180,10 +180,10 @@ func TestFrameMeterCompensationByteExact(t *testing.T) {
 	clk := &vclock{now: fixedNow()}
 	gw, _ := newTestGW(t, clk)
 	for val, want := range map[int]string{
-		-51:  "7f7f110000001000060106a045ffcdae5bf7f7", // the §5 capture op (0xFFCD)
-		500:  "7f7f110000001000060106a04501f42e29f7f7",
-		-500: "7f7f110000001000060106a045fe0c6e5bf7f7", // 0xFE0C two's complement
-		0:    "7f7f110000001000060106a04500002e3ef7f7",
+		-51:  "7f7f120000001000060106a045ffcdab98f7f7", // the §5 capture op (0xFFCD)
+		500:  "7f7f120000001000060106a04501f42beaf7f7",
+		-500: "7f7f120000001000060106a045fe0c6b98f7f7", // 0xFE0C two's complement
+		0:    "7f7f120000001000060106a04500002bfdf7f7",
 	} {
 		frs, err := gw.BuildFrames(Command{Kind: KindMeterCompensation, Params: map[Param]int{pValue: val}}, nil, 0x10)
 		if err != nil {
@@ -544,10 +544,37 @@ func TestEnvelopeFnParameterization(t *testing.T) {
 	// byte-exact 0x10 vs 0xc7 for the §5 compensation op
 	frs10, _ := gw.BuildFrames(Command{Kind: KindMeterCompensation, Params: map[Param]int{pValue: -51}}, nil, 0x10)
 	frsC7, _ := gw.BuildFrames(Command{Kind: KindMeterCompensation, Params: map[Param]int{pValue: -51}}, nil, 0xc7)
-	if got := hex(frs10[0].Raw); got != "7f7f110000001000060106a045ffcdae5bf7f7" {
+	if got := hex(frs10[0].Raw); got != "7f7f120000001000060106a045ffcdab98f7f7" {
 		t.Errorf("0x10 comp frame = %s", got)
 	}
-	if got := hex(frsC7[0].Raw); got != "7f7f11000000c700060106a045ffcd15aef7f7" {
+	if got := hex(frsC7[0].Raw); got != "7f7f12000000c700060106a045ffcd106df7f7" {
 		t.Errorf("0xc7 comp frame = %s", got)
+	}
+}
+
+// TestDeviceLeadByFunction (profile §5, 2026-11-20): the envelope's first
+// device byte is the request type — 0x11 for a read (the inverter answers
+// 0x91), 0x12 for a write (it echoes 0x92). Across 30 days of the real
+// cloud's traffic every read (464) led 0x11 and every write (29 fn06, 91
+// fn10) led 0x12; a write led 0x11 was silently ignored by the KH10
+// (2026-11-19, 41015).
+func TestDeviceLeadByFunction(t *testing.T) {
+	cases := map[string]struct {
+		pdu  []byte
+		lead byte
+	}{
+		"fn03 read":  {fn03PDU(41015, 1), 0x11},
+		"fn04 read":  {readPDU(0x04, 10016, 3), 0x11},
+		"fn06 write": {fn06PDU(41015, 2), 0x12},
+		"fn10 write": {fn10PDU(40000, []uint16{2026, 11, 20, 10, 0, 0}), 0x12},
+	}
+	for name, c := range cases {
+		f := modbusFrame(0x10, c.pdu)
+		if f.Device[0] != c.lead || f.Raw[2] != c.lead {
+			t.Errorf("%s: device lead %#02x (raw %#02x), want %#02x", name, f.Device[0], f.Raw[2], c.lead)
+		}
+		if crc := frame.CRC16(f.Raw[2 : 9+len(c.pdu)]); binary.LittleEndian.Uint16(f.Raw[9+len(c.pdu):]) != crc {
+			t.Errorf("%s: CRC not over the lead", name)
+		}
 	}
 }

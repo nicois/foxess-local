@@ -437,7 +437,7 @@ func TestFlowAppearanceSubmitsQueued(t *testing.T) {
 	if calls[0].connID != "c1" {
 		t.Errorf("connID = %q, want c1", calls[0].connID)
 	}
-	want := "7f7f110000001000060106a02800017e23f7f7"
+	want := "7f7f120000001000060106a02800017be0f7f7"
 	if hex(calls[0].raw) != want {
 		t.Errorf("frame = %s, want %s", hex(calls[0].raw), want)
 	}

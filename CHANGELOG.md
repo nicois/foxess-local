@@ -52,6 +52,11 @@ version; anything else bumps the patch version.
   never warned, or warned early from a single step.
 - History charts: a legend entry's line sample no longer wraps away from
   its name on narrow screens.
+- Settings written from foxess-local reach the inverter. Every write
+  (work mode, limits, the schedule, the backup-port mode, the clock) was
+  sent with the frame header of a read, and the inverter ignored it
+  without an answer, so the change was reported as unconfirmed. Writes
+  now carry the header the FoxESS cloud uses.
 - Control → Backup (EPS) port: choosing the other mode works. Clicking a
   mode asked to switch to the current one, and confirming did nothing.
 

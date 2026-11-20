@@ -81,12 +81,25 @@ const (
 	fnUnit = 0x01 // Modbus unit id in every PDU
 )
 
-// s2cDevice is the device field of built s2c frames. 0x11 is the s2c Modbus
-// lead observed in the captures (the inverter answers with dev0|0x80 = 0x91,
-// same tail — profile §5). Bytes [1:4] vary per frame in the real cloud's
-// traffic; the hook (task 6) substitutes the session tail before injection
-// and recomputes the CRC (frame.CRC16 over raw[2:9+plen]).
-var s2cDevice = [4]byte{0x11, 0, 0, 0}
+// The device field of built s2c frames: its first byte is the request
+// type — readLead for a read (the inverter answers with lead|0x80, 0x91),
+// writeLead for a write (echoed 0x92). Every read in the real cloud's
+// traffic leads 0x11 and every write 0x12; the KH10 ignores a write led
+// 0x11 (profile §5, 2026-11-20). Bytes [1:4] vary per frame in the
+// cloud's traffic; the hook substitutes the session tail before
+// injection and recomputes the CRC (frame.CRC16 over raw[2:9+plen]).
+const (
+	readLead  = 0x11
+	writeLead = 0x12
+)
+
+// s2cDevice is the device field for a request PDU (by its function).
+func s2cDevice(pdu []byte) [4]byte {
+	if len(pdu) > pduFnOff && (pdu[pduFnOff] == fnWriteOne || pdu[pduFnOff] == fnWriteMulti) {
+		return [4]byte{writeLead, 0, 0, 0}
+	}
+	return [4]byte{readLead, 0, 0, 0}
+}
 
 // byteMask / byteShift split a 16-bit value into wire bytes (gosec G115).
 const (
@@ -394,9 +407,10 @@ func curMap(cur []RegisterValue) map[uint16]uint16 {
 // (13+plen B: start 7f7f, device, fn, plen BE, payload, CRC16 LE over
 // [2:9+plen], terminator f7f7 — profile §3/§5).
 func modbusFrame(envFn byte, pdu []byte) frame.Frame {
+	dev := s2cDevice(pdu)
 	raw := make([]byte, 0, frameOverhead+len(pdu))
 	raw = append(raw, frameStart, frameStart)
-	raw = append(raw, s2cDevice[:]...)
+	raw = append(raw, dev[:]...)
 	//nolint:gosec // G115: payload length is bounded by the schedule block set.
 	raw = append(raw, envFn, byte(len(pdu)>>byteShift), byte(len(pdu)&byteMask))
 	raw = append(raw, pdu...)
@@ -405,7 +419,7 @@ func modbusFrame(envFn byte, pdu []byte) frame.Frame {
 	raw = append(raw, frameTerm, frameTerm)
 	return frame.Frame{
 		Raw:     raw,
-		Device:  s2cDevice,
+		Device:  dev,
 		Fn:      envFn,
 		Payload: raw[9 : 9+len(pdu)],
 	}
