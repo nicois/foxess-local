@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"math"
 	"path/filepath"
 	"testing"
 	"time"
@@ -32,7 +33,7 @@ func TestSocWatchPublishes(t *testing.T) {
 	sub := h.bus.Subscribe()
 	defer sub.Close()
 	now := time.Date(2026, 11, 19, 1, 0, 0, 0, time.UTC)
-	h.observeSoc(19, 0, now) // below the default 20 %
+	h.observeSoc(19, 0, 0, now) // below the default 20 %
 	select {
 	case ev := <-sub.Events():
 		se, ok := ev.Data.(api.SystemEvent)
@@ -72,7 +73,7 @@ func TestSocWatchEstimate(t *testing.T) {
 	h := newHandle(41930)
 	var est *float64
 	for i := range 121 { // 10 min at 500 W discharging: −0.199 %
-		est = h.observeSoc(42, -500, now.Add(time.Duration(i)*5*time.Second))
+		est = h.observeSoc(42, -500, 0, now.Add(time.Duration(i)*5*time.Second))
 	}
 	if est == nil || *est != 41.8 {
 		t.Fatalf("estimate %v, want 41.80", est)
@@ -80,7 +81,7 @@ func TestSocWatchEstimate(t *testing.T) {
 	if r, ok := h.soc.est.Latest(); !ok || r.Raw != 42 {
 		t.Fatalf("Latest %+v %v", r, ok)
 	}
-	if est := newHandle(0).observeSoc(42, -500, now); est != nil {
+	if est := newHandle(0).observeSoc(42, -500, 0, now); est != nil {
 		t.Fatalf("no capacity: %v", *est)
 	}
 }
@@ -116,7 +117,7 @@ func TestSocLearnedPersists(t *testing.T) {
 		case 721:
 			raw = 40
 		}
-		h.observeSoc(raw, -419, now.Add(time.Duration(i)*5*time.Second))
+		h.observeSoc(raw, -419, 0, now.Add(time.Duration(i)*5*time.Second))
 	}
 	h.soc.saves.Wait()
 	v, ok, err := st.Setting(socLearnedKey)
@@ -158,5 +159,59 @@ func TestSocWatchAnchorAndStore(t *testing.T) {
 	raw, err := st.HistoryRaw(now, now.Add(time.Minute))
 	if err != nil || len(raw) != 1 || !raw[0].SocEst.Valid || raw[0].SocEst.Int64 != 6690 {
 		t.Fatalf("stored %+v %v", raw, err)
+	}
+}
+
+// TestSocWatchForceDischarge (owner, 2026-11-20): the forecast takes the
+// running force discharge into account — a fast forced fall that ends
+// well above the alert level, with only the house's own load after it,
+// does not warn; the same fall outside a session does.
+func TestSocWatchForceDischarge(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if got := forcedFall(t, st, false); len(got) != 1 || got[0].Type != socalert.KindForecastLow {
+		t.Fatalf("no session: %+v", got)
+	}
+	if got := forcedFall(t, st, true); len(got) != 0 {
+		t.Fatalf("in a force discharge ending at 55 %%: %+v", got)
+	}
+}
+
+// forcedFall feeds 30 min of a 3 kW discharge from 70 % (30 %/h on
+// 10 kWh; the house uses 300 W) — in a force discharge ending after
+// 30 min with a 20 % cut-off, or not — and returns the system events.
+func forcedFall(t *testing.T, st *store.Store, forced bool) []api.SystemEvent {
+	t.Helper()
+	set, _, err := buildSettings(st, &config.Config{Battery: config.Battery{CapacityWh: 10000}}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &handle{bus: api.NewBus(), set: set}
+	start := time.Date(2026, 11, 20, 7, 0, 0, 0, time.UTC)
+	cur := start // the reading being fed
+	if forced {
+		fd := func() (time.Duration, int, bool) { return start.Add(30 * time.Minute).Sub(cur), 20, true }
+		h.soc.fd.Store(&fd)
+	}
+	sub := h.bus.Subscribe()
+	defer sub.Close()
+	for i := range 30 * 12 {
+		cur = start.Add(time.Duration(i) * 5 * time.Second)
+		raw := byte(math.Round(70 - 30*cur.Sub(start).Hours()))
+		h.observeSoc(raw, -3000, -300, cur)
+	}
+	var got []api.SystemEvent
+	for {
+		select {
+		case ev := <-sub.Events():
+			if se, ok := ev.Data.(api.SystemEvent); ok {
+				got = append(got, se)
+			}
+		default:
+			return got
+		}
 	}
 }

@@ -20,6 +20,16 @@ version; anything else bumps the patch version.
 
 ## [Unreleased]
 
+### Fixed
+
+- The low-battery forecast no longer warns about a scheduled force
+  discharge as if it ran on forever. During one, it takes the measured
+  discharge rate until the discharge is expected to end — the window's
+  end or its cut-off SoC, whichever comes first — and the house's recent
+  usage (its load less solar) from there. It has a forecast within a
+  minute of a session starting. After a session, its readings are left
+  out of the forecast.
+
 ## [v0.3.0] - 2026-11-20
 
 ### Added

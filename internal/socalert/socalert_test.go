@@ -19,7 +19,7 @@ func feed(w *Watch, p Params, d time.Duration, soc func(h float64) float64) []Al
 	var out []Alert
 	for at := time.Duration(0); at <= d; at += 5 * time.Second {
 		est := soc(at.Hours())
-		out = append(out, w.Observe(t0.Add(at), int(math.Round(est)), est, p)...)
+		out = append(out, w.Observe(t0.Add(at), int(math.Round(est)), est, p, Session{})...)
 	}
 	return out
 }
@@ -104,7 +104,7 @@ func TestLowAndRearm(t *testing.T) {
 	p := params
 	var got []Alert
 	for i, soc := range []int{22, 21, 20, 19, 20, 21, 24, 25, 26, 20} {
-		got = append(got, w.Observe(t0.Add(time.Duration(i)*time.Minute), soc, float64(soc), p)...)
+		got = append(got, w.Observe(t0.Add(time.Duration(i)*time.Minute), soc, float64(soc), p, Session{})...)
 	}
 	if len(got) != 2 || got[0].Kind != KindLow || got[1].Kind != KindLow {
 		t.Fatalf("alerts %+v", got)
@@ -146,7 +146,7 @@ func TestOffAndClockJump(t *testing.T) {
 	}
 	var w2 Watch
 	feed(&w2, params, 20*time.Minute, func(h float64) float64 { return 60 - 15*h })
-	w2.Observe(t0.Add(-time.Hour), 55, 55, params)
+	w2.Observe(t0.Add(-time.Hour), 55, 55, params, Session{})
 	if n := len(w2.samples); n != 1 {
 		t.Fatalf("after a backward jump %d samples, want 1", n)
 	}
@@ -163,5 +163,82 @@ func TestTQuantile(t *testing.T) {
 		if got := tQuantile(c.p, c.df); math.Abs(got-c.want) > 0.01 {
 			t.Errorf("t(%v, %d) = %.3f, want %.3f", c.p, c.df, got, c.want)
 		}
+	}
+}
+
+// feedSession is feed with a force-discharge session given per hour.
+func feedSession(w *Watch, p Params, d time.Duration, soc func(h float64) float64, sess func(h float64) Session) []Alert {
+	var out []Alert
+	for at := time.Duration(0); at <= d; at += 5 * time.Second {
+		est := soc(at.Hours())
+		out = append(out, w.Observe(t0.Add(at), int(math.Round(est)), est, p, sess(at.Hours()))...)
+	}
+	return out
+}
+
+// sessionUntil is a force discharge ending at hour end, with cut-off
+// cut %, the battery falling forced %/h in it and the house using house
+// %/h (+ = surplus) throughout; after it the battery follows the house.
+func sessionUntil(end, cut, forced, house float64) func(h float64) Session {
+	return func(h float64) Session {
+		if h >= end {
+			return Session{RatesKnown: true, BattRate: house, HouseRate: house}
+		}
+		return Session{
+			Forced: true, Left: time.Duration((end - h) * float64(time.Hour)), CutoffPct: cut,
+			RatesKnown: true, BattRate: forced, HouseRate: house,
+		}
+	}
+}
+
+// TestForecastForceDischargeEnds (owner, 2026-11-20): a force discharge
+// falls fast, but it ends: past its expected end the battery falls only
+// at the house's own usage, so a session that ends well above the alert
+// level does not warn — during it, or after, while the window still
+// holds its readings.
+func TestForecastForceDischargeEnds(t *testing.T) {
+	var w Watch
+	// 70 % falling 20 %/h until 1 h (50 %), then 1 %/h
+	soc := func(h float64) float64 {
+		if h < 1 {
+			return 70 - 20*h
+		}
+		return 50 - (h - 1)
+	}
+	if got := feedSession(&w, params, 2*time.Hour, soc, sessionUntil(1, 10, -20, -1)); len(got) != 0 {
+		t.Fatalf("alerts %+v", got)
+	}
+}
+
+// TestForecastForceDischargeCutoff: the inverter stops forcing at the
+// window's cut-off SoC, so a cut-off above the alert level holds the
+// forecast there.
+func TestForecastForceDischargeCutoff(t *testing.T) {
+	var w Watch
+	p := params
+	p.Threshold = 40
+	// 70 % falling 30 %/h for 40 min (to the cut-off, 50 %); the window
+	// runs 3 h
+	if got := feedSession(&w, p, 40*time.Minute, func(h float64) float64 { return 70 - 30*h }, sessionUntil(3, 50, -30, 0)); len(got) != 0 {
+		t.Fatalf("alerts %+v", got)
+	}
+}
+
+// TestForecastForceDischargeAlerts: a session that will itself take the
+// battery to the alert level warns within its first minute (the measured
+// rate needs no line), naming the session; one that ends just above the
+// level warns when the house's own usage carries on down.
+func TestForecastForceDischargeAlerts(t *testing.T) {
+	var w Watch
+	// 60 % falling 20 %/h, the window runs 3 h, cut-off 10 %: 20 % at 2 h
+	got := feedSession(&w, params, time.Minute, func(h float64) float64 { return 60 - 20*h }, sessionUntil(3, 10, -20, -1))
+	if len(got) != 1 || got[0].Kind != KindForecastLow || !strings.Contains(got[0].Detail, "force discharging at 20 %/h") {
+		t.Fatalf("in-session: alerts %+v", got)
+	}
+	var w2 Watch
+	// 50 % falling 20 %/h until 1 h (30 %), then the house uses 15 %/h
+	got = feedSession(&w2, params, 55*time.Minute, func(h float64) float64 { return 50 - 20*h }, sessionUntil(1, 10, -20, -15))
+	if len(got) != 1 || got[0].Kind != KindForecastLow || !strings.Contains(got[0].Detail, "then the house uses 15 %/h") {
+		t.Fatalf("after the session: alerts %+v", got)
 	}
 }

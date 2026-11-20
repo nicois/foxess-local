@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"foxesslocal/internal/api"
@@ -26,6 +27,11 @@ type socWatch struct {
 	saved  socest.Learned
 	saves  sync.WaitGroup
 	saveMu sync.Mutex
+	// fd reports the force discharge running now (api.Server's
+	// ForceDischargeNow, set once the API is built): during one the
+	// forecast runs the measured fall until the discharge is expected to
+	// end, then the house's usage (owner, 2026-11-20).
+	fd atomic.Pointer[func() (time.Duration, int, bool)]
 }
 
 // socLearnedKey is the store key holding the learnt energy per percent
@@ -70,15 +76,19 @@ func (h *handle) saveSocLearned() {
 // SoC estimate moves, is stored on the row for the history (0.01 %), and
 // is returned rounded as the API carries it (nil without a capacity).
 func (h *handle) socSample(connID string, ts time.Time, t frame.Tele) *float64 {
-	est := h.observeSoc(t.Soc, t.Batt, ts)
+	est := h.observeSoc(t.Soc, t.Batt, t.Sol-t.Haus, ts)
 	if est != nil && h.st != nil && connID != "" {
 		h.st.RecordSocEstimate(connID, ts, int(math.Round(*est*centiPerPct)))
 	}
 	return est
 }
 
-// centiPerPct: the stored estimate is in 0.01 %.
-const centiPerPct = 100
+// centiPerPct: the stored estimate is in 0.01 %; pctPerUnit turns a
+// fraction of the capacity (per hour) into % (per hour).
+const (
+	centiPerPct = 100
+	pctPerUnit  = 100
+)
 
 // anchorSoc takes the BMS's SoC (0.1 %) from a snapshot: the estimate
 // continues from it (D-028).
@@ -86,19 +96,32 @@ func (h *handle) anchorSoc(at time.Time, deciPct int) {
 	h.soc.est.Anchor(at, deciPct)
 }
 
-// observeSoc takes one live reading (the SoC and the battery power, W,
-// + = charging) with the current settings (a change applies at the next
+// observeSoc takes one live reading (the SoC, the battery power and
+// the solar less the house load — what the battery would carry without
+// a forced export — W, + = charging) with the current settings (a change applies at the next
 // reading), publishes the alerts it triggers and returns the estimate,
 // rounded as the API carries it (nil while the capacity is not set).
-func (h *handle) observeSoc(soc byte, battW int32, now time.Time) *float64 {
+func (h *handle) observeSoc(soc byte, battW, selfW int32, now time.Time) *float64 {
 	if h.set == nil {
 		return nil
 	}
 	v := h.set.Get()
 	est := h.soc.est.Observe(now, int(soc), int(battW), v.CapacityWh)
 	p := socalert.Params{Threshold: v.SocThresholdPct, Horizon: v.SocHorizon, Window: v.SocWindow, P: v.SocPValue}
+	var sess socalert.Session
+	if fd := h.soc.fd.Load(); fd != nil {
+		if left, cut, ok := (*fd)(); ok {
+			sess = socalert.Session{Forced: true, Left: left, CutoffPct: float64(cut)}
+		}
+	}
+	if v.CapacityWh > 0 { // the measured rates, %/h
+		capPct := float64(v.CapacityWh) / pctPerUnit
+		sess.RatesKnown = true
+		sess.BattRate = float64(battW) / capPct
+		sess.HouseRate = float64(selfW) / capPct
+	}
 	h.soc.mu.Lock()
-	alerts := h.soc.w.Observe(now, int(soc), est, p)
+	alerts := h.soc.w.Observe(now, int(soc), est, p, sess)
 	l := h.soc.est.Learned()
 	changed := l != h.soc.saved && h.st != nil
 	if changed {

@@ -82,3 +82,28 @@ func TestStateInverterLimits(t *testing.T) {
 		t.Fatalf("eps_mode %q active %+v", st.EpsMode, st.ActiveMode)
 	}
 }
+
+// TestForceDischargeAt (owner, 2026-11-20): the battery forecast needs
+// the force discharge running now — the time left in its window and its
+// cut-off SoC — and nothing outside one.
+func TestForceDischargeAt(t *testing.T) {
+	sched := Schedule{Enabled: true, Groups: []ScheduleGroup{
+		{Index: 1, Enabled: true, Start: "11:02", End: "13:58", WorkMode: workModeForceCharge, FdSocPct: 80},
+		{Index: 2, Enabled: true, Start: "17:50", End: "19:45", WorkMode: workModeForceDischarge, FdSocPct: 50},
+		{Index: 3, Enabled: true, Start: hhmmZero, End: hhmmDayEnd, WorkMode: workModeSelfUse},
+	}}
+	at := func(h, m, s int) time.Time { return time.Date(2026, 11, 20, h, m, s, 0, time.UTC) }
+	left, cut, ok := forceDischargeAt(sched, at(18, 30, 30))
+	if !ok || left != time.Hour+14*time.Minute+30*time.Second || cut != 50 {
+		t.Fatalf("18:30:30: left %v cut-off %d ok %v, want 1h14m30s 50 true", left, cut, ok)
+	}
+	for _, tm := range []time.Time{at(19, 45, 0), at(12, 0, 0), at(9, 0, 0)} {
+		if _, _, ok := forceDischargeAt(sched, tm); ok {
+			t.Errorf("%s: a force discharge reported", tm.Format("15:04"))
+		}
+	}
+	sched.Enabled = false
+	if _, _, ok := forceDischargeAt(sched, at(18, 30, 0)); ok {
+		t.Error("scheduler off: a force discharge reported")
+	}
+}

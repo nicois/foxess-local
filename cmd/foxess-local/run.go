@@ -487,6 +487,9 @@ func (h *handle) buildMux(cfg *config.Config, tok *api.TokenStore) http.Handler 
 	h.notifier = notify.New(h.notifyTargets, h.clk, notify.WithOutbox(storeOutbox{h.st}))
 	apiH := api.New(h.st, h.gw, h.maint, tok, h.fwd, h.bus, h.clk, api.WithInfo(info), api.WithUpdate(h.upd), api.WithScanner(h.scanner), api.WithCaptures(h.capt),
 		api.WithReadyChecks(h.readyChecks), api.WithNotifier(h.notifier), api.WithSocEstimate(&h.soc.est))
+	// the battery forecast follows a force discharge until its expected end
+	fd := apiH.ForceDischargeNow
+	h.soc.fd.Store(&fd)
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/{rest...}", apiH)
 	mux.Handle("/healthz", apiH)

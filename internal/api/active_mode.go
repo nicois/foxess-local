@@ -56,3 +56,34 @@ func minuteOf(s string) int {
 	}
 	return t.Hour()*60 + t.Minute()
 }
+
+// ForceDischargeNow reports the force discharge the inverter is running
+// now, for the battery forecast (owner, 2026-11-20): the time left in its
+// window and its cut-off SoC. ok is false outside one, or while the
+// inverter's wall time or the schedule is unknown.
+func (s *Server) ForceDischargeNow() (left time.Duration, cutoffPct int, ok bool) {
+	st, err := s.st.QueryState()
+	if err != nil {
+		return 0, 0, false
+	}
+	now, known := s.wallNow()
+	if !known {
+		return 0, 0, false
+	}
+	cfg := s.scanConfigRegs(st.SchedTS)
+	return forceDischargeAt(scheduleOf(st.Schedule, cfg.schedOn), now)
+}
+
+// forceDischargeAt is ForceDischargeNow at now (inverter-local time):
+// the running group must be a force discharge; its end minute is
+// exclusive.
+func forceDischargeAt(sched Schedule, now time.Time) (time.Duration, int, bool) {
+	am := activeMode(sched, "", now)
+	if am.Mode != workModeForceDischarge || am.Group < 1 || am.Group > len(sched.Groups) {
+		return 0, 0, false
+	}
+	g := sched.Groups[am.Group-1]
+	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	end := day.Add(time.Duration(minuteOf(g.End)) * time.Minute)
+	return end.Sub(now), g.FdSocPct, true
+}

@@ -386,7 +386,10 @@ needs attention, without the web UI open:
 - foxess-local itself restarting after an unexpected stop (a power cut);
 - the battery at or below its alert level (20 % by default), or forecast
   to get there within two hours (set under System → Notifications →
-  Battery alerts; 0 turns these off);
+  Battery alerts; 0 turns these off). During a scheduled force
+  discharge the forecast takes the measured discharge rate until the
+  discharge is expected to end (the window's end or its cut-off), then
+  the house's recent usage;
 - a failed command or schedule, a write refused by the hourly limit,
   low disk space;
 - the cloud-forwarding mode or a maintenance window changing;
