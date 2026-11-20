@@ -10,12 +10,12 @@ labels: bug
 
 **Setup**
 
-- foxess-local: <!-- More → Settings → Server → Version -->
-- Inverter model and firmware: <!-- More → Device -->
+- foxess-local: <!-- System → Updates -->
+- Inverter model and firmware: <!-- Inverter → About this inverter -->
 - Cloud forwarding: <!-- off / telemetry_only / full -->
 
 **Report file**
 
-<!-- More → Report a problem builds one file with the app's checks, recent
+<!-- System → Help → Report a problem builds one file with the app's checks, recent
 errors and messages (serial numbers replaced). Drag it here to attach it.
 Please do not paste serial numbers, addresses or tokens. -->

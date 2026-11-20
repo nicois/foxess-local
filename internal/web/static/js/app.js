@@ -292,7 +292,7 @@ async function loginSubmit() {
   catch { ok = false; }
   if (!ok) {
     setToken("");
-    errEl.textContent = tr("that token was rejected — create one under More → Settings → Access tokens (installer role)");
+    errEl.textContent = tr("that token was rejected — create one under System → Access (installer role)");
     byId("login-token").select();
   }
 }
@@ -769,7 +769,7 @@ function queueSnapshot(d) {
     S.state.battery = { ...(S.state.battery || {}), soc_pct: s.soc_pct, soc_estimate_pct: s.soc_estimate_pct, state: s.battery_state };
     S.state.as_of = s.ts;
     if (routeName() === "dashboard") paintNow(S.state);
-    if (routeName() === "control") { paintNow(S.state); paintLimits(S.state); }
+    if (routeName() === "inverter") { paintNow(S.state); paintLimits(S.state); }
   });
 }
 
@@ -781,7 +781,7 @@ onSSE("snapshot", queueSnapshot);
 // poll found changed on the inverter itself.
 const ROUTE_SECTIONS = {
   "dashboard": ["work-mode", "limits", "meter-compensation", "identity"],
-  "control": ["work-mode", "limits", "meter-compensation", "identity"],
+  "inverter": ["work-mode", "limits", "meter-compensation", "identity"],
   "schedule": ["schedule", "identity"],
   "device": ["identity"],
 };
@@ -892,7 +892,7 @@ function renderForwardBadge() {
   el.className = "badge";
 }
 
-// refreshUpdateBadge shows a header badge, linked to Settings, while a
+// refreshUpdateBadge shows a header badge, linked to Updates, while a
 // newer eligible version is known (the server's last check: no network).
 async function refreshUpdateBadge(u) {
   if (!u) {
@@ -910,7 +910,7 @@ async function refreshUpdateBadge(u) {
     : tr("update: {v}", { v: u.latest });
   // the short form is for narrow screens; the title keeps the version
   el.innerHTML = `<span class="long">${esc(long)}</span><span class="short">${esc(tr("update ↑"))}</span>`;
-  el.title = long + " — " + tr("A newer version is available: see Settings → Updates.");
+  el.title = long + " — " + tr("A newer version is available: see System → Updates.");
 }
 
 async function refreshMeta() {
@@ -926,36 +926,52 @@ async function refreshMeta() {
 
 // ---------- router ----------
 
+// The pages, by what a visitor comes to do (owner, 2026-11-20): Home
+// (now), Schedule (when), Inverter (its settings and what it is),
+// Activity (what happened) and System (foxess-local itself: a hub).
 const ROUTES = {
   "dashboard": renderDashboard,
   "schedule": renderSchedule,
-  "control": renderControl,
-  "activity": renderAudit,
-  "more": renderMore,
+  "inverter": renderControl,
   "device": renderDevice,
-  "cloud": renderCloud,
-  "messages": renderMessages,
-  "settings": renderSettings,
-  "setup": renderSetup,
-  "report": renderReport,
   "quirks": renderQuirks,
+  "activity": renderAudit,
+  "messages": renderMessages,
+  "system": renderSystem,
+  "cloud": renderCloud,
+  "notifications": renderNotifications,
+  "access": renderAccess,
+  "updates": renderUpdates,
+  "site": renderSite,
+  "storage": renderStorage,
+  "help": renderReport,
+  "setup": renderSetup,
 };
 
 // old links keep working
-const ROUTE_ALIASES = { "audit": "activity", "maintenance": "cloud" };
+const ROUTE_ALIASES = {
+  "audit": "activity", "maintenance": "cloud", "control": "inverter",
+  "more": "system", "settings": "system", "report": "help",
+};
 
 const ROUTE_TITLES = {
-  "dashboard": tr("Home"), "schedule": tr("Schedule"), "control": tr("Control"),
-  "activity": tr("Activity"), "more": tr("More"), "device": tr("Device"),
-  "cloud": tr("Cloud & maintenance"), "messages": tr("Frame messages"), "settings": tr("Settings"),
-  "setup": tr("Setup"), "report": tr("Report a problem"), "quirks": tr("Inverter quirks"),
+  "dashboard": tr("Home"), "schedule": tr("Schedule"), "inverter": tr("Inverter"),
+  "device": tr("About this inverter"), "quirks": tr("Inverter quirks"),
+  "activity": tr("Activity"), "messages": tr("Frame messages"), "system": tr("System"),
+  "cloud": tr("FoxESS cloud"), "notifications": tr("Notifications"), "access": tr("Access"),
+  "updates": tr("Updates"), "site": tr("Site"), "storage": tr("Storage"), "help": tr("Help"),
+  "setup": tr("Setup"),
 };
 
 // FORWARD_NAME: the cloud-forwarding modes' display names.
 const FORWARD_NAME = () => ({ off: tr("off"), telemetry_only: tr("telemetry only"), full: tr("full") });
 
 // the primary nav item each route lives under
-const NAV_OF = { "device": "more", "cloud": "more", "messages": "more", "settings": "more", "setup": "more", "report": "more", "quirks": "more" };
+const NAV_OF = {
+  "device": "inverter", "quirks": "inverter", "messages": "activity",
+  "cloud": "system", "notifications": "system", "access": "system", "updates": "system",
+  "site": "system", "storage": "system", "help": "system", "setup": "system",
+};
 
 function routeName() {
   if (dashOnly()) return "dashboard";
@@ -979,7 +995,7 @@ let renderSeq = 0;
 let renderPending = false;
 
 // AFTER: post-render hooks per route (the charts need the DOM in #view).
-const AFTER = { "device": () => scanPoll(), "dashboard": afterDashboard, "cloud": afterCloud, "schedule": afterSchedule, "control": () => paintNow(S.state) };
+const AFTER = { "device": () => scanPoll(), "dashboard": afterDashboard, "cloud": afterCloud, "schedule": afterSchedule, "inverter": () => paintNow(S.state) };
 
 // afterSchedule positions the timeline blocks (CSSOM, CSP-safe).
 function afterSchedule() {
@@ -1648,7 +1664,7 @@ function flowNode(k, label, area) {
 }
 
 // FLOW_LIMITS: where each inverter limit acts on the diagram (a numbered
-// marker at x,y in the viewBox) — the Control page's legend explains each.
+// marker at x,y in the viewBox) — the Inverter page's legend explains each.
 const FLOW_LIMITS = [
   // each sits on the stretch of its line no node covers at phone width
   { n: 1, x: 300, y: 126, key: "grid" },   // the grid connection (CT)
@@ -1730,7 +1746,7 @@ function paintLimits(st) {
 }
 
 // flowMarkup is the power-flow diagram (the dashboard's, and the
-// Control page's with the limit markers — FLOW_LIMITS).
+// Inverter page's with the limit markers — FLOW_LIMITS).
 function flowMarkup(withLimits) {
   const marks = withLimits
     ? FLOW_LIMITS.map((l) => `<g class="lim-mark"><circle cx="${l.x}" cy="${l.y}" r="10"/><text x="${l.x}" y="${l.y}">${l.n}</text></g>`).join("")
@@ -1859,9 +1875,9 @@ function writeSupport(feature) {
 
 function writeNote(feature) {
   const s = writeSupport(feature);
-  if (s === "unmapped") return `<p class="note warn">${esc(tr("Not available on this inverter model yet — the setting is not mapped. Sharing a diagnostic bundle (More → Settings) helps add it."))}</p>`;
+  if (s === "unmapped") return `<p class="note warn">${esc(tr("Not available on this inverter model yet — the setting is not mapped. Sharing a diagnostic bundle (System → Help) helps add it."))}</p>`;
   if (s === "not_supported") return `<p class="note warn">${esc(tr("This inverter does not support this setting."))}</p>`;
-  if (s === "untested") return `<p class="note warn">${esc(tr("Untested on this inverter model. An installer can enable untested writes under More → Device."))}</p>`;
+  if (s === "untested") return `<p class="note warn">${esc(tr("Untested on this inverter model. An installer can enable untested writes under Inverter → About this inverter."))}</p>`;
   return "";
 }
 
@@ -1919,7 +1935,7 @@ async function renderControl() {
   const allDay = (st.schedule?.enabled ? st.schedule.groups ?? [] : [])
     .find((g) => g.enabled && g.start === "00:00" && hhmmMin(g.end) >= 23 * 60 + 59);
   return `
-  ${pageHead(tr("Control"), esc(tr("Changes are sent to the inverter and confirmed by reading them back.")))}
+  ${pageHead(tr("Inverter"), esc(tr("Changes are sent to the inverter and confirmed by reading them back.")))}
   <section class="stack" aria-label="${esc(tr("controls"))}">
     <article class="panel">
       <h3>${esc(tr("Running now"))}</h3>
@@ -1942,10 +1958,14 @@ async function renderControl() {
     </article>
 
     ${limitsPanel(st)}
+    <ul class="hub">
+      ${hubLink("device", tr("About this inverter"), deviceSummary(st), ICO.device)}
+      ${hubLink("quirks", tr("Inverter quirks"), esc(tr("compensate for known reading quirks")), ICO.quirks)}
+    </ul>
   </section>`;
 }
 
-// ---------- the Control page's limits (markers 1–5) ----------
+// ---------- the Inverter page's limits (markers 1–5) ----------
 
 // the setting endpoints the limits panel writes (paths after API)
 const SETTING_PATHS = ["/current-limits", "/port-limits", "/battery-currents", "/power-limit", "/eps-mode"];
@@ -2200,6 +2220,7 @@ async function renderAudit() {
   }).join("");
   return `
   ${pageHead(tr("Activity"), esc(tr("Every command sent to the inverter and every cloud message allowed or blocked, newest first.")))}
+  ${activityNav("activity")}
   <form id="audit-form" class="filterbar" role="search">
     <div class="chips" role="group" aria-label="${esc(tr("Filter by action"))}">
       ${ACTION_CHIPS.map(([v, l]) => `<button type="submit" name="action" value="${v}" class="chipbtn" aria-pressed="${f.action === v}">${esc(l)}</button>`).join("")}
@@ -2211,29 +2232,78 @@ async function renderAudit() {
   ${S.audit.exhausted ? "" : `<button type="button" class="ghost wide" data-action="audit-more">${esc(tr("Load older"))}</button>`}`;
 }
 
-// ---------- more (hub) ----------
+// ---------- system (hub) ----------
 
-async function renderMore() {
-  if (!(await loadState())) return null;
-  const id = S.state.identity ?? {};
-  const devSub = id.model
-    ? `${esc(id.model)} · fw ${esc(id.firmware?.master ?? "?")} · ${esc(id.verified_profile ? tr("verified") : tr("unverified model"))}`
-    : esc(tr("not identified yet"));
-  const link = (route, title, sub, ico) => `<li><a class="hub-link" href="#/${route}">
+// hub icons (24×24 strokes)
+const ICO = {
+  device: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6"/>',
+  quirks: '<path d="M4 12h3l2-5 3 10 2-5h6"/><circle cx="19" cy="6" r="1.5"/>',
+  cloud: '<path d="M7 18a4 4 0 0 1-.5-8 6 6 0 0 1 11.5 1.5A3.5 3.5 0 0 1 17.5 18z"/>',
+  bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 8-8M16 7l2 2M14 9l2 2"/>',
+  update: '<path d="M12 4v10M8 10l4 4 4-4M5 19h14"/>',
+  site: '<path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>',
+  storage: '<ellipse cx="12" cy="6" rx="7" ry="2.5"/><path d="M5 6v12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17.5v.5"/>',
+  setup: '<path d="M9 5h10M9 12h10M9 19h10"/><path d="m3.5 5 1.2 1.2L7 4M3.5 12l1.2 1.2L7 11"/><circle cx="5" cy="19" r="1.3"/>',
+};
+
+// hubLink is one row of a hub: icon, title, one-line summary, chevron.
+function hubLink(route, title, sub, ico) {
+  return `<li><a class="hub-link" href="#/${route}">
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ico}</svg>
       <span><span class="hub-title">${esc(title)}</span><span class="hub-sub muted small">${sub}</span></span>
       <svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></a></li>`;
+}
+
+// deviceSummary: model · firmware · verified, for a hub row.
+function deviceSummary(st) {
+  const id = st?.identity ?? {};
+  return id.model
+    ? `${esc(id.model)} · fw ${esc(id.firmware?.master ?? "?")} · ${esc(id.verified_profile ? tr("verified") : tr("unverified model"))}`
+    : esc(tr("not identified yet"));
+}
+
+async function renderSystem() {
+  if (!(await loadState())) return null;
+  const cfg = await loadCfg();
   return `
-  ${pageHead(tr("More"))}
+  ${pageHead(tr("System"), esc(tr("foxess-local itself: the cloud, notifications, access, updates and housekeeping.")))}
   <ul class="hub">
-    ${link("device", tr("Device"), devSub, '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6"/>')}
-    ${link("cloud", tr("Cloud & maintenance"), esc(tr("cloud forwarding: {mode}", { mode: FORWARD_NAME()[S.forwardMode?.mode] ?? "—" })), '<path d="M7 18a4 4 0 0 1-.5-8 6 6 0 0 1 11.5 1.5A3.5 3.5 0 0 1 17.5 18z"/>')}
-    ${link("setup", tr("Setup"), esc(tr("checks, battery capacity, cloud and access choices")), '<path d="m5 12 4 4 10-10"/>')}
-    ${link("settings", tr("Settings"), esc(tr("language, access tokens, notifications, tuning, diagnostics")), '<circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>')}
-    ${link("report", tr("Report a problem"), esc(tr("one file for the developers, plus a prefilled issue")), '<path d="M12 3 2 21h20zM12 9v5M12 17.5v.5"/>')}
-    ${link("quirks", tr("Inverter quirks"), esc(tr("compensate for known reading quirks")), '<path d="M4 12h3l2-5 3 10 2-5h6"/><circle cx="19" cy="6" r="1.5"/>')}
-    ${link("messages", tr("Frame messages"), esc(tr("the raw message log (diagnostics; expert)")), '<path d="M4 6h16M4 12h16M4 18h10"/>')}
+    ${hubLink("cloud", tr("FoxESS cloud"), esc(tr("cloud forwarding: {mode}", { mode: FORWARD_NAME()[S.forwardMode?.mode] ?? "—" })), ICO.cloud)}
+    ${hubLink("notifications", tr("Notifications"), esc(tr("where alerts go, and the battery alert level")), ICO.bell)}
+    ${hubLink("access", tr("Access"), esc(tr("tokens, and what visitors without a token can see")), ICO.key)}
+    ${hubLink("updates", tr("Updates"), esc(cfg?.version ?? "—"), ICO.update)}
+    ${hubLink("site", tr("Site"), esc(tr("time zone, inverter clock, language")), ICO.site)}
+    ${hubLink("storage", tr("Storage"), esc(tr("how much history is kept, and how often it is saved")), ICO.storage)}
+    ${hubLink("help", tr("Help"), esc(tr("report a problem, diagnostic bundle, API description")), ICO.help)}
+    ${hubLink("setup", tr("Setup"), esc(tr("checks, battery capacity, cloud and access choices")), ICO.setup)}
   </ul>`;
+}
+
+// loadCfg: GET /config, kept in S.cfg (null when it cannot be read).
+async function loadCfg() {
+  if (S.cfg) return S.cfg;
+  try {
+    const r = await apiFetch("/config");
+    if (r.ok) S.cfg = await r.json();
+  } catch { /* pages show "—" */ }
+  return S.cfg;
+}
+
+// loadSettings: GET /settings (null when it cannot be read).
+async function loadSettings() {
+  try {
+    const r = await apiFetch("/settings");
+    if (r.ok) return await r.json();
+  } catch { /* the panel says it cannot load */ }
+  return null;
+}
+
+// activityNav switches between the change log and the raw messages.
+function activityNav(cur) {
+  const a = (route, label) => `<a href="#/${route}" ${route === cur ? 'aria-current="page"' : ""}>${esc(label)}</a>`;
+  return `<nav class="subnav" aria-label="${esc(tr("Activity"))}">${a("activity", tr("Changes"))}${a("messages", tr("Raw messages"))}</nav>`;
 }
 
 // msgStatus is a message's status chip: what happened to the frame, the
@@ -2390,7 +2460,7 @@ async function renderSetup() {
   </article>
   <article class="panel">
     <h3>4 · ${esc(tr("Cloud forwarding"))}</h3>
-    <p class="muted small">${esc(tr("What reaches the FoxESS cloud and the FoxESS app, and whether they can change anything. The same setting as More → Cloud & maintenance; a maintenance window overrides it for a while."))}</p>
+    <p class="muted small">${esc(tr("What reaches the FoxESS cloud and the FoxESS app, and whether they can change anything. The same setting as System → FoxESS cloud; a maintenance window overrides it for a while."))}</p>
     <div class="radio-list">${FORWARD_CHOICES.map(([m, t, d]) => `
       <label class="radio-row"><input type="radio" name="setup-forward" value="${m}" ${fwd === m ? "checked" : ""}>
         <span><strong>${esc(t)}</strong><span class="desc muted small">${esc(d)}</span></span></label>`).join("")}
@@ -2409,7 +2479,7 @@ async function renderSetup() {
   </article>
   <article class="panel">
     <h3>6 · ${esc(tr("Done"))}</h3>
-    <p class="muted small">${esc(tr("Each section above takes effect as soon as you save it; this changes no setting. Marking setup as done only stops this page opening by itself when an installer signs in — it stays under More → Setup."))}
+    <p class="muted small">${esc(tr("Each section above takes effect as soon as you save it; this changes no setting. Marking setup as done only stops this page opening by itself when an installer signs in — it stays under System → Setup."))}
       ${esc(allOk ? tr("Everything needed is in place.") : tr("Some checks still need attention: you can mark it done now and come back."))}</p>
     ${s.completed ? `<p class="small">${esc(tr("Setup is marked as done."))}</p>`
       : `<button type="button" class="cmd" data-action="setup-finish">${esc(tr("Mark setup as done"))}</button>`}
@@ -2547,7 +2617,7 @@ async function renderDevice() {
     return `<div><dt>${esc(COMPAT_LABEL[k])}</dt><dd><span class="chip ${cls}">${esc(txt)}</span></dd></div>`;
   }).join("");
   return `
-  ${pageHead(tr("Device"))}
+  ${pageHead(tr("About this inverter"))}
   <section class="stack">
     <article class="panel">
       <h3>${esc(tr("Inverter"))}</h3>
@@ -2569,7 +2639,7 @@ async function renderDevice() {
       <p class="muted small">${esc(id.verified_profile
         ? tr("Reads every register that the known maps list for this model, so a developer can check them against the inverter.")
         : tr("This model is not verified yet. A scan reads every register that the community maps list for it — read-only, nothing is changed — so a developer can check which map fits and work towards full support."))}
-        ${esc(tr("It takes about ten seconds; live values keep updating. The result joins your next problem report (More → Report a problem). Installer role."))}</p>
+        ${esc(tr("It takes about ten seconds; live values keep updating. The result joins your next problem report (System → Help). Installer role."))}</p>
       <button type="button" class="cmd" data-action="scan-start">${esc(tr("Scan registers"))}</button>
       <p id="scan-status" class="small" aria-live="polite"></p>
     </article>
@@ -2645,7 +2715,7 @@ async function renderCloud() {
   }
   const caps = await fetchCaptures();
   return `
-  ${pageHead(tr("Cloud & maintenance"), esc(tr("How much of the FoxESS cloud this inverter may talk to.")))}
+  ${pageHead(tr("FoxESS cloud"), esc(tr("How much of the FoxESS cloud this inverter may talk to.")))}
   <section class="stack">
     <article class="panel">
       <h3>${esc(tr("Cloud forwarding"))}</h3>
@@ -2730,6 +2800,7 @@ async function renderMessages() {
   if (first && !(await fetchMessagesPage(null, true))) return null;
   if (S.messages.denied) {
     return `${pageHead(tr("Frame messages"))}
+  ${activityNav("messages")}
   <p class="muted">${esc(tr("The raw message log needs the expert or installer role. Sign in with such a token to see it."))}</p>`;
   }
   const f = S.msgFilters;
@@ -2751,6 +2822,7 @@ async function renderMessages() {
   }).join("");
   return `
   ${pageHead(tr("Frame messages"), esc(tr("The raw message log between the inverter and the cloud channel (diagnostics).")))}
+  ${activityNav("messages")}
   <form class="filterbar" id="messages-form">
     <div class="fields two">
       <label>${esc(tr("Direction"))}<select name="dir">
@@ -2771,23 +2843,15 @@ async function renderMessages() {
 
 // ---------- settings ----------
 
-async function renderSettings() {
-  let cfg = S.cfg;
-  if (!cfg) {
-    const r = await apiFetch("/config");
-    if (r.status === 401) { gate(tr("the token was rejected — sign in again")); return null; }
-    if (r.ok) cfg = await r.json();
-    S.cfg = cfg;
-  }
+// tokensPanel: the access tokens (installer: list, create, revoke).
+async function tokensPanel() {
   let tokens = null;
   let denied = null;
-  {
-    const r = await apiFetch("/config/tokens");
-    if (r.status === 401 && S.token) { gate(tr("the token was rejected — sign in again")); return null; }
-    if (r.ok) tokens = await r.json();
-    else denied = await problemOf(r);
-  }
-  const tokenList = tokens ? `
+  const r = await apiFetch("/config/tokens");
+  if (r.status === 401 && S.token) { gate(tr("the token was rejected — sign in again")); return null; }
+  if (r.ok) tokens = await r.json();
+  else denied = await problemOf(r);
+  const body = tokens ? `
     <ul class="list compact">${(tokens.items ?? []).map((tk) => `
       <li class="item">
         <div class="item-main">
@@ -2812,29 +2876,95 @@ async function renderSettings() {
       ? tr("Token management needs the {need} role (yours: {have}).", { need: denied.required_role, have: denied.token_role })
       : denied?.status === 401 ? tr("Sign in with an installer token to manage tokens.")
       : tr("Cannot load the token list."))}</p>`;
+  return `<article class="panel">
+      <h3>${esc(tr("Access tokens"))}</h3>
+      ${body}
+    </article>`;
+}
+
+// inSetup: a read-only row's pointer to where it is changed.
+const inSetup = () => `<p class="muted small"><a href="#/setup">${esc(tr("Change these in Setup."))}</a></p>`;
+
+async function renderAccess() {
+  const cfg = await loadCfg();
+  const tokens = await tokensPanel();
+  if (tokens === null) return null;
+  return `
+  ${pageHead(tr("Access"))}
+  <section class="stack">
+    <article class="panel">
+      <h3>${esc(tr("Visitors without a token"))}</h3>
+      <dl class="kv">
+        <div><dt>${esc(tr("Read-only access without a token"))}</dt><dd>${esc(cfg?.public_access ? tr("on") : tr("off"))}</dd></div>
+      </dl>
+      ${inSetup()}
+    </article>
+    ${tokens}
+  </section>`;
+}
+
+async function renderNotifications() {
+  const sets = await loadSettings();
+  return `
+  ${pageHead(tr("Notifications"))}
+  <section class="stack">
+    ${notifyPanel(sets)}
+    ${tuningPanel(sets, ALERT_KEYS, tr("Battery alerts"), false)}
+  </section>`;
+}
+
+async function renderUpdates() {
   let upd = null;
   try {
     const r = await apiFetch("/update");
     if (r.ok) upd = await r.json();
-  } catch { /* the panel shows without the update state */ }
+  } catch { /* the page says it cannot load */ }
   if (upd) refreshUpdateBadge(upd);
-  let sets = null;
-  try {
-    const r = await apiFetch("/settings");
-    if (r.ok) sets = await r.json();
-  } catch { /* the panel says it cannot load */ }
   return `
-  ${pageHead(tr("Settings"))}
+  ${pageHead(tr("Updates"))}
   <section class="stack">
-    ${languagePanel()}
-    ${updatesPanel(upd)}
-    ${notifyPanel(sets)}
-    ${tuningPanel(sets)}
+    ${updatesPanel(upd) || `<p class="muted">${esc(tr("Cannot load the update state."))}</p>`}
+  </section>`;
+}
+
+async function renderSite() {
+  const cfg = await loadCfg();
+  return `
+  ${pageHead(tr("Site"))}
+  <section class="stack">
     <article class="panel">
-      <h3>${esc(tr("Access tokens"))}</h3>
-      ${tokenList}
+      <h3>${esc(tr("Time"))}</h3>
+      <dl class="kv">
+        <div><dt>${esc(tr("Site time zone"))}</dt><dd>${cfg ? esc(cfg.site_time_zone ?? tr("not chosen yet (Setup)")) : "—"}</dd></div>
+        <div><dt>${esc(tr("Inverter clock"))}</dt><dd>${clockOffsetText(cfg?.inverter_clock_offset_s, cfg?.site_time_zone)}</dd></div>
+        <div><dt>${esc(tr("This machine's time zone"))}</dt><dd>${cfg ? esc(cfg.time_zone) + " " + utcOffset(cfg.utc_offset_s) : "—"}</dd></div>
+      </dl>
+      ${inSetup()}
     </article>
+    ${languagePanel()}
+  </section>`;
+}
+
+async function renderStorage() {
+  const cfg = await loadCfg();
+  const sets = await loadSettings();
+  return `
+  ${pageHead(tr("Storage"))}
+  <section class="stack">
     <article class="panel">
+      <h3>${esc(tr("History"))}</h3>
+      <dl class="kv">
+        <div><dt>${esc(tr("Detailed history kept"))}</dt><dd>${cfg ? cfg.raw_hours + " h" : "—"}</dd></div>
+        <div><dt>${esc(tr("Hourly history kept"))}</dt><dd>${cfg ? esc(tr("{n} days", { n: cfg.bucket_days })) : "—"}</dd></div>
+      </dl>
+    </article>
+    ${tuningPanel(sets, STORAGE_KEYS, tr("Saving"), true)}
+  </section>`;
+}
+
+// diagnosticsPanel: the de-identified diagnostic bundle (installer).
+function diagnosticsPanel() {
+  return `<article class="panel">
       <h3>${esc(tr("Diagnostics"))}</h3>
       <p class="small">${esc(tr("Download a diagnostic bundle to help support your inverter model: recent messages and register readings, with serial numbers and dates removed. You can inspect it before sharing; nothing is uploaded."))}</p>
       <div class="fields two inline">
@@ -2843,22 +2973,8 @@ async function renderSettings() {
         </select></label>
         <button type="button" class="cmd" data-action="bundle-download">${esc(tr("Download bundle"))}</button>
       </div>
-      <p class="muted small">${esc(tr("Installer role. Reporting a problem? Report a problem (under More) adds your description and the app's checks to the same file."))}</p>
-    </article>
-    <article class="panel">
-      <h3>${esc(tr("Server"))}</h3>
-      <dl class="kv">
-        <div><dt>${esc(tr("Version"))}</dt><dd class="num">${esc(cfg?.version ?? "—")}</dd></div>
-        <div><dt>${esc(tr("Detailed history kept"))}</dt><dd>${cfg ? cfg.raw_hours + " h" : "—"}</dd></div>
-        <div><dt>${esc(tr("Hourly history kept"))}</dt><dd>${cfg ? esc(tr("{n} days", { n: cfg.bucket_days })) : "—"}</dd></div>
-        <div><dt>${esc(tr("Read-only access without a token"))}</dt><dd>${esc(S.cfg?.public_access ? tr("on") : tr("off"))}</dd></div>
-        <div><dt>${esc(tr("Site time zone"))}</dt><dd>${cfg ? esc(cfg.site_time_zone ?? tr("not chosen yet (Setup)")) : "—"}</dd></div>
-        <div><dt>${esc(tr("Inverter clock"))}</dt><dd>${clockOffsetText(cfg?.inverter_clock_offset_s, cfg?.site_time_zone)}</dd></div>
-        <div><dt>${esc(tr("This machine's time zone"))}</dt><dd>${cfg ? esc(cfg.time_zone) + " " + utcOffset(cfg.utc_offset_s) : "—"}</dd></div>
-        <div><dt>${esc(tr("API description"))}</dt><dd><a href="${API}/openapi.yaml" target="_blank" rel="noopener">openapi.yaml</a></dd></div>
-      </dl>
-    </article>
-  </section>`;
+      <p class="muted small">${esc(tr("Installer role. Reporting a problem? Report a problem, on this page, adds your description and the app's checks to the same file."))}</p>
+    </article>`;
 }
 
 // NOTIFY_KEYS: the notification targets (F2) — a secret: the API shows
@@ -2887,8 +3003,8 @@ function notifyPanel(sets) {
   }).join("");
   return `
     <article class="panel">
-      <h3>${esc(tr("Notifications"))}</h3>
-      <p class="small">${esc(tr("Hear about a problem without this page open: the inverter offline for 10 minutes (and back), the gate losing its rules, a failed command or schedule, a write refused by the hourly limit, low disk, an upgrade rolled back, cloud-forwarding or maintenance-window changes, a lost grid, a restart after a power cut, and a low or falling battery (see Tuning)."))}</p>
+      <h3>${esc(tr("Where notices go"))}</h3>
+      <p class="small">${esc(tr("Hear about a problem without this page open: the inverter offline for 10 minutes (and back), the gate losing its rules, a failed command or schedule, a write refused by the hourly limit, low disk, an upgrade rolled back, cloud-forwarding or maintenance-window changes, a lost grid, a restart after a power cut, and a low or falling battery (see Battery alerts below)."))}</p>
       ${hidden ? `<dl class="kv">${fields}</dl><p class="muted small">${esc(tr("Sign in with an installer token to change or test them."))}</p>`
         : `<div class="fields stacked-fields">${fields}</div>
       <div class="row-actions">
@@ -2899,11 +3015,14 @@ function notifyPanel(sets) {
     </article>`;
 }
 
-// TUNING_KEYS: the expert-level knobs (owner, 2026-11-18): [key, label,
-// unit, min, max, step, help].
-const TUNING_KEYS = [
+// The adjustable knobs (owner, 2026-11-18): [key, label, unit, min, max,
+// step, help]. Storage holds the expert one; Notifications the battery
+// alerts.
+const STORAGE_KEYS = [
   ["store.write_delay_s", tr("Write delay"), "s", 0, 900, 1,
     tr("How long new readings may wait in memory before they are saved. Longer is gentler on an SD card or eMMC; a power cut loses what waits. Commands and setting changes are always saved at once. 0 saves at once.")],
+];
+const ALERT_KEYS = [
   ["alerts.soc_threshold_pct", tr("Battery alert level"), "%", 0, 95, 1,
     tr("Notify when the battery is at or below this charge, or is forecast to reach it. 0 turns the battery alerts off.")],
   ["alerts.soc_horizon_min", tr("Forecast horizon"), "min", 10, 1440, 1,
@@ -2913,13 +3032,14 @@ const TUNING_KEYS = [
   ["alerts.soc_p_value", tr("Forecast p-value"), "", 0.001, 0.5, 0.001,
     tr("How sure the forecast must be: 0.05 means 95 % confident. Smaller means fewer, later warnings.")],
 ];
+const TUNING_KEYS = [...STORAGE_KEYS, ...ALERT_KEYS];
 
-// tuningPanel: the expert knobs — anyone may look; saving needs an
-// expert token (the API refuses otherwise, and the toast says so).
-function tuningPanel(sets) {
+// tuningPanel: a set of knobs — anyone may look; saving needs an expert
+// token (the API refuses otherwise, and the toast says so).
+function tuningPanel(sets, keys, title, expert) {
   if (!sets) return "";
   const item = (k) => sets.settings?.find((s) => s.key === k);
-  const fields = TUNING_KEYS.map(([k, label, unit, min, max, step, help]) => {
+  const fields = keys.map(([k, label, unit, min, max, step, help]) => {
     const it = item(k);
     return `<label>${esc(label)}${unit ? ` <span class="muted small">(${esc(unit)})</span>` : ""}
       <input type="number" id="tune-${k.replace(/\./g, "-")}" value="${esc(it?.value ?? "")}" data-orig="${esc(it?.value ?? "")}" min="${min}" max="${max}" step="${step}" inputmode="decimal">
@@ -2927,7 +3047,7 @@ function tuningPanel(sets) {
   }).join("");
   return `
     <article class="panel">
-      <h3>${esc(tr("Tuning"))} <span class="chip muted">${esc(tr("expert"))}</span></h3>
+      <h3>${esc(title)}${expert ? ` <span class="chip muted">${esc(tr("expert"))}</span>` : ""}</h3>
       <div class="fields stacked-fields">${fields}</div>
       <div class="row-actions">
         <button type="button" class="cmd" data-action="tuning-save">${esc(tr("Save"))}</button>
@@ -2942,12 +3062,13 @@ async function tuningSave() {
   const body = {};
   for (const [k] of TUNING_KEYS) {
     const el = byId("tune-" + k.replace(/\./g, "-"));
+    if (!el) continue; // on another page
     const v = el.value.trim();
     if (v === el.dataset.orig) continue;
     body[k] = v === "" ? null : Number(v);
   }
   if (Object.keys(body).length === 0) { toast(tr("nothing changed")); return; }
-  if (await setupSave("/settings", "PUT", body, tr("tuning saved"))) render();
+  if (await setupSave("/settings", "PUT", body, tr("saved"))) render();
 }
 
 // notifySave stores both targets ("" = off).
@@ -3115,8 +3236,11 @@ async function renderReport() {
   if (!(await loadState())) return null;
   const id = S.state.identity ?? {};
   return `
-  ${pageHead(tr("Report a problem"), esc(tr("Builds one file with your description and what this app knows about the problem, for the developers.")))}
+  ${pageHead(tr("Help"))}
+  <section class="stack">
   <article class="panel report">
+    <h3>${esc(tr("Report a problem"))}</h3>
+    <p class="small">${esc(tr("Builds one file with your description and what this app knows about the problem, for the developers."))}</p>
     <form id="report-form" data-cmd="report">
       <label>${esc(tr("What went wrong?"))}<textarea id="report-desc" name="description" rows="6" maxlength="4000"
         placeholder="${esc(tr("What you saw, when it started, and what you expected instead."))}"></textarea></label>
@@ -3128,7 +3252,13 @@ async function renderReport() {
     </form>
     <p class="muted small">${esc(tr("The file contains your description, the app's version, settings and checks, recent errors, and the raw messages between the inverter and the cloud. Serial numbers are replaced, dates are shifted, and token names are left out — you can open it (a .tar.gz) and read everything before sharing. Nothing is sent anywhere by this page. Installer role."))}</p>
     <div id="report-next" hidden></div>
-  </article>`;
+  </article>
+  ${diagnosticsPanel()}
+  <article class="panel">
+    <h3>${esc(tr("API description"))}</h3>
+    <p class="small"><a href="${API}/openapi.yaml" target="_blank" rel="noopener">openapi.yaml</a></p>
+  </article>
+  </section>`;
 }
 
 // QUIRK_TEXT: the quirks' translated texts by id (the server's English
@@ -3167,7 +3297,7 @@ async function renderQuirks() {
   return `
   ${pageHead(tr("Inverter quirks"), esc(tr("Behaviours seen on some inverters that this app can compensate for. A quirk changes only what the web pages show: the history, the API and exports keep the inverter's own values.")))}
   <section class="stack quirks">${body}</section>
-  <p class="muted small">${esc(tr("New quirks start off until reports show they are common to a model or firmware. If you see one of these (or something like it) on your inverter, please say so: More → Report a problem. Changing a quirk needs the expert role."))}</p>`;
+  <p class="muted small">${esc(tr("New quirks start off until reports show they are common to a model or firmware. If you see one of these (or something like it) on your inverter, please say so: System → Help. Changing a quirk needs the expert role."))}</p>`;
 }
 
 // quirkSave sets (on/off) or resets one quirk, then reloads the page.

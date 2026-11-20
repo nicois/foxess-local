@@ -78,7 +78,7 @@ only accept binaries signed by the key built into them.
    Unreleased section as it stands. Push the tag alone
    (`git push origin vX.Y.Z-rc.N`). CI builds the draft and marks it a
    prerelease. Check, sign and publish it as below. Only installations
-   that opted in to prereleases (More → Settings → Updates → Update
+   that opted in to prereleases (System → Updates → Update
    choices) are offered it, and its container image is never tagged
    `latest`. When it holds up, `make tag` makes the release.
 2. Check the draft by rebuilding locally from the same tag:
@@ -102,4 +102,4 @@ only accept binaries signed by the key built into them.
    verified assets.
 
 Installed copies see the release within a day (or at once with
-"check now") and offer it in More → Settings → Updates.
+"check now") and offer it in System → Updates.

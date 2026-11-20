@@ -128,7 +128,28 @@ a {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.brand { display: inline-flex; align-items: center; gap: 0.4rem; }
+.brand { display: inline-flex; align-items: center; gap: 0.4rem; color: inherit; text-decoration: none; }
+/* wide screens: the brand is the way home, so the tab row starts at
+   Schedule (the phone tab bar keeps Home: the brand is out of thumb reach) */
+.tabs-top a[data-route="dashboard"] { display: none; }
+a.badge { color: inherit; text-decoration: none; }
+
+/* a page's sibling views (Activity: Changes | Raw messages) */
+.subnav {
+  display: inline-flex;
+  margin: 0 0 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+
+  a {
+    padding: 0.35rem 0.9rem;
+    color: inherit;
+    text-decoration: none;
+  }
+  a + a { border-left: 1px solid var(--line); }
+  a[aria-current="page"] { background: var(--accent-soft, var(--panel)); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+}
 .brand-ico { color: var(--accent); }
 
 .tabs-top {

@@ -133,7 +133,7 @@ inverter's address.
    connected and identified and that the clocks agree (each failed check
    says what to fix), and asks for the inverter's time zone, the battery
    capacity, what the cloud may receive, and what visitors without a
-   token may see. It is under More → Setup afterwards. The header shows
+   token may see. It is under System → Setup afterwards. The header shows
    `live` once data flows.
 
    The time zone is where the inverter is; this machine's own zone does
@@ -192,15 +192,15 @@ hotspot and USB networking alone. `--hostname NAME` renames the stick;
 
 Configuration lives in `/etc/foxess-local/config.toml` — every setting is
 optional and documented in the file. The battery capacity, the cloud
-forwarding mode and visitor access can also be changed in the UI (More →
-Setup, More → Cloud); a value set there is kept across restarts and wins
+forwarding mode and visitor access can also be changed in the UI (System →
+Setup, System → FoxESS cloud); a value set there is kept across restarts and wins
 over the file.
 
 ## Updates
 
 foxess-local checks GitHub for a new release once a week (one HTTPS
-request carrying only the version). When one exists, **More → Settings
-→ Updates** offers it. Under **Update choices** an installer can set
+request carrying only the version). When one exists, **System →
+Updates** offers it. Under **Update choices** an installer can set
 how often to check (or never), opt in to **prereleases** (test versions
 ahead of a release, which may have bugs), and turn on **installing
 updates automatically**: each new update is then applied once, when a
@@ -349,10 +349,10 @@ If your model is not verified, foxess-local identifies it, picks a
 community register map (from the foxess_modbus project) by testing it
 against physical checks, and shows live values marked *tentative*.
 Settings are locked; an installer can enable untested writes for that
-exact model and firmware (More → Device), at their own risk.
+exact model and firmware (Inverter → About this inverter), at their own
+risk.
 
-To help add full support: **More → Settings → Diagnostics → Download
-bundle**. The bundle contains recent messages and register readings with
+To help add full support: **System → Help → Download bundle**. The bundle contains recent messages and register readings with
 serial numbers and dates removed — you can inspect it before sharing it
 in a GitHub issue. Nothing is uploaded automatically.
 
@@ -373,7 +373,7 @@ through the same checks, limits and audit log as the web UI. See
 
 ## Notifications
 
-**More → Settings → Notifications** sends you a message when something
+**System → Notifications** sends you a message when something
 needs attention, without the web UI open:
 
 - the inverter offline for 10 minutes (and when it is back);
@@ -385,15 +385,15 @@ needs attention, without the web UI open:
 - an upgrade that rolled back;
 - foxess-local itself restarting after an unexpected stop (a power cut);
 - the battery at or below its alert level (20 % by default), or forecast
-  to get there within two hours (tunable at expert level under More →
-  Settings → Tuning; 0 turns these off);
+  to get there within two hours (set under System → Notifications →
+  Battery alerts; 0 turns these off);
 - a failed command or schedule, a write refused by the hourly limit,
   low disk space;
 - the cloud-forwarding mode or a maintenance window changing;
 - the cloud asking the inverter to update its firmware: which component
   and file, and whether it was blocked (outside a maintenance window) or
-  passed. The download address is not in the message; it is under More →
-  Frame messages (expert), where the request shows as a "Firmware update
+  passed. The download address is not in the message; it is under Activity →
+  Raw messages (expert), where the request shows as a "Firmware update
   task".
 
 Two targets, either or both:
@@ -417,7 +417,7 @@ wins. Only installers can see or change them.
 
 ## Reporting a problem
 
-**More → Report a problem**: describe what went wrong, choose how much
+**System → Help → Report a problem**: describe what went wrong, choose how much
 history to include, and download the report — one file with your
 description, the app's version, settings and checks, recent errors, and
 the raw messages between the inverter and the cloud. Serial numbers are
@@ -426,8 +426,8 @@ everything before sharing it. The page then offers a GitHub issue,
 prefilled with your description and setup, to attach the file to.
 Nothing is uploaded automatically.
 
-For a model or firmware that is not verified yet, run **More → Device →
-Scan registers** first: it reads (never writes) every register the
+For a model or firmware that is not verified yet, run **Inverter → About this
+inverter → Scan registers** first: it reads (never writes) every register the
 community maps for your model name, which shows a developer which map
 fits; the result goes into your next report.
 

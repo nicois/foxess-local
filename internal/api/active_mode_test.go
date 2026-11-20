@@ -44,7 +44,7 @@ func TestActiveMode(t *testing.T) {
 	}
 }
 
-// TestStateInverterLimits: /state reports every limit the Control page
+// TestStateInverterLimits: /state reports every limit the Inverter page
 // draws — the grid pair, the inverter's load / generation limits (41200 /
 // 41201), the battery current limits (41007 / 41008), the power limit %
 // (41016) and the EPS output mode (41015).

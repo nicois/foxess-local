@@ -11,7 +11,7 @@ import (
 	"foxesslocal/internal/gateway"
 )
 
-// The installer settings endpoints (the Control page's numbered limits):
+// The installer settings endpoints (the Inverter page's numbered limits):
 // each is one gateway command kind of single-register fn06 writes,
 // proven by captured cloud writes on the verified profile (protocol
 // profile §5). Fields use /state's names and units; amps go to the wire

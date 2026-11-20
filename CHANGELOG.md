@@ -45,6 +45,23 @@ version; anything else bumps the patch version.
   data table and exports as "SoC estimate". Readings stored before this
   version have none.
 
+### Changed
+
+- The web UI's pages are grouped by what you come to do. **Inverter**
+  (was Control) holds the inverter's settings, with links to **About
+  this inverter** (was More → Device) and its quirks. **Activity** shows
+  the change log and, one tap away, the raw messages (was More → Frame
+  messages). **System** (was More) is a hub: FoxESS cloud,
+  Notifications (now with the battery alerts, which were under Tuning),
+  Access (tokens and visitor access), Updates, Site (time zone, clock,
+  language), Storage, Help (report a problem, the diagnostic bundle,
+  the API description) and Setup. Settings is split across these.
+  Old links still open the right page.
+- The foxesslocal name in the header goes to Home; on wide screens the
+  separate Home tab is gone (phones keep it in the bottom bar). The
+  cloud badge opens System → FoxESS cloud, the update badge System →
+  Updates.
+
 ### Fixed
 
 - Dashboard: the two-column layout (the live view beside the history)

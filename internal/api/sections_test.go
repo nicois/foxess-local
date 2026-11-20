@@ -27,7 +27,7 @@ func TestSectionsOf(t *testing.T) {
 	}
 }
 
-// TestSectionsOfInstallerSettings: a write to any of the Control page's
+// TestSectionsOfInstallerSettings: a write to any of the Inverter page's
 // installer settings refreshes its limits section.
 func TestSectionsOfInstallerSettings(t *testing.T) {
 	for _, a := range []int{41007, 41008, 41015, 41016, 41027, 41028, 41200, 41201} {

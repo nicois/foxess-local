@@ -61,7 +61,7 @@ func upgradeCmd(args []string) int {
 	}
 	fmt.Printf("installed %s (previous binary kept as foxess-local.prev).\n", v.Latest)
 	fmt.Println("The running service switches to it at its next restart (`sudo systemctl restart foxess-local`).")
-	fmt.Println("Tip: updating from the web UI (More → Settings → Updates) restarts the service for you, no root needed.")
+	fmt.Println("Tip: updating from the web UI (System → Updates) restarts the service for you, no root needed.")
 	return 0
 }
 

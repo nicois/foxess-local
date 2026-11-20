@@ -51,7 +51,7 @@ func sectionOf(a int) string {
 	case a >= regImportLimAddr && a <= regExportLimAddr+1, a == regImportCurAddr, a == regExportCurAddr,
 		a == regMaxChgCurAddr, a == regMaxChgCurAddr+1, a == regEpsOutputAddr, a == regPowerLimAddr,
 		a == regLoadLimAddr, a == regLoadLimAddr+1:
-		// the Control page's limits (its numbered markers 1–5)
+		// the Inverter page's limits (its numbered markers 1–5)
 		return SectionLimits
 	case a == regMeterCompAddr:
 		return SectionMeterCompensation

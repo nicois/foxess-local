@@ -51,7 +51,7 @@ var systemNotices = map[string]struct {
 
 // firmwareTaskEvent describes a cloud firmware upgrade task: the
 // component and file, and what happened to it. The download URL stays
-// out (notices leave the LAN): it is on More → Frame messages.
+// out (notices leave the LAN): it is on Activity → Raw messages.
 func firmwareTaskEvent(ev framesvc.Event) api.SystemEvent {
 	t := ev.FwTask
 	detail := fmt.Sprintf("The cloud asked to update the inverter's %s firmware (%s, %d bytes).",
@@ -59,7 +59,7 @@ func firmwareTaskEvent(ev framesvc.Event) api.SystemEvent {
 	if ev.Decision == store.DecisionForwarded {
 		detail += " Passed (maintenance window): the inverter may download and flash it, then restart."
 	} else {
-		detail += " Blocked: firmware passes only in a maintenance window. The file's address is under More → Frame messages (expert)."
+		detail += " Blocked: firmware passes only in a maintenance window. The file's address is under Activity → Raw messages (expert)."
 	}
 	return api.SystemEvent{Type: api.SystemFirmwareTask, Detail: detail}
 }

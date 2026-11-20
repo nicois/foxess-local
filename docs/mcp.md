@@ -37,7 +37,7 @@ Use the web UI for those.
 
 ## Connecting
 
-Create a token for the assistant (**More → Settings → Access tokens**).
+Create a token for the assistant (**System → Access**).
 Give it **read-only** unless you want it to change the work mode or
 schedule (then **standard**). The token is optional: without one, the
 assistant gets what visitors get (the dashboard data, while public

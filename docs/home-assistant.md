@@ -17,7 +17,7 @@ sign convention and error code.
 
 ## 1. Tokens
 
-Create the tokens in the web UI, **More → Settings → Access tokens**
+Create the tokens in the web UI, **System → Access**
 (installer role), and keep them in Home Assistant's `secrets.yaml`:
 
 | Token | Role | For |
@@ -183,7 +183,7 @@ upgrade rolled back, and cloud-forwarding or maintenance-window changes.
 
 1. Create an automation with a **Webhook** trigger; pick a hard-to-guess
    ID and allow only local access.
-2. In the web UI, **More → Settings → Notifications**, set the webhook
+2. In the web UI, **System → Notifications**, set the webhook
    URL to `http://homeassistant.local:8123/api/webhook/<the ID>` and press
    **Send a test**.
 

@@ -29,7 +29,7 @@ func (s *Server) handleNotifyTest(w http.ResponseWriter, r *http.Request, _ Toke
 		writeProblem(w, http.StatusConflict, problem{
 			Title:  "No notification target",
 			Code:   "notify_not_configured",
-			Detail: "set a webhook or ntfy URL first (More → Settings → Notifications, or [notify] in the config file)",
+			Detail: "set a webhook or ntfy URL first (System → Notifications, or [notify] in the config file)",
 		})
 		return
 	}

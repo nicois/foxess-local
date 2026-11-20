@@ -422,7 +422,7 @@ func checkProfile(id Identity) Check {
 	default:
 		c.Status = checkWarn
 		c.Detail = "not yet verified: live readings are shown (marked tentative); settings stay locked"
-		c.Fix = "Help verify it: More → Settings → Diagnostics → Download bundle, and share it in a GitHub issue."
+		c.Fix = "Help verify it: System → Help → Download bundle, and share it in a GitHub issue."
 	}
 	return c
 }
