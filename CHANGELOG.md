@@ -20,6 +20,8 @@ version; anything else bumps the patch version.
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-11-20
+
 ### Added
 
 - The state of charge between the inverter's whole-percent readings,
