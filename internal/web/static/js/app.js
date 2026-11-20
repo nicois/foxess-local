@@ -61,6 +61,7 @@ const S = {
   cfg: null,             // GET /config
   pageVersion: null,     // the version this page's code came from (first GET /config)
   reloadPending: false,  // another version is answering: the page reloads into it
+  shownRoute: null,      // the route #view shows (a new one scrolls to the top)
   offlineSince: null,    // display ts of the last connection:offline
   cmdBusy: 0,            // in-flight command count (PUT/POST/DELETE only)
   busyWatchdog: null,    // timer that force-clears a stuck busy state
@@ -1041,6 +1042,13 @@ async function render() {
   // the shell's layout may depend on the page (the wide dashboard)
   byId("app").dataset.route = routeName();
   view.innerHTML = `<h1 class="sr-only">${esc(title)}</h1>` + html;
+  // another page starts at its top: the views share one document, so the
+  // window kept the last one's scroll (owner, 2026-11-20); re-rendering
+  // the same page (live updates, a save) keeps the reader's place
+  if (S.shownRoute !== routeName()) {
+    S.shownRoute = routeName();
+    window.scrollTo(0, 0);
+  }
   paintDeviceBanner();
   watchWide();
   htmx.process(view);

@@ -22,6 +22,9 @@ version; anything else bumps the patch version.
 
 ### Fixed
 
+- Opening another page in the web UI starts at its top. It kept the
+  previous page's scroll position, so after scrolling down Activity, the
+  Inverter page opened part-way down.
 - "Running now" (Home and the Inverter page) names the schedule's
   default group as the default mode, instead of its 00:00–23:59 window.
 - The low-battery forecast no longer warns about a scheduled force
