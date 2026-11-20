@@ -59,13 +59,12 @@ func main() {
 	dbPath := flag.String("db", "", "serve this existing database instead of a seeded temporary one")
 	pprofAddr := flag.String("pprof", "", "serve the Go profiler on this address (e.g. 127.0.0.1:6060)")
 	eps := flag.Int("eps", 0, "simulated EPS (backup) port load, W")
+	version := flag.String("version", "devui", "the version /config reports (a restart with another one exercises the UI's reload into an update)")
+	stateDir := flag.String("dir", "", "keep the token store (and a seeded database) in this directory instead of a temporary one: a restart keeps the browser's token valid (pass -db DIR/devui.db then)")
 	flag.Parse()
 	epsW = int32(*eps) //nolint:gosec // G115: a small wattage flag
 
-	dir, err := os.MkdirTemp("", "foxess-devui-")
-	if err != nil {
-		log.Fatal(err)
-	}
+	dir := devDir(*stateDir)
 	st := openStore(*dbPath, dir, *model, uint16(*master)) //nolint:gosec // G115: flag is a register value
 	if *pprofAddr != "" {
 		go servePprof(*pprofAddr)
@@ -78,10 +77,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	_, plain, err := tok.Create("devui", api.RoleInstaller)
-	if err != nil {
-		log.Fatal(err)
-	}
+	plain := devToken(tok, *stateDir != "")
 	bus := api.NewBus()
 	// notifications go to the targets set in Settings, as in the service
 	notifier := notify.New(func() notify.Targets {
@@ -91,7 +87,7 @@ func main() {
 	go notifier.Run(context.Background())
 	var est socest.Estimator
 	apiH := api.New(st, gw, maint, tok, fwd, bus, time.Now, api.WithSocEstimate(&est), api.WithInfo(api.ServerInfo{
-		Version: "devui", RawHours: 72, BucketDays: 365, Settings: set,
+		Version: *version, RawHours: 72, BucketDays: 365, Settings: set,
 	}), api.WithNotifier(notifier),
 		api.WithCaptures(wincap.New(filepath.Join(dir, "captures"), 256<<20, time.Now, "devui")))
 	go live(st, bus, &est, func() int { return set.Get().CapacityWh })
@@ -122,6 +118,34 @@ func devSettings(st *store.Store, allPages bool, capacity int) (*settings.Settin
 	fwd := forward.New(st, time.Now, set.Get().ForwardMode)
 	fwd.OnChange(func(m policy.ForwardMode, _ string) error { return set.Persist(settings.KeyForwardMode, string(m)) })
 	return set, fwd
+}
+
+// devDir is the directory for the token store (and a seeded database):
+// the -dir flag's, or a new temporary one.
+func devDir(stateDir string) string {
+	if stateDir != "" {
+		return stateDir
+	}
+	dir, err := os.MkdirTemp("", "foxess-devui-")
+	if err != nil {
+		log.Fatal(err)
+	}
+	return dir
+}
+
+// devToken creates this run's installer token. A kept store (-dir)
+// already holds the earlier runs' tokens, still valid, so the name is
+// made unique.
+func devToken(tok *api.TokenStore, kept bool) string {
+	name := "devui"
+	if kept {
+		name = fmt.Sprintf("devui-%d", time.Now().Unix())
+	}
+	_, plain, err := tok.Create(name, api.RoleInstaller)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return plain
 }
 
 // openStore opens dbPath (an existing database, e.g. from tools/synthdb)

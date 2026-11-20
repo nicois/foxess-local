@@ -47,6 +47,14 @@ version; anything else bumps the patch version.
 
 ### Fixed
 
+- The web UI rides out a restart. A page loaded while foxess-local was
+  restarting (after an update, say) signed you out, even with "keep me
+  signed in"; it now keeps the stored token and tries again until the
+  service answers. Only a rejected token still signs you out.
+- After an update, an open page reloads into the new version by itself
+  once the service is back, so it no longer runs the old version's
+  pages. With an unsaved edit it waits until that is saved or
+  discarded.
 - Schedule: a window in groups 4–8 shows its grid import and export
   limits and whether it uses solar. Only groups 1–3 were read, so a
   default (remaining-time) window that the cloud placed in group 4

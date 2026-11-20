@@ -59,6 +59,8 @@ const S = {
   epsRing: [],           // the last EPS_MEDIAN_N live backup-port readings (quirk eps_dropouts)
   quirks: {},            // id → on (GET /quirks)
   cfg: null,             // GET /config
+  pageVersion: null,     // the version this page's code came from (first GET /config)
+  reloadPending: false,  // another version is answering: the page reloads into it
   offlineSince: null,    // display ts of the last connection:offline
   cmdBusy: 0,            // in-flight command count (PUT/POST/DELETE only)
   busyWatchdog: null,    // timer that force-clears a stuck busy state
@@ -504,7 +506,7 @@ document.body.addEventListener("htmx:after:request", (e) => {
       ? tr("maintenance window open (until {time})", { time: fmtTime(body.expires_at) })
       : tr("maintenance window closed"));
   } else if (path === API + "/update/apply") {
-    toast(tr("updating to {to} — the app restarts; this page reconnects by itself", { to: body?.to ?? tr("the new release") }));
+    toast(tr("updating to {to} — the app restarts; this page reloads by itself when it is back", { to: body?.to ?? tr("the new release") }));
   } else if (path === API + "/update/check") {
     toast(body?.available ? tr("update available: {v}", { v: body.latest }) : tr("no newer release"));
     if (body) refreshUpdateBadge(body);
@@ -712,7 +714,11 @@ document.body.addEventListener("htmx:sse:before:connection", (e) => {
 });
 
 document.body.addEventListener("htmx:sse:after:connection", () => {
+  // a reconnect may be to a restarted, updated service: its version
+  // decides whether the page reloads (checkVersion)
+  const reconnect = S.feed !== "connected" && S.pageVersion;
   setFeed("connected");
+  if (reconnect) refreshMeta();
 });
 
 document.body.addEventListener("htmx:sse:error", (e) => {
@@ -914,6 +920,7 @@ async function refreshMeta() {
     S.cfg = await resp.json();
     byId("ver").textContent = S.cfg.version;
     paintNav();
+    checkVersion(S.cfg.version);
   } catch { /* non-fatal */ }
 }
 
@@ -3434,32 +3441,79 @@ window.addEventListener("hashchange", () => {
 
 // ---------- init ----------
 
+// RETRY_S: the waits, in seconds, between attempts to reach a service
+// that is not answering (a restart takes from seconds to a minute); the
+// last repeats.
+const RETRY_S = [1, 2, 3, 5];
+
 async function init() {
-  if (S.token) {
-    try {
-      const resp = await fetch(API + "/state", { headers: { Authorization: "Bearer " + S.token } });
-      if (resp.status === 401) {
-        setToken("");
-        gate(tr("the stored token was rejected — sign in again"));
-        return;
-      }
-      if (!resp.ok) {
-        setToken("");
-        gate(tr("the stored token could not be verified — sign in again"));
-        return;
-      }
-      S.state = await resp.json();
-      S.forwardMode = { mode: S.state.forward_mode };
-      enterApp();
-    } catch {
-      setToken("");
-      gate(tr("the server was unreachable — sign in"));
-    }
-  } else {
+  if (!S.token) {
     // No stored token: probe public read-only access (config flag,
     // default on — spec §5.5) before falling back to the gate.
     if (!(await probePublic())) gate(tr("sign in to use foxesslocal"));
+    return;
   }
+  // Only a rejection (401) drops the stored token. Anything else — the
+  // service restarting after an update, a reverse proxy's 502 while it
+  // does — keeps it and tries again until the service answers, or until
+  // a sign-in from the gate replaces the token.
+  const token = S.token;
+  for (let n = 0; S.token === token; n++) {
+    let resp = null;
+    try {
+      resp = await fetch(API + "/state", { headers: { Authorization: "Bearer " + token } });
+    } catch { /* not answering: retried */ }
+    if (S.token !== token) return;
+    if (resp?.status === 401) {
+      setToken("");
+      gate(tr("the stored token was rejected — sign in again"));
+      return;
+    }
+    if (resp?.ok) {
+      S.state = await resp.json();
+      S.forwardMode = { mode: S.state.forward_mode };
+      enterApp();
+      return;
+    }
+    const wait = RETRY_S[Math.min(n, RETRY_S.length - 1)];
+    waitScreen(tr("foxess-local is not answering yet — it may be restarting. Trying again in {s} s…", { s: wait }));
+    await new Promise((r) => setTimeout(r, wait * 1000));
+  }
+}
+
+// waitScreen: the gate with a status line, the stored token kept (no
+// sign-in dialog; the gate's button still offers one).
+function waitScreen(msg) {
+  byId("app").hidden = true;
+  byId("app").setAttribute("inert", "");
+  byId("gate-msg").textContent = msg;
+  byId("gate").hidden = false;
+}
+
+// ---------- a new version: reload into its UI ----------
+// The page runs the code and templates of the release that served it.
+// When the service answers as another version (an update applied from
+// this page or automatically, seen when the live stream reconnects
+// after the restart), the page reloads to match — after any unsaved
+// edit is saved or discarded.
+function checkVersion(v) {
+  if (!v) return;
+  if (!S.pageVersion) {
+    S.pageVersion = v;
+    return;
+  }
+  if (v === S.pageVersion || S.reloadPending) return;
+  S.reloadPending = true;
+  if (!editing()) {
+    location.reload();
+    return;
+  }
+  toast(tr("foxess-local is now {v}: the page reloads once your changes are saved or discarded", { v }), "warn");
+  const t = setInterval(() => {
+    if (editing()) return;
+    clearInterval(t);
+    location.reload();
+  }, 2000);
 }
 
 init();
