@@ -22,6 +22,8 @@ version; anything else bumps the patch version.
 
 ### Fixed
 
+- "Running now" (Home and the Inverter page) names the schedule's
+  default group as the default mode, instead of its 00:00–23:59 window.
 - The low-battery forecast no longer warns about a scheduled force
   discharge as if it ran on forever. During one, it takes the measured
   discharge rate until the discharge is expected to end — the window's

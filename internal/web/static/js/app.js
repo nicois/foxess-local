@@ -1234,14 +1234,23 @@ async function loadQuirks() {
   } catch { return null; }
 }
 
+// activeWhy: why the running mode applies — a schedule window, the
+// schedule's default (all-day) group, or the base work mode. The default
+// group's 00:00–23:59 window says nothing useful, so it is named instead
+// (owner, 2026-11-20).
+function activeWhy(st) {
+  const am = st?.active_mode ?? {};
+  if (am.source !== "schedule") return tr("the base work mode (no schedule group applies)");
+  if (st.schedule?.groups?.[am.group - 1]?.default) return tr("default mode");
+  return tr("schedule group {n} ({from}–{to})", { n: am.group, from: am.start, to: am.end });
+}
+
 // nowModeHTML: what the inverter is running and why (Home), linking
 // the schedule.
 function nowModeHTML(st) {
   const am = st?.active_mode;
   if (!am?.mode) return "";
-  const why = am.source === "schedule"
-    ? tr("schedule group {n} ({from}–{to})", { n: am.group, from: am.start, to: am.end })
-    : tr("the base work mode (no schedule group applies)");
+  const why = activeWhy(st);
   return `${esc(tr("Running now"))}: <strong>${esc(SCHED_TEXT[am.mode] ?? am.mode)}</strong> <span class="muted">· <a href="#/schedule">${esc(why)}</a></span>`;
 }
 
@@ -1957,9 +1966,7 @@ async function renderControl() {
     <article class="panel running-panel">
       <h3>${esc(tr("Running now"))}</h3>
       <p class="running"><strong>${esc(SCHED_TEXT[am.mode] ?? am.mode ?? "—")}</strong>
-        <span class="muted">${am.source === "schedule"
-          ? `${esc(tr("schedule group {n} ({from}–{to})", { n: am.group, from: am.start, to: am.end }))} · <a href="#/schedule">${esc(tr("Schedule"))}</a>`
-          : esc(tr("the base work mode (no schedule group applies)"))}</span></p>
+        <span class="muted">${esc(activeWhy(st))}${am.source === "schedule" ? ` · <a href="#/schedule">${esc(tr("Schedule"))}</a>` : ""}</span></p>
       ${flowMarkup(true)}
       ${limitsLegend(st)}
     </article>

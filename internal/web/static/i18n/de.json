@@ -433,6 +433,7 @@
   "created {time}": "erstellt {time}",
   "current": "aktuell",
   "datalogger": "Datenlogger",
+  "default mode": "Standardmodus",
   "default: {v}": "Standard: {v}",
   "delete": "löschen",
   "delete this capture?": "diesen Mitschnitt löschen?",
