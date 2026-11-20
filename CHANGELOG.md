@@ -61,6 +61,15 @@ version; anything else bumps the patch version.
   separate Home tab is gone (phones keep it in the bottom bar). The
   cloud badge opens System → FoxESS cloud, the update badge System →
   Updates.
+- Each setting has one home, and Setup walks through the same panels:
+  the time zone, inverter clock and battery capacity are under System →
+  Site, visitor access under System → Access, cloud forwarding under
+  System → FoxESS cloud (the wizard's own "Nothing / Readings only /
+  Everything" wording is gone; it uses Off / Telemetry only / Full like
+  the rest). Until setup is marked done, System shows "Finish setting
+  up" first, with what is still to do.
+- Home says what the inverter is running now and why (a schedule group
+  and its window, or the base work mode), linked to the schedule.
 
 ### Fixed
 

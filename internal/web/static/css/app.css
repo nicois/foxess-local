@@ -1443,9 +1443,10 @@ a.badge { text-decoration: none; &:hover { text-decoration: underline; } }
   &:hover { text-decoration: underline; }
 }
 
-/* setup wizard (F12): fields outside a <form> (Enter must not submit) */
-.setup {
-  label:not(.radio-row) {
+/* setup wizard (F12) and the settings panels it shares with Site and
+   Access: fields outside a <form> (Enter must not submit) */
+.setup, .field-panel {
+  label:not(.radio-row):not(.choice) {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
@@ -1464,7 +1465,7 @@ a.badge { text-decoration: none; &:hover { text-decoration: underline; } }
     .desc { display: block; }
   }
   .panel { margin-bottom: 1rem; }
-  .panel button { margin-top: 0.4rem; }
+  .panel button, & > button { margin-top: 0.4rem; }
 }
 
 /* the Inverter page's limits panel: one numbered section per diagram marker */
@@ -1611,3 +1612,9 @@ a.badge { text-decoration: none; &:hover { text-decoration: underline; } }
     .mode-panel, .limits, .inv-links { grid-column: 2; }
   }
 }
+
+/* Home: what the inverter is running now (one line, under the panel head) */
+.now-mode { margin: 0.2rem 0 0.4rem; min-height: 1.45em; }
+/* System: setup not yet done comes first, highlighted */
+.hub-todo { margin-bottom: 1rem; border-color: var(--accent); }
+.field-panel > .kv { margin-top: 0.9rem; }

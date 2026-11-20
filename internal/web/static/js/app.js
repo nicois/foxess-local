@@ -1234,7 +1234,23 @@ async function loadQuirks() {
   } catch { return null; }
 }
 
+// nowModeHTML: what the inverter is running and why (Home), linking
+// the schedule.
+function nowModeHTML(st) {
+  const am = st?.active_mode;
+  if (!am?.mode) return "";
+  const why = am.source === "schedule"
+    ? tr("schedule group {n} ({from}–{to})", { n: am.group, from: am.start, to: am.end })
+    : tr("the base work mode (no schedule group applies)");
+  return `${esc(tr("Running now"))}: <strong>${esc(SCHED_TEXT[am.mode] ?? am.mode)}</strong> <span class="muted">· <a href="#/schedule">${esc(why)}</a></span>`;
+}
+
 function paintNow(st) {
+  const nm = byId("now-mode");
+  if (nm) {
+    const h = nowModeHTML(st);
+    if (nm.dataset.h !== h) { nm.innerHTML = h; nm.dataset.h = h; }
+  }
   const p = nowPower(st);
   const f = flowOf(p);
   // the backup branch appears once the EPS port supplies power (and
@@ -1788,6 +1804,7 @@ async function renderDashboard() {
           `<button type="button" data-window="${w}" aria-pressed="${S.nowWindow === w}">${esc(l)}</button>`).join("")}
       </div>
     </div>
+    <p id="now-mode" class="now-mode">${nowModeHTML(S.state)}</p>
     <div class="now-body">
       ${flowMarkup(false)}
       <div class="batt">
@@ -2274,17 +2291,28 @@ function deviceSummary(st) {
 async function renderSystem() {
   if (!(await loadState())) return null;
   const cfg = await loadCfg();
+  // an installer whose setup is not marked done sees it first
+  let setup = null;
+  try {
+    const r = await apiFetch("/setup");
+    if (r.ok) setup = await r.json();
+  } catch { /* the hub shows without it */ }
+  const left = setup ? setup.checks.filter((c) => c.status === "fail" || c.status === "warn").length : 0;
+  const todo = setup && !setup.completed
+    ? `<ul class="hub hub-todo">${hubLink("setup", tr("Finish setting up"),
+        esc(left ? tr("{n} still to do", { n: left }) : tr("everything is in place — mark it as done")), ICO.setup)}</ul>` : "";
   return `
   ${pageHead(tr("System"), esc(tr("foxess-local itself: the cloud, notifications, access, updates and housekeeping.")))}
+  ${todo}
   <ul class="hub">
     ${hubLink("cloud", tr("FoxESS cloud"), esc(tr("cloud forwarding: {mode}", { mode: FORWARD_NAME()[S.forwardMode?.mode] ?? "—" })), ICO.cloud)}
     ${hubLink("notifications", tr("Notifications"), esc(tr("where alerts go, and the battery alert level")), ICO.bell)}
     ${hubLink("access", tr("Access"), esc(tr("tokens, and what visitors without a token can see")), ICO.key)}
     ${hubLink("updates", tr("Updates"), esc(cfg?.version ?? "—"), ICO.update)}
-    ${hubLink("site", tr("Site"), esc(tr("time zone, inverter clock, language")), ICO.site)}
+    ${hubLink("site", tr("Site"), esc(tr("time zone, inverter clock, battery capacity, language")), ICO.site)}
     ${hubLink("storage", tr("Storage"), esc(tr("how much history is kept, and how often it is saved")), ICO.storage)}
     ${hubLink("help", tr("Help"), esc(tr("report a problem, diagnostic bundle, API description")), ICO.help)}
-    ${hubLink("setup", tr("Setup"), esc(tr("checks, battery capacity, cloud and access choices")), ICO.setup)}
+    ${setup?.completed || !setup ? hubLink("setup", tr("Setup"), esc(tr("the first-run checks and choices, again")), ICO.setup) : ""}
   </ul>`;
 }
 
@@ -2399,33 +2427,112 @@ const CHECK_TITLE = {
   verified: tr("Settings support"), clock: tr("Clocks agree"), battery_capacity: tr("Battery capacity"),
 };
 
-const FORWARD_CHOICES = [
-  ["off", tr("Nothing"), tr("The cloud and the FoxESS app see nothing. Recommended to start.")],
-  ["telemetry_only", tr("Readings only"), tr("The FoxESS app keeps showing data; the cloud cannot change anything.")],
-  ["full", tr("Everything, as before"), tr("The cloud can change settings too. A firmware update still needs a maintenance window.")],
-];
+// ---------- settings shared by Setup and their own pages ----------
+// Each setting is edited in one place: the time zone and the battery
+// capacity under System → Site, visitor access under System → Access,
+// cloud forwarding under System → FoxESS cloud. The setup wizard walks
+// through the same panels (step numbers in front).
+
+// loadSiteCtx: what the shared panels need — the settings and, for an
+// installer, the setup facts (the battery module count; passed in when
+// the caller already has them).
+async function loadSiteCtx(known) {
+  const [gr, sr] = await Promise.all([apiFetch("/settings"), known ? null : apiFetch("/setup")]);
+  const set = gr.ok ? await gr.json() : { settings: [] };
+  const setup = known ?? (sr?.ok ? await sr.json() : null);
+  return {
+    setup,
+    val: (k) => set.settings.find((x) => x.key === k)?.value,
+    src: (k) => set.settings.find((x) => x.key === k)?.source,
+  };
+}
+
+const stepHead = (n, title) => `<h3>${n ? n + " · " : ""}${esc(title)}</h3>`;
+
+// zonePanel: the site time zone, and the inverter's clock against it.
+function zonePanel(ctx, cfg, n) {
+  const zone = ctx.val("site.time_zone");
+  const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+  const zones = Intl.supportedValuesOf?.("timeZone") ?? [];
+  const pick = zone ?? browserZone;
+  if (pick && !zones.includes(pick)) zones.unshift(pick);
+  const off = cfg?.inverter_clock_offset_s;
+  return `<article class="panel field-panel">
+    ${stepHead(n, tr("Time zone"))}
+    <p class="muted small">${esc(tr("The inverter's clock has no time zone: it shows local time, and its schedule runs on it. Choose where the inverter is — this machine's own time zone does not matter. foxesslocal keeps the inverter's clock to this zone, daylight saving included."))}</p>
+    <label>${esc(tr("Time zone"))}${zones.length
+      ? `<select id="setup-zone">${zones.map((z) => `<option value="${esc(z)}" ${z === pick ? "selected" : ""}>${esc(z)}</option>`).join("")}</select>`
+      : `<input type="text" id="setup-zone" placeholder="Australia/Melbourne" value="${esc(pick)}">`}</label>
+    <p class="muted small">${esc(zone ? tr("Currently {zone} ({source}).", { zone, source: SOURCE_TEXT[ctx.src("site.time_zone")] ?? "" })
+      : browserZone ? tr("Not set yet. Suggested from this browser: {zone}.", { zone: browserZone }) : tr("Not set yet."))}</p>
+    <button type="button" class="cmd" data-action="setup-zone">${esc(tr("Save time zone"))}</button>
+    ${cfg ? `<dl class="kv">
+      <div><dt>${esc(tr("Inverter clock"))}</dt><dd>${clockOffsetText(off, cfg.site_time_zone)}</dd></div>
+      <div><dt>${esc(tr("This machine's time zone"))}</dt><dd>${esc(cfg.time_zone)} ${utcOffset(cfg.utc_offset_s)}</dd></div>
+    </dl>
+    ${cfg.site_time_zone && off != null && Math.abs(off) >= 60
+      ? `<button type="button" class="ghost" data-action="setup-set-clock">${esc(tr("Set the inverter's clock"))}</button>` : ""}` : ""}
+  </article>`;
+}
+
+// capacityPanel: the battery's usable capacity.
+function capacityPanel(ctx, n) {
+  const capWh = ctx.val("battery.capacity_wh");
+  const modules = ctx.setup?.battery?.modules;
+  return `<article class="panel field-panel">
+    ${stepHead(n, tr("Battery capacity"))}
+    <p class="muted small">${esc(tr("The battery's usable energy, used to show how much is stored. It is the number of battery modules times the energy of one module."))} ${esc(modules
+        ? tr("The inverter reports {n} modules — for EQ4800 modules (4.66 kWh each) that is {kwh} kWh.", { n: modules, kwh: (modules * 4.66).toFixed(2) })
+        : tr("An EQ4800 module is 4.66 kWh. The module count shows here once the inverter has sent its battery details."))}</p>
+    <label>${esc(tr("Usable capacity (kWh)"))}<input type="number" id="setup-capacity" min="0.1" max="200" step="0.01" value="${capWh ? (capWh / 1000).toFixed(2) : ""}"></label>
+    <p class="muted small">${esc(capWh ? tr("Currently {kwh} kWh ({source}).", { kwh: (capWh / 1000).toFixed(2), source: SOURCE_TEXT[ctx.src("battery.capacity_wh")] ?? "" }) : tr("Not set yet."))}</p>
+    <button type="button" class="cmd" data-action="setup-capacity">${esc(tr("Save capacity"))}</button>
+  </article>`;
+}
+
+// accessPanel: what visitors without a token may see.
+function accessPanel(ctx, n) {
+  return `<article class="panel field-panel">
+    ${stepHead(n, tr("Visitors without a token"))}
+    <p class="muted small">${esc(tr("Separate from cloud forwarding: this is about people on your own network opening this web page."))}</p>
+    <label class="radio-row"><input type="checkbox" id="setup-public" ${ctx.val("access.public_read_only") ? "checked" : ""}>
+      <span>${esc(tr("Can see the dashboard (read only)"))}</span></label>
+    <label class="radio-row"><input type="checkbox" id="setup-public-all" ${ctx.val("access.public_all_pages") ? "checked" : ""}>
+      <span>${esc(tr("…and every other page (still read only)"))}</span></label>
+    <p class="muted small">${esc(tr("Anyone on your network can open this page. Changes always need a token."))}</p>
+    <button type="button" class="cmd" data-action="setup-access">${esc(tr("Save access"))}</button>
+  </article>`;
+}
+
+// forwardPanel: what the FoxESS cloud may receive and change.
+function forwardPanel(n) {
+  const mode = S.forwardMode?.mode ?? S.state?.forward_mode;
+  const choice = (k) => {
+    const [t, d] = FORWARD_TEXT[k];
+    return `<label class="choice radio"><input type="radio" name="mode" value="${k}" ${k === mode ? "checked" : ""}>
+      <span class="choice-title">${esc(t)}${k === mode ? ` <span class="chip">${esc(tr("current"))}</span>` : ""}</span><span class="choice-desc">${esc(d)}</span></label>`;
+  };
+  return `<article class="panel">
+      ${stepHead(n, tr("Cloud forwarding"))}
+      <form id="forward-form" data-cmd="forward" hx-put="${API}/forward-mode" hx-encoding="json" hx-swap="none">
+        <div class="choices">${["off", "telemetry_only", "full"].map(choice).join("")}</div>
+        <button data-cmd="forward" data-confirm="forward" type="submit" class="cmd">${esc(tr("Apply"))}</button>
+      </form>
+      <p class="muted small">${esc(tr("Installer role. Applies at once: the inverter's connection is restarted under the new mode (a few seconds without live data)."))}</p>
+    </article>`;
+}
 
 async function renderSetup() {
-  const [sr, gr] = await Promise.all([apiFetch("/setup"), apiFetch("/settings")]);
+  const sr = await apiFetch("/setup");
   if (sr.status === 401) { gate(tr("the token was rejected — sign in again")); return null; }
   if (!sr.ok) {
     const p = await problemOf(sr);
     return `${pageHead(tr("Setup"))}<article class="panel"><p class="muted">${esc(p.code === "insufficient_role"
       ? tr("Setup needs an installer token (yours: {role}).", { role: p.token_role }) : tr("Setup is not available on this server."))}</p></article>`;
   }
+  if (!(await loadState())) return null;
   const s = await sr.json();
-  const set = gr.ok ? await gr.json() : { settings: [] };
-  const val = (k) => set.settings.find((x) => x.key === k)?.value;
-  const src = (k) => set.settings.find((x) => x.key === k)?.source;
-  const fwd = val("forward.mode") ?? S.forwardMode?.mode;
-  const capWh = val("battery.capacity_wh");
-  const modules = s.battery?.modules;
-  const zone = val("site.time_zone");
-  const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
-  const zones = Intl.supportedValuesOf?.("timeZone") ?? [];
-  const pick = zone ?? browserZone;
-  if (pick && !zones.includes(pick)) zones.unshift(pick);
-
+  const ctx = await loadSiteCtx(s);
   const checks = s.checks.map((c) => {
     const [txt, cls] = CHECK_CHIP[c.status] ?? [c.status, "muted"];
     return `<li class="item">
@@ -2446,47 +2553,13 @@ async function renderSetup() {
     <ul class="list compact">${checks}</ul>
     <button type="button" class="ghost" data-action="setup-refresh">${esc(tr("Check again"))}</button>
   </article>
-  <article class="panel">
-    <h3>2 · ${esc(tr("Time zone"))}</h3>
-    <p class="muted small">${esc(tr("The inverter's clock has no time zone: it shows local time, and its schedule runs on it. Choose where the inverter is — this machine's own time zone does not matter. foxesslocal keeps the inverter's clock to this zone, daylight saving included."))}</p>
-    <label>${esc(tr("Time zone"))}${zones.length
-      ? `<select id="setup-zone">${zones.map((z) => `<option value="${esc(z)}" ${z === pick ? "selected" : ""}>${esc(z)}</option>`).join("")}</select>`
-      : `<input type="text" id="setup-zone" placeholder="Australia/Melbourne" value="${esc(pick)}">`}</label>
-    <p class="muted small">${esc(zone ? tr("Currently {zone} ({source}).", { zone, source: SOURCE_TEXT[src("site.time_zone")] ?? "" })
-      : browserZone ? tr("Not set yet. Suggested from this browser: {zone}.", { zone: browserZone }) : tr("Not set yet."))}</p>
-    <button type="button" class="cmd" data-action="setup-zone">${esc(tr("Save time zone"))}</button>
-  </article>
-  <article class="panel">
-    <h3>3 · ${esc(tr("Battery capacity"))}</h3>
-    <p class="muted small">${esc(tr("The battery's usable energy, used to show how much is stored. It is the number of battery modules times the energy of one module."))} ${esc(modules
-        ? tr("The inverter reports {n} modules — for EQ4800 modules (4.66 kWh each) that is {kwh} kWh.", { n: modules, kwh: (modules * 4.66).toFixed(2) })
-        : tr("An EQ4800 module is 4.66 kWh. The module count shows here once the inverter has sent its battery details."))}</p>
-    <label>${esc(tr("Usable capacity (kWh)"))}<input type="number" id="setup-capacity" min="0.1" max="200" step="0.01" value="${capWh ? (capWh / 1000).toFixed(2) : ""}"></label>
-    <p class="muted small">${esc(capWh ? tr("Currently {kwh} kWh ({source}).", { kwh: (capWh / 1000).toFixed(2), source: SOURCE_TEXT[src("battery.capacity_wh")] ?? "" }) : tr("Not set yet."))}</p>
-    <button type="button" class="cmd" data-action="setup-capacity">${esc(tr("Save capacity"))}</button>
-  </article>
-  <article class="panel">
-    <h3>4 · ${esc(tr("Cloud forwarding"))}</h3>
-    <p class="muted small">${esc(tr("What reaches the FoxESS cloud and the FoxESS app, and whether they can change anything. The same setting as System → FoxESS cloud; a maintenance window overrides it for a while."))}</p>
-    <div class="radio-list">${FORWARD_CHOICES.map(([m, t, d]) => `
-      <label class="radio-row"><input type="radio" name="setup-forward" value="${m}" ${fwd === m ? "checked" : ""}>
-        <span><strong>${esc(t)}</strong><span class="desc muted small">${esc(d)}</span></span></label>`).join("")}
-    </div>
-    <button type="button" class="cmd" data-action="setup-forward">${esc(tr("Save cloud choice"))}</button>
-  </article>
-  <article class="panel">
-    <h3>5 · ${esc(tr("Visitors without a token"))}</h3>
-    <p class="muted small">${esc(tr("Separate from cloud forwarding: this is about people on your own network opening this web page."))}</p>
-    <label class="radio-row"><input type="checkbox" id="setup-public" ${val("access.public_read_only") ? "checked" : ""}>
-      <span>${esc(tr("Can see the dashboard (read only)"))}</span></label>
-    <label class="radio-row"><input type="checkbox" id="setup-public-all" ${val("access.public_all_pages") ? "checked" : ""}>
-      <span>${esc(tr("…and every other page (still read only)"))}</span></label>
-    <p class="muted small">${esc(tr("Anyone on your network can open this page. Changes always need a token."))}</p>
-    <button type="button" class="cmd" data-action="setup-access">${esc(tr("Save access"))}</button>
-  </article>
+  ${zonePanel(ctx, null, 2)}
+  ${capacityPanel(ctx, 3)}
+  ${forwardPanel(4)}
+  ${accessPanel(ctx, 5)}
   <article class="panel">
     <h3>6 · ${esc(tr("Done"))}</h3>
-    <p class="muted small">${esc(tr("Each section above takes effect as soon as you save it; this changes no setting. Marking setup as done only stops this page opening by itself when an installer signs in — it stays under System → Setup."))}
+    <p class="muted small">${esc(tr("Each step saves on its own and is also on its own page under System (Site, FoxESS cloud, Access). Marking setup as done only stops this page opening by itself when an installer signs in."))}
       ${esc(allOk ? tr("Everything needed is in place.") : tr("Some checks still need attention: you can mark it done now and come back."))}</p>
     ${s.completed ? `<p class="small">${esc(tr("Setup is marked as done."))}</p>`
       : `<button type="button" class="cmd" data-action="setup-finish">${esc(tr("Mark setup as done"))}</button>`}
@@ -2567,16 +2640,6 @@ async function setupAction(action) {
       if (!(await confirmDlg(tr("Set the inverter's clock?"),
         tr("The inverter's clock will be set to {zone} time now. Its schedule runs on this clock.", { zone: z }), tr("Set the clock")))) return;
       if (await setInverterClock()) render();
-      break;
-    }
-    case "setup-forward": {
-      const m = document.querySelector('input[name="setup-forward"]:checked')?.value;
-      if (!m) { toast(tr("choose what the cloud may receive"), "warn"); return; }
-      if (await setupSave("/forward-mode", "PUT", { mode: m }, tr("cloud choice saved — the inverter reconnects under it within seconds"))) {
-        S.forwardMode = { mode: m };
-        renderForwardBadge();
-        render();
-      }
       break;
     }
     case "setup-access": {
@@ -2696,12 +2759,6 @@ async function renderCloud() {
   if (!(await loadState())) return null;
   const m = await fetchMaintenance();
   if (m === null) return null;
-  const mode = S.forwardMode?.mode ?? S.state.forward_mode;
-  const choice = (k) => {
-    const [t, d] = FORWARD_TEXT[k];
-    return `<label class="choice radio"><input type="radio" name="mode" value="${k}" ${k === mode ? "checked" : ""}>
-      <span class="choice-title">${esc(t)}${k === mode ? ` <span class="chip">${esc(tr("current"))}</span>` : ""}</span><span class="choice-desc">${esc(d)}</span></label>`;
-  };
   let maint;
   if (m.error) {
     maint = `<p class="error">${esc(m.error.code)}: ${esc(m.error.detail ?? m.error.title)}</p>`;
@@ -2724,14 +2781,7 @@ async function renderCloud() {
   return `
   ${pageHead(tr("FoxESS cloud"), esc(tr("How much of the FoxESS cloud this inverter may talk to.")))}
   <section class="stack">
-    <article class="panel">
-      <h3>${esc(tr("Cloud forwarding"))}</h3>
-      <form id="forward-form" data-cmd="forward" hx-put="${API}/forward-mode" hx-encoding="json" hx-swap="none">
-        <div class="choices">${["off", "telemetry_only", "full"].map(choice).join("")}</div>
-        <button data-cmd="forward" data-confirm="forward" type="submit" class="cmd">${esc(tr("Apply"))}</button>
-      </form>
-      <p class="muted small">${esc(tr("Installer role. Applies at once: the inverter's connection is restarted under the new mode (a few seconds without live data)."))}</p>
-    </article>
+    ${forwardPanel()}
     <article class="panel">
       <div class="card-head"><h3>${esc(tr("Maintenance window"))}</h3><span class="chip ${m.active ? "warn" : "muted"}">${esc(m.active ? tr("open") : tr("closed"))}</span></div>
       ${maint}
@@ -2889,23 +2939,14 @@ async function tokensPanel() {
     </article>`;
 }
 
-// inSetup: a read-only row's pointer to where it is changed.
-const inSetup = () => `<p class="muted small"><a href="#/setup">${esc(tr("Change these in Setup."))}</a></p>`;
-
 async function renderAccess() {
-  const cfg = await loadCfg();
+  const ctx = await loadSiteCtx();
   const tokens = await tokensPanel();
   if (tokens === null) return null;
   return `
   ${pageHead(tr("Access"))}
   <section class="stack">
-    <article class="panel">
-      <h3>${esc(tr("Visitors without a token"))}</h3>
-      <dl class="kv">
-        <div><dt>${esc(tr("Read-only access without a token"))}</dt><dd>${esc(cfg?.public_access ? tr("on") : tr("off"))}</dd></div>
-      </dl>
-      ${inSetup()}
-    </article>
+    ${accessPanel(ctx)}
     ${tokens}
   </section>`;
 }
@@ -2935,19 +2976,12 @@ async function renderUpdates() {
 }
 
 async function renderSite() {
-  const cfg = await loadCfg();
+  const [cfg, ctx] = await Promise.all([loadCfg(), loadSiteCtx()]);
   return `
   ${pageHead(tr("Site"))}
   <section class="stack">
-    <article class="panel">
-      <h3>${esc(tr("Time"))}</h3>
-      <dl class="kv">
-        <div><dt>${esc(tr("Site time zone"))}</dt><dd>${cfg ? esc(cfg.site_time_zone ?? tr("not chosen yet (Setup)")) : "—"}</dd></div>
-        <div><dt>${esc(tr("Inverter clock"))}</dt><dd>${clockOffsetText(cfg?.inverter_clock_offset_s, cfg?.site_time_zone)}</dd></div>
-        <div><dt>${esc(tr("This machine's time zone"))}</dt><dd>${cfg ? esc(cfg.time_zone) + " " + utcOffset(cfg.utc_offset_s) : "—"}</dd></div>
-      </dl>
-      ${inSetup()}
-    </article>
+    ${zonePanel(ctx, cfg)}
+    ${capacityPanel(ctx)}
     ${languagePanel()}
   </section>`;
 }
@@ -3516,7 +3550,6 @@ document.addEventListener("click", async (e) => {
     case "setup-zone":
     case "setup-set-clock":
     case "setup-capacity":
-    case "setup-forward":
     case "setup-access":
     case "setup-finish":
       setupAction(t.dataset.action);
