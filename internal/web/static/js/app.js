@@ -1936,8 +1936,8 @@ async function renderControl() {
     .find((g) => g.enabled && g.start === "00:00" && hhmmMin(g.end) >= 23 * 60 + 59);
   return `
   ${pageHead(tr("Inverter"), esc(tr("Changes are sent to the inverter and confirmed by reading them back.")))}
-  <section class="stack" aria-label="${esc(tr("controls"))}">
-    <article class="panel">
+  <section class="stack inverter-page" aria-label="${esc(tr("controls"))}">
+    <article class="panel running-panel">
       <h3>${esc(tr("Running now"))}</h3>
       <p class="running"><strong>${esc(SCHED_TEXT[am.mode] ?? am.mode ?? "—")}</strong>
         <span class="muted">${am.source === "schedule"
@@ -1947,7 +1947,7 @@ async function renderControl() {
       ${limitsLegend(st)}
     </article>
 
-    <article class="panel">
+    <article class="panel mode-panel">
       <h3>${esc(tr("Base work mode"))}</h3>
       <p class="muted small">${esc(tr("Used when no schedule group covers the time."))}${allDay
         ? " " + esc(tr("Schedule group {n} runs all day ({mode}), so the base mode currently never applies — the FoxESS app's \"work mode\" is that group.", { n: allDay.index, mode: SCHED_TEXT[allDay.work_mode] ?? allDay.work_mode }))
@@ -1958,7 +1958,7 @@ async function renderControl() {
     </article>
 
     ${limitsPanel(st)}
-    <ul class="hub">
+    <ul class="hub inv-links">
       ${hubLink("device", tr("About this inverter"), deviceSummary(st), ICO.device)}
       ${hubLink("quirks", tr("Inverter quirks"), esc(tr("compensate for known reading quirks")), ICO.quirks)}
     </ul>
@@ -2002,7 +2002,8 @@ function limitsPanel(st) {
   return `<article class="panel limits">
       <h3>${esc(tr("Limits"))}</h3>
       <p class="muted small">${esc(tr("Numbered as on the diagram above. Installer role, except meter compensation (expert). Each change is read back from the inverter; the inverter may round values."))}</p>
-
+      <div class="lim-groups">
+      <section class="lim-group">
       ${head(1, tr("Grid connection"))}
       ${limitForm("limits-form", "limits", "/limits", "power_limits", (ok) =>
         numIn("import_w", tr("Import limit"), l.import_w, "W", 0, 30000, 1, ok) +
@@ -2015,22 +2016,26 @@ function limitsPanel(st) {
         <p class="muted small">${esc(tr("Corrects a steady offset between the CT meter and the real flow (−500 to 500 W). Export limiting uses the corrected reading, so real export can exceed the export limit by up to this amount."))}</p>
         <button data-cmd="meter-comp" type="submit" class="cmd" ${compOK ? "" : "disabled"}>${esc(tr("Apply compensation"))}</button>
       </form>${writeNote("meter_compensation")}
-
+      </section>
+      <section class="lim-group">
       ${head(2, tr("Inverter grid port"))}
       ${limitForm("port-form", "port-limits", "/port-limits", "port_limits", (ok) =>
         numIn("load_limit_w", tr("Load limit"), l.load_limit_w, "W", 0, 65535, 1, ok) +
         numIn("generation_limit_w", tr("Generation limit"), l.generation_limit_w, "W", 0, 65535, 1, ok), tr("Apply port limits"))}
       <p class="muted small">${esc(tr("The load limit caps what the inverter draws from the switchboard — battery charging plus backup pass-through (verified 17 Nov); keep it within the inverter's supply breaker. The generation limit's effect is untested."))}</p>
-
+      </section>
+      <section class="lim-group">
       ${head(3, tr("Battery"))}
       ${limitForm("batt-form", "battery-currents", "/battery-currents", "battery_currents", (ok) =>
         numIn("max_charge_current_a", tr("Max charge current"), l.max_charge_current_a, "A", 0, 50, 0.1, ok) +
         numIn("max_discharge_current_a", tr("Max discharge current"), l.max_discharge_current_a, "A", 0, 50, 0.1, ok), tr("Apply battery currents"))}
-
+      </section>
+      <section class="lim-group">
       ${head(4, tr("Inverter output"))}
       ${limitForm("plim-form", "power-limit", "/power-limit", "power_limit", (ok) =>
         numIn("power_limit_pct", tr("Power limit"), l.power_limit_pct, esc(tr("% of rating")), 0, 100, 1, ok), tr("Apply power limit"))}
-
+      </section>
+      <section class="lim-group">
       ${head(5, tr("Backup (EPS) port"))}
       <form id="eps-form" data-cmd="eps-mode" data-confirm="epsMode" hx-put="${API}/eps-mode" hx-encoding="json" hx-swap="none">
         <div class="radio-list">${[["ups", tr("UPS mode"), tr("switches the backup circuits to the battery within milliseconds when the grid fails")],
@@ -2041,6 +2046,8 @@ function limitsPanel(st) {
         ${eps === "disabled" ? `<p class="muted small">${esc(tr("The port is currently disabled; enabling and disabling it from here is not offered until that has been verified on this inverter."))}</p>` : ""}
         <button data-cmd="eps-mode" type="submit" class="cmd" ${epsOK ? "" : "disabled"}>${esc(tr("Apply EPS mode"))}</button>
       </form>${writeNote("eps_mode")}
+      </section>
+      </div>
     </article>`;
 }
 

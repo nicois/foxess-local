@@ -39,7 +39,11 @@
 /* the hidden attribute always wins over a component's display */
 [hidden] { display: none !important; }
 
-html { scroll-padding-top: 6rem; } /* focused targets never hide under the sticky header (2.4.11) */
+/* focused targets never hide under the sticky header (2.4.11); the
+   scrollbar's room is kept from the start, so the page does not narrow
+   when the history makes it scroll (the flow diagram, sized by its
+   width, would shift everything below it: CLS 0.56, 2026-11-20) */
+html { scroll-padding-top: 6rem; scrollbar-gutter: stable; }
 
 .sr-only {
   position: absolute;
@@ -1463,7 +1467,7 @@ a.badge { text-decoration: none; &:hover { text-decoration: underline; } }
   .panel button { margin-top: 0.4rem; }
 }
 
-/* the Control page's limits panel: one numbered section per diagram marker */
+/* the Inverter page's limits panel: one numbered section per diagram marker */
 .panel.limits {
   .lim-num {
     display: inline-grid;
@@ -1483,7 +1487,7 @@ a.badge { text-decoration: none; &:hover { text-decoration: underline; } }
     margin: 1.2rem 0 0.4rem;
     font-size: 0.95rem;
   }
-  .lim-head:first-of-type { margin-top: 0.6rem; }
+  .lim-group > .lim-head:first-child { margin-top: 0; }
   form + form { margin-top: 0.6rem; }
   .radio-list { display: grid; gap: 0.2rem; margin: 0.4rem 0 0.6rem; }
   .radio-row {
@@ -1590,3 +1594,20 @@ a.badge { text-decoration: none; &:hover { text-decoration: underline; } }
 
 /* a firmware upgrade task on Frame messages: the download address is long */
 .fw-task { margin: 0.25rem 0 0; overflow-wrap: anywhere; }
+
+/* the Inverter page on a wide screen: it uses the width rather than one
+   long column (owner, 2026-11-20). The diagram and its legend stand on
+   the left; the work mode, the limits — their five groups side by side
+   as far as they fit — and the links share the wider right column. */
+#app[data-route="inverter"] #view { max-width: 1840px; }
+/* the groups flow as newspaper columns (as many as fit): a tall group
+   leaves no hole beside a short one */
+.lim-groups { columns: 330px; column-gap: 1.75rem; margin-top: 1rem; }
+.lim-group { break-inside: avoid; padding-bottom: 1rem; }
+@container (min-width: 1200px) {
+  .inverter-page {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    .running-panel { grid-column: 1; grid-row: 1 / span 3; }
+    .mode-panel, .limits, .inv-links { grid-column: 2; }
+  }
+}

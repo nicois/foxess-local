@@ -92,7 +92,7 @@ func TestStaticAssets(t *testing.T) {
 		{"/static/vendor/apexcharts.min.js", ctJS, cacheVendor},
 		{"/static/vendor/apexcharts.css", ctCSS, cacheVendor},
 		{"/static/vendor/apexcharts-legend.css", ctCSS, cacheVendor},
-		{"/static/js/app.js", ctJS, cacheAssets},
+		{pathAppJS, ctJS, cacheAssets},
 		{"/static/css/app.css", ctCSS, cacheAssets},
 		{"/static/index.html", "text/html", cacheAssets},
 		{"/static/favicon.svg", "image/svg+xml", cacheAssets},

@@ -1,10 +1,10 @@
 package web
 
 import (
-	"io"
 	"mime"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 )
 
@@ -40,37 +40,49 @@ func serveUI(w http.ResponseWriter, r *http.Request) {
 	p := path.Clean(r.URL.Path)
 	switch {
 	case p == "/" || p == "/index.html":
-		serveFile(w, "static/index.html", cacheAssets)
+		serveFile(w, r, "static/index.html", cacheAssets)
 	case strings.HasPrefix(p, "/static/"):
 		name := strings.TrimPrefix(p, "/")
 		cc := cacheAssets
 		if strings.HasPrefix(name, "static/vendor/") {
 			cc = cacheVendor
 		}
-		serveFile(w, name, cc)
+		serveFile(w, r, name, cc)
 	default:
 		http.NotFound(w, r)
 	}
 }
 
 // serveFile writes one embedded asset (404 when missing; the embed FS
-// also rejects any traversal, and the mux cleans the path before us).
-func serveFile(w http.ResponseWriter, name, cacheControl string) {
-	f, err := staticFS.Open(name)
-	if err != nil {
+// also rejects any traversal, and the mux cleans the path before us):
+// gzipped for a client that accepts it, with an ETag, and 304 when the
+// client's copy still matches.
+func serveFile(w http.ResponseWriter, r *http.Request, name, cacheControl string) {
+	a := loadAsset(name)
+	if a == nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	defer func() { _ = f.Close() }()
-	st, err := f.Stat()
-	if err != nil || st.IsDir() {
-		http.Error(w, "not found", http.StatusNotFound)
+	h := w.Header()
+	body, tag := a.plain, a.etag
+	if a.compressible {
+		h.Set("Vary", "Accept-Encoding")
+		if acceptsGzip(r) {
+			body, tag = a.gz, a.etagGz
+			h.Set("Content-Encoding", "gzip")
+		}
+	}
+	h.Set("Cache-Control", cacheControl)
+	h.Set("ETag", tag)
+	if matchesETag(r, tag) {
+		h.Del("Content-Encoding")
+		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	w.Header().Set("Content-Type", contentType(name))
-	w.Header().Set("Cache-Control", cacheControl)
+	h.Set("Content-Type", a.contentType)
+	h.Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, f)
+	_, _ = w.Write(body)
 }
 
 // contentType gives the assets explicit, stable types: Go's mime table

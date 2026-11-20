@@ -64,6 +64,18 @@ version; anything else bumps the patch version.
 
 ### Fixed
 
+- Pages load faster, especially through a reverse proxy or over a slow
+  link. The page files are sent compressed (the app's script shrinks from
+  175 KB to 53 KB), a repeat visit re-downloads only what changed, and
+  the two modules the app needs are fetched alongside it rather than
+  after it.
+- The dashboard no longer jumps as it loads. A scrollbar appearing when
+  the history filled in narrowed the page, which shrank the flow diagram
+  and moved everything below it.
+- Inverter page on a wide screen: the page uses the width. The diagram
+  stays on the left; the work mode, the limits (their groups side by side)
+  and the links fill the right, so the whole page fits a 1080-pixel-high
+  screen.
 - Dashboard: the two-column layout (the live view beside the history)
   is used only when the whole live view fits the window's height. On a
   wide but short window the bottom of the live view was cut off; it now
