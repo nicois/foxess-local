@@ -47,6 +47,10 @@ version; anything else bumps the patch version.
 
 ### Fixed
 
+- Dashboard: the two-column layout (the live view beside the history)
+  is used only when the whole live view fits the window's height. On a
+  wide but short window the bottom of the live view was cut off; it now
+  stays one column there, and switches as the window is resized.
 - The web UI rides out a restart. A page loaded while foxess-local was
   restarting (after an update, say) signed you out, even with "keep me
   signed in"; it now keeps the stored token and tries again until the

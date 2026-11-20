@@ -1528,9 +1528,11 @@ a.badge { text-decoration: none; &:hover { text-decoration: underline; } }
    banners, the live view and the footer; right, the energy history,
    scrolling on its own so the live view stays in sight. main#view steps
    aside (display: contents) so its two sections are the grid's items;
-   each becomes the size container its container queries need. */
+   each becomes the size container its container queries need. The
+   class is the script's (fitWide): at least 1400 px wide, and only
+   while the whole live view fits the window's height. */
 @media (min-width: 1400px) {
-  #app[data-route="dashboard"] {
+  #app.wide[data-route="dashboard"] {
     display: grid;
     grid-template-columns: minmax(0, 40rem) minmax(0, 1fr);
     /* header, three banners, the live view, the footer; the last row

@@ -1026,11 +1026,45 @@ async function render() {
   byId("app").dataset.route = routeName();
   view.innerHTML = `<h1 class="sr-only">${esc(title)}</h1>` + html;
   paintDeviceBanner();
+  watchWide();
   htmx.process(view);
   applyRoleLocks(view);
   if (AFTER[routeName()]) AFTER[routeName()]();
   setBusy(S.cmdBusy > 0);
 }
+
+// ---------- the wide dashboard ----------
+// Two columns (the live view beside the history) need a screen at least
+// WIDE_MIN_PX wide and tall enough for the whole live view: on a shorter
+// one its base would sit below the fold, so the dashboard stays one
+// column. fitWide measures the live view in the wide layout and keeps
+// it only if it fits; the class goes on and off within one task, so the
+// browser never paints the trial. It runs on each render, on a resize,
+// and when the live view or a banner above it changes size.
+const WIDE_MIN_PX = 1400;
+const wideRO = new ResizeObserver(() => fitWide());
+
+function fitWide() {
+  const app = byId("app");
+  const now = document.querySelector("#view .now");
+  if (app.dataset.route !== "dashboard" || !now || window.innerWidth < WIDE_MIN_PX) {
+    app.classList.remove("wide");
+    return;
+  }
+  app.classList.add("wide");
+  const bottom = now.getBoundingClientRect().bottom + window.scrollY + parseFloat(getComputedStyle(now).marginBottom);
+  app.classList.toggle("wide", bottom <= window.innerHeight);
+}
+
+function watchWide() {
+  wideRO.disconnect();
+  for (const el of [byId("banner-inverter"), byId("banner-feed"), byId("banner-device"), document.querySelector("#view .now")]) {
+    if (el) wideRO.observe(el);
+  }
+  fitWide();
+}
+
+window.addEventListener("resize", fitWide);
 
 // ---------- dashboard (2026-11-16 redesign: dataviz skill) ----------
 //
