@@ -521,7 +521,8 @@ path = %q
 	require.GreaterOrEqual(t, len(fwdS2C), 2)
 
 	// The bus replay (SSE Last-Event-ID's data source): the session's
-	// whole story, in order.
+	// discrete events in order, then the latest snapshot (snapshots are
+	// not replayed: the next supersedes each).
 	_, replay, _, _ := h.bus.Connect(0, true)
 	kinds := make([]string, 0, len(replay))
 	for _, ev := range replay {
@@ -529,14 +530,13 @@ path = %q
 	}
 	require.Equal(t, []string{
 		api.EventConnection, // online (the first telemetry of the session)
-		api.EventSnapshot,   // tele 1
-		api.EventSnapshot,   // tele 2
 		api.EventConfig,     // the cloud's fn10 write: limits (the observer's config event)
 		api.EventConfig,     // identity learned (the seeded model read, as the poll would)
 		api.EventConfig,     // identity (the seeded version read)
 		api.EventConfig,     // work-mode learned (the seeded 41000 read)
 		api.EventConfig,     // the work-mode command acked
 		api.EventConnection, // offline (session down)
+		api.EventSnapshot,   // tele 2, the latest
 	}, kinds)
 
 	// Chunk byte capture (knob on above): the persisted chunks carry the

@@ -1708,7 +1708,7 @@ paths:
 
         | event | payload |
         |---|---|
-        | `snapshot` | `SnapshotEvent` — every 150 B telemetry frame (~5 s) |
+        | `snapshot` | `SnapshotEvent` — the live values, every reading (~5 s); no `id` |
         | `config` | `ConfigEvent` — any confirmed register change (ours or a cloud push) |
         | `connection` | `ConnectionEvent` — inverter liveness up/down (session down, or data-silent >15 s — server-computed) |
         | `system` | `SystemEvent` — forward-mode change, maintenance window transitions, alerts |
@@ -1716,8 +1716,16 @@ paths:
         | `gap` | `GapEvent` — per-client drops; do `GET /state` |
 
         `id` is monotonic per connection epoch; send it back as
-        `Last-Event-ID` for replay. The 5 s snapshot cadence is the
-        heartbeat: treat >15 s of silence as offline. Browsers' `EventSource`
+        `Last-Event-ID` for replay. The replay window is the last 1024
+        discrete events (`config`, `connection`, `system`). Snapshots are
+        not replayed — each only says what the values are now, and the
+        next supersedes it — and carry no `id`, so the client's
+        Last-Event-ID stays on the last discrete event. Every connection
+        (fresh or resumed) sends the latest snapshot after its replay, so
+        the current values arrive at once. A client that falls behind
+        drops snapshots silently; `gap` reports dropped discrete events
+        only. The 5 s snapshot cadence is the heartbeat: treat >15 s of
+        silence as offline. Browsers' `EventSource`
         passes the bearer token as `?token=` (LAN-only v1).
       x-required-role: read-only
       parameters:
@@ -3115,11 +3123,13 @@ components:
     Event:
       type: object
       description: One server-sent event. `event` selects the `data` payload (see `x-event-map`).
-      required: [id, event, data]
+      required: [event, data]
       properties:
         id:
           type: integer
-          description: Monotonic per connection epoch; send back as Last-Event-ID.
+          description: >-
+            Monotonic per connection epoch; send back as Last-Event-ID.
+            Absent on a snapshot (not replayed).
         event:
           type: string
           enum: [snapshot, config, connection, system, resync, gap]

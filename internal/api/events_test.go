@@ -50,6 +50,7 @@ type sseWriter struct {
 	statusCode int
 	events     []sseEvent
 	pending    []byte
+	raw        []byte // the whole stream as written
 	header     http.Header
 	ready      chan struct{} // closed on the first write (the connect barrier)
 }
@@ -81,6 +82,7 @@ func (w *sseWriter) Write(p []byte) (int, error) {
 	defer w.mu.Unlock()
 	w.markReady()
 	w.pending = append(w.pending, p...)
+	w.raw = append(w.raw, p...)
 	for {
 		idx := indexBytes(w.pending, []byte("\n\n"))
 		if idx < 0 {
@@ -219,6 +221,97 @@ func TestSSEReplay(t *testing.T) {
 	}
 }
 
+// TestSSESnapshotsNotReplayed (owner, 2026-11-21): a snapshot only says
+// what the values are now, so the replay ring keeps the discrete events
+// (config, connection, system) and no snapshots. A connection ends its
+// replay with the latest snapshot — a reconnect after an hour gets one,
+// not ~700, and a fresh connect has the current values at once.
+func TestSSESnapshotsNotReplayed(t *testing.T) {
+	h := newHarness(t)
+	snap := func(soc int) { h.bus.PublishSnapshot(SnapshotEvent{SocPct: soc}) }
+	snap(41)
+	h.bus.PublishSystem(SystemEvent{Type: SystemAlert, Detail: "e1"}) // 1
+	snap(42)
+	h.bus.PublishConfig(ConfigEvent{Changed: []string{SectionWorkMode}}) // 2
+	snap(43)
+	h.bus.PublishSystem(SystemEvent{Type: SystemAlert, Detail: "e2"}) // 3
+	snap(44)
+	auth := map[string]string{headerAuth: "Bearer " + h.tokens[RoleReadOnly]}
+
+	c := h.connectSSE(t, mergeHeader(auth, map[string]string{headerLastEventID: "0"}))
+	var got []string
+	for range 4 {
+		ev := c.next()
+		got = append(got, fmt.Sprintf("%s/%d", ev.kind, ev.id))
+		if ev.kind == EventSnapshot && !contains(ev.data, `"soc_pct":44`) {
+			t.Fatalf("snapshot: got %s, want the latest (44)", ev.data)
+		}
+	}
+	c.close()
+	if fmt.Sprint(got) != "[system/1 config/2 system/3 snapshot/0]" {
+		t.Fatalf("replay: got %v, want the discrete events then the latest snapshot", got)
+	}
+
+	// a resume from a discrete event's id replays only what followed it
+	c = h.connectSSE(t, mergeHeader(auth, map[string]string{headerLastEventID: "2"}))
+	if ev := c.next(); ev.kind != EventSystem || ev.id != 3 {
+		t.Fatalf("resume from 2: got %s/%d, want system/3", ev.kind, ev.id)
+	}
+	if ev := c.next(); ev.kind != EventSnapshot || ev.id != 0 {
+		t.Fatalf("resume from 2: got %s/%d, want the latest snapshot", ev.kind, ev.id)
+	}
+	c.close()
+
+	// a fresh connect (no Last-Event-ID): the latest snapshot, then live
+	c = h.connectSSE(t, auth)
+	defer c.close()
+	if ev := c.next(); ev.kind != EventSnapshot || !contains(ev.data, `"soc_pct":44`) {
+		t.Fatalf("fresh connect: got %s %s, want the latest snapshot", ev.kind, ev.data)
+	}
+	h.bus.PublishSystem(SystemEvent{Type: SystemAlert, Detail: "live"})
+	if ev := c.next(); ev.kind != EventSystem || ev.id != 4 {
+		t.Fatalf("live: got %s/%d, want system/4", ev.kind, ev.id)
+	}
+}
+
+// TestSSESnapshotHasNoID: a snapshot goes out without an id: line, so a
+// client's Last-Event-ID stays on the last discrete event (EventSource
+// and hx-sse keep the previous id when a message has none) and a
+// resume never skips one.
+func TestSSESnapshotHasNoID(t *testing.T) {
+	h := newHarness(t)
+	h.bus.PublishSystem(SystemEvent{Type: SystemAlert, Detail: "e1"})
+	c := h.connectSSE(t, map[string]string{headerAuth: "Bearer " + h.tokens[RoleReadOnly]})
+	defer c.close()
+	h.bus.PublishSnapshot(SnapshotEvent{SocPct: 42})
+	_ = c.next()
+	c.rw.mu.Lock()
+	raw := string(c.rw.raw)
+	c.rw.mu.Unlock()
+	if !strings.Contains(raw, "event: snapshot\n") || strings.Contains(raw, "id: 0") || strings.Contains(raw, "id: 2") {
+		t.Fatalf("stream: %q, want a snapshot with no id line", raw)
+	}
+}
+
+// TestSSEGapIgnoresSnapshots: a slow client that misses snapshots has
+// lost nothing (the next one supersedes them): no gap signal. Missed
+// discrete events still raise one (TestSSEGap).
+func TestSSEGapIgnoresSnapshots(t *testing.T) {
+	h := newHarness(t)
+	sub := h.bus.Subscribe()
+	defer sub.Close()
+	for i := range 3 * subQueueCap {
+		h.bus.PublishSnapshot(SnapshotEvent{SocPct: i % 100})
+	}
+	for range subQueueCap {
+		<-sub.Events()
+	}
+	h.bus.PublishSystem(SystemEvent{Type: SystemAlert, Detail: "after"})
+	if ev := <-sub.Events(); ev.Kind != EventSystem {
+		t.Fatalf("after dropped snapshots: got %s %+v, want the system event (no gap)", ev.Kind, ev.Data)
+	}
+}
+
 // TestSSEResync: a Last-Event-ID older than the ring's oldest entry
 // (1024 entries) gets the spec's resync signal instead of a replay.
 func TestSSEResync(t *testing.T) {
@@ -263,8 +356,8 @@ func TestSSELive(t *testing.T) {
 	defer c.close()
 	h.bus.PublishSnapshot(SnapshotEvent{TS: testBase, SocPct: 42, BatteryState: "idle"})
 	ev := c.next()
-	if ev.kind != "snapshot" || ev.id != 2 || !contains(ev.data, `"soc_pct":42`) {
-		t.Fatalf("live: got kind=%q id=%d data=%s, want snapshot e2", ev.kind, ev.id, ev.data)
+	if ev.kind != "snapshot" || ev.id != 0 || !contains(ev.data, `"soc_pct":42`) {
+		t.Fatalf("live: got kind=%q id=%d data=%s, want a snapshot without an id", ev.kind, ev.id, ev.data)
 	}
 	// behind nginx (the TLS route): the stream must not be buffered
 	if got := c.rw.header.Get("X-Accel-Buffering"); got != "no" {

@@ -20,7 +20,13 @@ func sseWriteFn(w http.ResponseWriter, flusher http.Flusher) func(Event) bool {
 		if err != nil {
 			return false
 		}
-		if _, err := fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", ev.ID, ev.Kind, data); err != nil {
+		// a snapshot has no id: line — the client's Last-Event-ID stays on
+		// the last discrete event, which a resume replays from
+		id := ""
+		if ev.Kind != EventSnapshot {
+			id = fmt.Sprintf("id: %d\n", ev.ID)
+		}
+		if _, err := fmt.Fprintf(w, "%sevent: %s\ndata: %s\n\n", id, ev.Kind, data); err != nil {
 			return false
 		}
 		if flusher != nil {

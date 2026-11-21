@@ -63,8 +63,10 @@ const (
 	auditActionAllow     = "allow"
 )
 
-// ringCap is the SSE replay window (spec: 1024 ≈ 85 min at the
-// snapshot cadence).
+// ringCap is the SSE replay window: the last 1024 discrete events
+// (config, connection, system). Snapshots are not kept: each only says
+// what the values are now, and the next supersedes it (owner,
+// 2026-11-21) — a connection gets the latest one (Bus.latest) instead.
 const ringCap = 1024
 
 // subQueueCap is one client's delivery queue (a slow client that
@@ -72,7 +74,9 @@ const ringCap = 1024
 const subQueueCap = 64
 
 // Event is one bus event: a monotonic id, a kind (the SSE event:
-// line), and a payload (the data: line, JSON-encoded per kind).
+// line), and a payload (the data: line, JSON-encoded per kind). A
+// snapshot has id 0 and goes out without an id: line, so a client's
+// Last-Event-ID stays on the last discrete event.
 type Event struct {
 	ID   int64
 	Kind string
@@ -137,6 +141,7 @@ type subscriber struct {
 type Bus struct {
 	mu     sync.Mutex
 	ring   []Event
+	latest *Event // the latest snapshot (nil before the first)
 	nextID int64
 	subs   map[int64]*subscriber
 	subSeq int64
@@ -156,8 +161,22 @@ func NewBus() *Bus {
 	return &Bus{subs: make(map[int64]*subscriber)}
 }
 
-// PublishSnapshot publishes one live-value snapshot.
-func (b *Bus) PublishSnapshot(e SnapshotEvent) Event { return b.publish(EventSnapshot, e) }
+// PublishSnapshot publishes one live-value snapshot: to the live
+// subscribers, and as the latest for the next connection — not into the
+// replay ring, and with no id.
+func (b *Bus) PublishSnapshot(e SnapshotEvent) Event {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	ev := Event{Kind: EventSnapshot, Data: e}
+	b.latest = &ev
+	for _, s := range b.subs {
+		select {
+		case s.ch <- ev:
+		default: // superseded by the next one: not a gap
+		}
+	}
+	return ev
+}
 
 // PublishConfig publishes a confirmed configuration change.
 func (b *Bus) PublishConfig(e ConfigEvent) Event { return b.publish(EventConfig, e) }
@@ -247,7 +266,8 @@ func (b *Bus) Subscribe() *Subscription {
 // window (a publish interleaved between the two would be missed or
 // duplicated): wantReplay returns the events with id > replayFrom, or
 // the resync signal when the window is exceeded (replayFrom older than
-// the ring's oldest, or a non-zero id against an empty ring).
+// the ring's oldest, or a non-zero id against an empty ring). Replay or
+// not, it ends with the latest snapshot (the current values).
 func (b *Bus) Connect(replayFrom int64, wantReplay bool) (*Subscription, []Event, bool, int64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -260,6 +280,10 @@ func (b *Bus) Connect(replayFrom int64, wantReplay bool) (*Subscription, []Event
 	var resyncID int64
 	if wantReplay {
 		replay, resync, resyncID = b.replayWindowLocked(replayFrom)
+	}
+	// every connection ends its replay with the current values
+	if b.latest != nil {
+		replay = append(replay, *b.latest)
 	}
 	return &Subscription{b: b, sub: sub}, replay, resync, resyncID
 }

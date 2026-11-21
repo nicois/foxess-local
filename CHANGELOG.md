@@ -28,6 +28,18 @@ version; anything else bumps the patch version.
 - The dashboard's state of charge moves smoothly between readings: it is
   carried forward at its recent rate for up to 10 s, then the next
   reading takes over.
+- The live feed (`GET /api/v1/events`) no longer replays missed
+  snapshots: a snapshot only says what the values are now. A reconnect
+  replays the missed configuration, connection and system events, then
+  sends the latest snapshot, which a fresh connection now also gets at
+  once. Snapshots carry no `id`, and dropping them for a slow client is
+  not reported as a `gap`. The replay window (1024 events) now covers
+  days instead of about 85 minutes.
+
+### Fixed
+
+- Coming back to the web UI after a while no longer replays the missed
+  readings on the dashboard at speed.
 
 ## [v0.4.0] - 2026-11-21
 

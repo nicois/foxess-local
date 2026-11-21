@@ -217,7 +217,9 @@ critical ones.
 - `GET /api/v1/events` is a Server-Sent Events stream: `snapshot` (the
   live values, ~5 s), `config` (any confirmed change, with the full
   state), `connection` (online / offline) and `system` (alerts, mode
-  and window changes). It resumes from `Last-Event-ID`.
+  and window changes). It resumes from `Last-Event-ID`: the missed
+  `config`, `connection` and `system` events, then the latest snapshot
+  (snapshots are not replayed, and carry no `id`).
 - `GET /api/v1/history?range=24h` gives bucketed series and energy
   totals; `GET /api/v1/power/average?window=5m` a trailing mean.
 - `GET /readyz` (no token) answers 503 while something is wrong, and
