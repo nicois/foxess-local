@@ -83,13 +83,14 @@ func main() {
 	notifier := notify.New(func() notify.Targets {
 		v := set.Get()
 		return notify.Targets{WebhookURL: v.NotifyWebhook, NtfyURL: v.NotifyNtfy}
-	}, time.Now)
+	}, time.Now, notify.WithJournal(api.NoticeJournal(st, bus)))
 	go notifier.Run(context.Background())
 	var est socest.Estimator
 	apiH := api.New(st, gw, maint, tok, fwd, bus, time.Now, api.WithSocEstimate(&est), api.WithInfo(api.ServerInfo{
 		Version: *version, RawHours: 72, BucketDays: 365, Settings: set,
 	}), api.WithNotifier(notifier),
 		api.WithCaptures(wincap.New(filepath.Join(dir, "captures"), 256<<20, time.Now, "devui")))
+	go apiH.RunOverrides(context.Background())
 	go live(st, bus, &est, func() int { return set.Get().CapacityWh })
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/{rest...}", apiH)

@@ -15,13 +15,15 @@ import (
 
 // allowed are the API operations that are tools (by operationId). Reads,
 // plus the everyday commands; each still needs the role the API requires
-// (work mode and schedule standard, meter compensation expert, limits
-// installer). Not here, on purpose: tokens, updates, maintenance windows,
+// (work mode, schedule and the schedule override standard, meter
+// compensation expert, limits installer). Not here, on purpose: tokens, updates, maintenance windows,
 // cloud forwarding, settings, raw register reads, the write override.
 var allowed = []string{
 	"getState", "getHistory", "getPowerAverage", "listAudit", "getForwardMode",
 	"getMaintenance", "getCompatibility", "getConfig", "ready", "getUpdate",
 	"setWorkMode", "setSchedule", "setLimits", "setMeterCompensation",
+	"getScheduleOverride", "setScheduleOverride", "clearScheduleOverride",
+	"listNotices", "sendNotice",
 }
 
 // apiPrefix is where the spec's paths live (its servers entry).

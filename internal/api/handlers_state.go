@@ -246,6 +246,8 @@ type State struct {
 	Energy Energy `json:"energy"`
 	// WriteBudget is each budgeted setting's write budget (WriteBudget).
 	WriteBudget map[string]WriteBudget `json:"write_budget"`
+	// ScheduleOverride is the active schedule override (D-029); null when none.
+	ScheduleOverride *ScheduleOverride `json:"schedule_override"`
 }
 
 // handleState is GET /state (spec getState): the normalized snapshot.
@@ -387,6 +389,7 @@ func (s *Server) buildState(st store.State) (State, error) {
 	body.Schedule = scheduleOf(st.Schedule, cfg.schedOn)
 	s.groupParams(body.Schedule.Groups)
 	body.ActiveMode = s.activeModeNow(body.Schedule, body.WorkMode)
+	body.ScheduleOverride = s.currentOverride()
 
 	mode, _, err := s.fwd.Get()
 	if err != nil {

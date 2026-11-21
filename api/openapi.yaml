@@ -445,6 +445,122 @@ paths:
           $ref: '#/components/responses/InverterOffline'
         '504':
           $ref: '#/components/responses/CommandFailed'
+  /schedule/override:
+    get:
+      tags: [Commands]
+      operationId: getScheduleOverride
+      summary: The active schedule override
+      x-required-role: read-only
+      responses:
+        '200':
+          description: The override (`active` false when none)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleOverride'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      tags: [Commands]
+      operationId: setScheduleOverride
+      summary: Force charge or discharge until a time (start or renew)
+      description: |
+        For automations (D-029): a force discharge or force charge from
+        now until `until`, without editing the schedule table. foxess-local
+        puts the window in the lowest free schedule group that runs before
+        the groups around it (the owner's groups never move: each group's
+        parameter block belongs to its slot), cuts it short where another
+        group's window begins inside it, and clears the group again at
+        its end, on DELETE, or after a restart. The inverter stops at the
+        cut-off SoC itself.
+
+        One override at a time, held by the token that started it: the
+        holder renews it by sending the same request with a later
+        `until` (a renewal keeps the group and start and moves the end),
+        or changes it. Another token gets `409 override_held`. Each start,
+        renewal and end is one schedule write against the schedule's
+        write budget (`429 write_budget`); a request the inverter already
+        holds is not written. Not queued: with no inverter session it is
+        `503 inverter_offline` and nothing is written.
+
+        Refusals: `409 override_no_group` (no free group runs before the
+        groups around the window), `409 override_unavailable` (the
+        scheduler is off, the current table does not validate, the
+        inverter's day ends now, or another window begins now), `503
+        wall_time_unknown` (no inverter clock reading or site time zone),
+        `503 schedule_unknown` (the schedule has not been read yet), and
+        the write gate's refusals (as `PUT /schedule`).
+      x-required-role: standard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleOverrideRequest'
+      responses:
+        '200':
+          description: The override as written (read back)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleOverride'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '409':
+          description: Held by another token, no group, or unavailable (`override_held`, `override_no_group`, `override_unavailable`, `command_in_flight`)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          $ref: '#/components/responses/TooManyWrites'
+        '501':
+          $ref: '#/components/responses/WriteUnsupported'
+        '502':
+          $ref: '#/components/responses/CommandFailed'
+        '503':
+          $ref: '#/components/responses/InverterOffline'
+        '504':
+          $ref: '#/components/responses/CommandFailed'
+    delete:
+      tags: [Commands]
+      operationId: clearScheduleOverride
+      summary: End the schedule override now
+      description: >-
+        The holder, an expert or an installer ends it: its group is
+        cleared (one schedule write). A group someone else has changed
+        since is left as it is. Without an override it is a no-op. A
+        failed write keeps the override; it is cleared at its end.
+      x-required-role: standard
+      responses:
+        '200':
+          description: Ended (`active` false)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleOverride'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: 'Not the holder (`override_held`), or the role is too low'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          $ref: '#/components/responses/CommandInFlight'
+        '429':
+          $ref: '#/components/responses/TooManyWrites'
+        '502':
+          $ref: '#/components/responses/CommandFailed'
+        '503':
+          $ref: '#/components/responses/InverterOffline'
+        '504':
+          $ref: '#/components/responses/CommandFailed'
   /meter-compensation:
     put:
       tags: [Commands]
@@ -1634,6 +1750,92 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
+  /notices:
+    get:
+      tags: [Events]
+      operationId: listNotices
+      summary: Recent notices (foxess-local's and automations')
+      description: >-
+        Every notice that was news (not a repeat within the 15-minute
+        dedup window), whether or not a webhook or ntfy target is set:
+        foxess-local's own (`origin` foxess-local) and automations' (D-030).
+        Newest first; kept 30 days, at most 500. `before` (an id) pages back.
+      x-required-role: read-only
+      parameters:
+        - name: before
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+      responses:
+        '200':
+          description: The notices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [notices]
+                properties:
+                  notices:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Notice'
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+    post:
+      tags: [Events]
+      operationId: sendNotice
+      summary: Send a notice from an automation
+      description: |
+        For automations (D-030): a notice delivered like foxess-local's own
+        — the outbox (survives a restart, retried), the webhook and ntfy
+        targets, the 15-minute dedup of the same event and message — and
+        kept in `GET /notices`. Its origin is the token's name: the
+        webhook body carries `origin`, ntfy's title is prefixed with it.
+        The event is prefixed `sidecar.` so it never passes for one of
+        foxess-local's own. `critical` needs an expert or installer token.
+        At most 20 an hour per token (`429 notice_rate`, Retry-After).
+      x-required-role: standard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoticeRequest'
+      responses:
+        '202':
+          description: Accepted (a repeat within the dedup window is dropped)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted: {type: boolean}
+        '400':
+          $ref: '#/components/responses/InvalidValue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientRole'
+        '429':
+          description: 'The token''s hourly budget is spent (`code: notice_rate`; Retry-After set)'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          description: 'No notifier in this server (`code: notices_unavailable`)'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
   /healthz:
     get:
       tags: [Config]
@@ -1841,6 +2043,11 @@ components:
           description: When this snapshot was built.
         energy:
           $ref: '#/components/schemas/Energy'
+        schedule_override:
+          oneOf:
+            - $ref: '#/components/schemas/ScheduleOverride'
+            - type: 'null'
+          description: The active schedule override (`PUT /schedule/override`); null when none.
         write_budget:
           type: object
           description: >-
@@ -2312,6 +2519,108 @@ components:
       properties:
         mode:
           $ref: '#/components/schemas/ForwardMode'
+    NoticeRequest:
+      type: object
+      required: [event, severity, title]
+      properties:
+        event:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{0,39}$'
+          description: The automation's event name (delivered as `sidecar.<event>`).
+        severity:
+          type: string
+          enum: [info, warning, critical]
+          description: ntfy priority 3 / 4 / 5. critical needs an expert or installer token.
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: One line.
+        message:
+          type: string
+          maxLength: 1000
+    Notice:
+      type: object
+      required: [id, ts, origin, event, severity, title, message]
+      properties:
+        id: {type: integer}
+        ts: {type: string, format: date-time}
+        origin:
+          type: string
+          description: foxess-local, or the name of the automation's token.
+        event: {type: string}
+        severity:
+          type: string
+          enum: [info, warning, critical]
+        title: {type: string}
+        message: {type: string}
+    ScheduleOverrideRequest:
+      type: object
+      required: [mode, until, fd_soc_pct, fd_pwr_w]
+      properties:
+        mode:
+          type: string
+          enum: [force-discharge, force-charge]
+        until:
+          type: string
+          format: date-time
+          description: >-
+            When it ends: 1 minute to 12 hours ahead. Rounded up to the
+            inverter's minute; a window cannot pass the inverter's
+            midnight (it ends at 23:59; renew after midnight).
+        fd_soc_pct:
+          type: integer
+          minimum: 10
+          maximum: 100
+          description: >-
+            The cut-off SoC: a force discharge stops at it, a force charge
+            charges to it. The inverter enforces it.
+        fd_pwr_w:
+          type: integer
+          minimum: 0
+          maximum: 10500
+          description: The force window's power (W).
+    ScheduleOverride:
+      type: object
+      required: [active]
+      properties:
+        active:
+          type: boolean
+        mode:
+          type: string
+          enum: [force-discharge, force-charge]
+        holder:
+          type: string
+          description: The name of the token that holds it.
+        group:
+          type: integer
+          minimum: 1
+          maximum: 8
+          description: The schedule group it occupies.
+        start:
+          type: string
+          description: The window's start, HH:MM inverter time.
+        end:
+          type: string
+          description: The window's end, HH:MM inverter time (exclusive).
+        until:
+          type: string
+          format: date-time
+          description: >-
+            When it ends: the window's end. Earlier than requested_until
+            when the window had to stop where another group's window
+            begins, or at the inverter's midnight.
+        requested_until:
+          type: string
+          format: date-time
+        since:
+          type: string
+          format: date-time
+          description: When it started (kept across renewals).
+        fd_soc_pct:
+          type: integer
+        fd_pwr_w:
+          type: integer
     Schedule:
       type: object
       required: [enabled, groups]
@@ -2876,7 +3185,7 @@ components:
       properties:
         type:
           type: string
-          enum: [forward-mode-changed, maintenance-opened, maintenance-extended, maintenance-expired, maintenance-closed, alert, gate-rule-loss, upgrade-rolled-back, grid-lost, grid-restored, unclean-restart, battery-low, battery-forecast-low, counter-reset, firmware-task]
+          enum: [forward-mode-changed, maintenance-opened, maintenance-extended, maintenance-expired, maintenance-closed, alert, gate-rule-loss, upgrade-rolled-back, grid-lost, grid-restored, unclean-restart, battery-low, battery-forecast-low, counter-reset, firmware-task, schedule-override-started, schedule-override-ended, notice]
         detail:
           type: string
     ResyncEvent:
@@ -2964,6 +3273,13 @@ components:
             - zone_mismatch
             - zone_unset
             - host_clock_unsynced
+            - notice_rate
+            - notices_unavailable
+            - override_held
+            - override_no_group
+            - override_unavailable
+            - schedule_unknown
+            - wall_time_unknown
         setting:
           type: string
           description: Present on write_budget — the setting whose budget is spent (a `write_budget` key).

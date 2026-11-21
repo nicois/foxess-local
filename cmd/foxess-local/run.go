@@ -108,6 +108,7 @@ func withStoreOpen(f func(string, string) (*store.Store, error)) runOption {
 type handle struct {
 	capt     *wincap.Capturer   // maintenance-window captures
 	notifier *notify.Notifier   // outbound notifications (F2)
+	apiSrv   *api.Server        // the API (its schedule-override expiry loop runs in Start)
 	grid     gridWatch          // grid lost / restored, from the inverter state
 	soc      socWatch           // the battery alerts, from the state of charge
 	energy   energyWatch        // the lifetime energy counters
@@ -484,9 +485,10 @@ func (h *handle) buildMux(cfg *config.Config, tok *api.TokenStore) http.Handler 
 	}
 	// read-only device scans (F8): operator-origin reads through the gateway
 	h.scanner = scan.New(scan.GatewayReader(h.gw, scanOrigin), h.clk)
-	h.notifier = notify.New(h.notifyTargets, h.clk, notify.WithOutbox(storeOutbox{h.st}))
+	h.notifier = notify.New(h.notifyTargets, h.clk, notify.WithOutbox(storeOutbox{h.st}), notify.WithJournal(api.NoticeJournal(h.st, h.bus)))
 	apiH := api.New(h.st, h.gw, h.maint, tok, h.fwd, h.bus, h.clk, api.WithInfo(info), api.WithUpdate(h.upd), api.WithScanner(h.scanner), api.WithCaptures(h.capt),
 		api.WithReadyChecks(h.readyChecks), api.WithNotifier(h.notifier), api.WithSocEstimate(&h.soc.est))
+	h.apiSrv = apiH
 	// the battery forecast follows a force discharge until its expected end
 	fd := apiH.ForceDischargeNow
 	h.soc.fd.Store(&fd)
@@ -716,6 +718,9 @@ func (h *handle) Start(ctx context.Context) {
 	go h.maint.Run(ctx)
 	go h.live.Run(ctx, livenessTick)
 	go h.diskGuard().Run(ctx)
+	if h.apiSrv != nil {
+		go h.apiSrv.RunOverrides(ctx) // clears an ended schedule override (D-029)
+	}
 	h.startNotify(ctx)
 	h.startCaptures(ctx)
 	h.seedEnergy()

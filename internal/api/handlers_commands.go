@@ -154,51 +154,53 @@ func (s *Server) runCommand(r *http.Request, tk Token, cmd gateway.Command, summ
 	go s.commandWorker(r.Context(), tk, cmd, summary, done)
 	select {
 	case out := <-done:
-		switch {
-		case out.submitErr != nil:
-			if errors.Is(out.submitErr, gateway.ErrWriteBudget) {
-				// the caller is often an automation: tell the owner too (F2)
-				s.bus.PublishSystem(SystemEvent{
-					Type:   SystemAlert,
-					Detail: fmt.Sprintf("write refused for %s by %s: %v", summary, tk.Name, out.submitErr),
-				})
-			}
-			return s.submitResponse(out.submitErr)
-		case out.queued:
-			return commandResponse{status: http.StatusServiceUnavailable, body: problem{
-				Title:  "Inverter offline",
-				Code:   "inverter_offline",
-				Detail: "no active inverter flow; the command stays queued",
-			}}
-		case out.waitErr == nil && out.res.Status == gateway.StatusAcked:
-			if fromResult, ok := readBack.(func(gateway.Result) any); ok {
-				return commandResponse{status: http.StatusOK, body: fromResult(out.res)}
-			}
-			return commandResponse{status: http.StatusOK, body: readBack}
-		case out.waitErr == nil && (out.res.Status == gateway.StatusFailed || out.res.Status == gateway.StatusExpired):
-			// The device read back a contradiction (failed) or the
-			// gateway's TTL elapsed (expired): the command is confirmed
-			// not applied — report the real detail, not a timeout.
-			detail := out.res.Detail
-			if detail == "" {
-				detail = "the command expired before the device read back"
-			}
-			return commandResponse{status: http.StatusBadGateway, body: problem{
-				Title:   "Command failed",
-				Code:    "command_failed",
-				Applied: confirmedNo,
-				Detail:  detail,
-			}}
-		default:
-			return commandResponse{status: http.StatusGatewayTimeout, body: problem{
-				Title:   "Command failed",
-				Code:    "command_failed",
-				Applied: confirmedUnknown,
-				Detail:  "no device read-back within the timeout",
-			}}
-		}
+		return s.commandOutcome(out, tk, summary, readBack)
 	case <-r.Context().Done():
 		return commandResponse{}
+	}
+}
+
+// commandOutcome maps one worker outcome to the response (readBack is
+// the 200 body, or a func(gateway.Result) any building it).
+func (s *Server) commandOutcome(out workerOut, tk Token, summary string, readBack any) commandResponse {
+	switch {
+	case out.submitErr != nil:
+		if errors.Is(out.submitErr, gateway.ErrWriteBudget) {
+			// the caller is often an automation: tell the owner too (F2)
+			s.bus.PublishSystem(SystemEvent{
+				Type:   SystemAlert,
+				Detail: fmt.Sprintf("write refused for %s by %s: %v", summary, tk.Name, out.submitErr),
+			})
+		}
+		return s.submitResponse(out.submitErr)
+	case out.queued:
+		return commandResponse{status: http.StatusServiceUnavailable, body: offlineProblem("no active inverter flow; the command stays queued")}
+	case out.waitErr == nil && out.res.Status == gateway.StatusAcked:
+		if fromResult, ok := readBack.(func(gateway.Result) any); ok {
+			return commandResponse{status: http.StatusOK, body: fromResult(out.res)}
+		}
+		return commandResponse{status: http.StatusOK, body: readBack}
+	case out.waitErr == nil && (out.res.Status == gateway.StatusFailed || out.res.Status == gateway.StatusExpired):
+		// The device read back a contradiction (failed) or the
+		// gateway's TTL elapsed (expired): the command is confirmed
+		// not applied — report the real detail, not a timeout.
+		detail := out.res.Detail
+		if detail == "" {
+			detail = "the command expired before the device read back"
+		}
+		return commandResponse{status: http.StatusBadGateway, body: problem{
+			Title:   "Command failed",
+			Code:    "command_failed",
+			Applied: confirmedNo,
+			Detail:  detail,
+		}}
+	default:
+		return commandResponse{status: http.StatusGatewayTimeout, body: problem{
+			Title:   "Command failed",
+			Code:    "command_failed",
+			Applied: confirmedUnknown,
+			Detail:  "no device read-back within the timeout",
+		}}
 	}
 }
 
@@ -309,11 +311,7 @@ func submitResponse(err error) commandResponse {
 			Detail: err.Error(),
 		}}
 	case errors.Is(err, gateway.ErrNoFlow): // a clock value is never queued
-		return commandResponse{status: http.StatusServiceUnavailable, body: problem{
-			Title:  "Inverter offline",
-			Code:   "inverter_offline",
-			Detail: "no active inverter flow",
-		}}
+		return commandResponse{status: http.StatusServiceUnavailable, body: offlineProblem("no active inverter flow")}
 	case errors.Is(err, gateway.ErrInFlight):
 		return commandResponse{status: http.StatusConflict, body: problem{
 			Title:  "Command in flight",

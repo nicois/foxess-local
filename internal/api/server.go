@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	apispec "foxesslocal/api"
@@ -141,6 +142,19 @@ type Server struct {
 	mux      *http.ServeMux
 	// socEst is the SoC estimate (WithSocEstimate); nil = none.
 	socEst SocEstimator
+	// ovMu serialises the override's changes (requests, the expiry
+	// loop); ovWake tells the loop one happened (D-029). ovWake is made
+	// on first use (wakeChan): a goroutine waiting on a channel made
+	// outside its synctest bubble stops the bubble's virtual time, and
+	// the e2e tests build the server before the bubble starts.
+	ovMu    sync.Mutex
+	ovWakeM sync.Mutex
+	ovWake  chan struct{}
+	// notices queues automations' notices (D-030; WithNotifier); nil:
+	// not offered. noticeSent is each token's sends in the last hour.
+	notices    NoticeSender
+	noticeMu   sync.Mutex
+	noticeSent map[string][]time.Time
 }
 
 // ServeHTTP makes *Server an http.Handler (New returns the server; the
@@ -202,10 +216,7 @@ func New(st *store.Store, gw *gateway.Gateway, maint MaintenanceState, tok *Toke
 	s.handle(mux, "DELETE /api/v1/update/rolled-back", s.protect(RoleInstaller, s.handleUpdateDismiss))
 	s.handle(mux, "GET /api/v1/history", s.protectDashboard(s.handleHistory))
 	s.handle(mux, "GET /api/v1/power/average", s.protectDashboard(s.handlePowerAverage))
-	s.handle(mux, "PUT /api/v1/work-mode", s.protect(RoleStandard, s.handleWorkMode))
-	s.handle(mux, "PUT /api/v1/schedule", s.protect(RoleStandard, s.handleSchedule))
-	s.handle(mux, "PUT /api/v1/meter-compensation", s.protect(RoleExpert, s.handleMeterCompensation))
-	s.handle(mux, "PUT /api/v1/limits", s.protect(RoleInstaller, s.handleLimits))
+	s.commandRoutes(mux)
 	s.handle(mux, "POST /api/v1/registers/read", s.protect(RoleInstaller, s.handleRegistersRead))
 	s.handle(mux, "GET /api/v1/forward-mode", s.protectDashboard(s.handleGetForwardMode))
 	s.handle(mux, "PUT /api/v1/forward-mode", s.protect(RoleInstaller, s.handlePutForwardMode))
@@ -223,6 +234,22 @@ func New(st *store.Store, gw *gateway.Gateway, maint MaintenanceState, tok *Toke
 	s.inverterSettingRoutes(mux)
 	s.mux = mux
 	return s
+}
+
+// commandRoutes are the everyday commands, and the routes for
+// automations (sidecars): the schedule override (D-029) and notices
+// (D-030).
+func (s *Server) commandRoutes(mux *http.ServeMux) {
+	s.handle(mux, "PUT /api/v1/work-mode", s.protect(RoleStandard, s.handleWorkMode))
+	s.handle(mux, "PUT /api/v1/schedule", s.protect(RoleStandard, s.handleSchedule))
+	s.handle(mux, "PUT /api/v1/meter-compensation", s.protect(RoleExpert, s.handleMeterCompensation))
+	s.handle(mux, "PUT /api/v1/limits", s.protect(RoleInstaller, s.handleLimits))
+
+	s.handle(mux, "GET /api/v1/schedule/override", s.protect(RoleReadOnly, s.handleOverrideGet))
+	s.handle(mux, "PUT /api/v1/schedule/override", s.protect(RoleStandard, s.handleOverridePut))
+	s.handle(mux, "DELETE /api/v1/schedule/override", s.protect(RoleStandard, s.handleOverrideDelete))
+	s.handle(mux, "GET /api/v1/notices", s.protect(RoleReadOnly, s.handleNoticesGet))
+	s.handle(mux, "POST /api/v1/notices", s.protect(RoleStandard, s.handleNoticePost))
 }
 
 // defaultRawHours is the dev server's raw-telemetry horizon (mirrors the
@@ -499,6 +526,17 @@ func parsePage(r *http.Request) (pageParams, problem, bool) {
 	return p, problem{}, true
 }
 
+// The 500 problem's title and code.
+const (
+	titleInternal = "Internal error"
+	codeInternal  = "internal"
+)
+
+// offlineProblem is the 503 inverter_offline problem.
+func offlineProblem(detail string) problem {
+	return problem{Title: "Inverter offline", Code: "inverter_offline", Detail: detail}
+}
+
 // internal sends a 500 for the unexpected (logged upstream; the spec
 // has no internal code, so the RFC 7807 default title stands).
 func (s *Server) internal(w http.ResponseWriter, err error) {
@@ -506,8 +544,8 @@ func (s *Server) internal(w http.ResponseWriter, err error) {
 	// paths and driver text (audit S11)
 	slog.Error("api: internal error", "err", err)
 	writeProblem(w, http.StatusInternalServerError, problem{
-		Title:  "Internal error",
-		Code:   "internal",
+		Title:  titleInternal,
+		Code:   codeInternal,
 		Detail: "an internal error occurred; the server log has the details",
 	})
 }

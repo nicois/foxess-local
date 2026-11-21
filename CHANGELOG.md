@@ -20,6 +20,27 @@ version; anything else bumps the patch version.
 
 ## [Unreleased]
 
+### Added
+
+- Schedule override for automations (`PUT /api/v1/schedule/override`): a
+  force discharge or force charge from now until a given time, with a
+  cut-off SoC that the inverter enforces. foxess-local puts the window in
+  a free schedule group without moving yours, and clears it again when
+  it ends, when it is cancelled, or after a restart. The token that
+  started it renews it by asking again with a later end; if the
+  automation stops, the override lapses. "Running now" shows who holds
+  it and until when, with "End override now".
+- Notices from automations (`POST /api/v1/notices`): a sidecar sends a
+  notice with its own token, and it reaches your webhook and ntfy like
+  foxess-local's own, labelled with the token's name. At most 20 an hour
+  per token.
+- Activity → Notices lists every notice from the last 30 days, from
+  foxess-local and from automations, whether or not a notification
+  target is set (`GET /api/v1/notices`). The database schema is now v14.
+- `examples/aemo-spike`: an example sidecar that force-discharges while
+  the NEM's dispatch price for your region is high, and tells you through notices. It is a starting point for your own
+  automations, small enough for an OpenStick.
+
 ### Fixed
 
 - Opening another page in the web UI starts at its top. It kept the

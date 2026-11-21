@@ -450,6 +450,7 @@ const CODE_TEXT = {
     : tr("this setting is not mapped for this inverter model yet — sharing a diagnostic bundle helps us add it"),
   write_unverified: () => tr("untested on this inverter model / firmware — an installer can enable untested writes on the control tab"),
   device_not_identified: () => tr("the inverter has not been identified yet — try again in a minute"),
+  override_held: () => tr("another token holds the schedule override"),
   checks_failing: () => tr("a plausibility check is failing for this setting — the register map looks wrong, so writes are blocked"),
 };
 
@@ -828,9 +829,19 @@ const SYSTEM_TITLE = {
   "battery-low": tr("Battery low"),
   "battery-forecast-low": tr("Battery running low"),
   "firmware-task": tr("The cloud requested a firmware update"),
+  "schedule-override-started": tr("Schedule override started"),
+  "schedule-override-ended": tr("Schedule override ended"),
 };
 
 onSSE("system", (d) => {
+  if (d.type === "notice") {
+    // a notice kept in the list: an automation's is shown here (foxess-local's
+    // own came with its own event)
+    if (d.detail) toast(tr("Notice"), "info", d.detail);
+    if (routeName() === "notices") render();
+    return;
+  }
+  if (d.type.startsWith("schedule-override-")) refreshState();
   const bad = d.type.includes("failed") || d.type.includes("error");
   const warn = d.type.startsWith("battery-") || d.type === "grid-lost" || d.type === "unclean-restart" || d.type === "firmware-task";
   toast(SYSTEM_TITLE[d.type] ?? d.type, bad ? "error" : warn ? "warn" : "info", d.detail || undefined);
@@ -937,6 +948,7 @@ const ROUTES = {
   "device": renderDevice,
   "quirks": renderQuirks,
   "activity": renderAudit,
+  "notices": renderNotices,
   "messages": renderMessages,
   "system": renderSystem,
   "cloud": renderCloud,
@@ -958,7 +970,7 @@ const ROUTE_ALIASES = {
 const ROUTE_TITLES = {
   "dashboard": tr("Home"), "schedule": tr("Schedule"), "inverter": tr("Inverter"),
   "device": tr("About this inverter"), "quirks": tr("Inverter quirks"),
-  "activity": tr("Activity"), "messages": tr("Frame messages"), "system": tr("System"),
+  "activity": tr("Activity"), "notices": tr("Notices"), "messages": tr("Frame messages"), "system": tr("System"),
   "cloud": tr("FoxESS cloud"), "notifications": tr("Notifications"), "access": tr("Access"),
   "updates": tr("Updates"), "site": tr("Site"), "storage": tr("Storage"), "help": tr("Help"),
   "setup": tr("Setup"),
@@ -969,7 +981,7 @@ const FORWARD_NAME = () => ({ off: tr("off"), telemetry_only: tr("telemetry only
 
 // the primary nav item each route lives under
 const NAV_OF = {
-  "device": "inverter", "quirks": "inverter", "messages": "activity",
+  "device": "inverter", "quirks": "inverter", "messages": "activity", "notices": "activity",
   "cloud": "system", "notifications": "system", "access": "system", "updates": "system",
   "site": "system", "storage": "system", "help": "system", "setup": "system",
 };
@@ -1249,6 +1261,8 @@ async function loadQuirks() {
 function activeWhy(st) {
   const am = st?.active_mode ?? {};
   if (am.source !== "schedule") return tr("the base work mode (no schedule group applies)");
+  const ov = st.schedule_override;
+  if (ov?.active && ov.group === am.group) return tr("override by {holder} until {time}", { holder: ov.holder, time: ov.end });
   if (st.schedule?.groups?.[am.group - 1]?.default) return tr("default mode");
   return tr("schedule group {n} ({from}–{to})", { n: am.group, from: am.start, to: am.end });
 }
@@ -1975,6 +1989,9 @@ async function renderControl() {
       <h3>${esc(tr("Running now"))}</h3>
       <p class="running"><strong>${esc(SCHED_TEXT[am.mode] ?? am.mode ?? "—")}</strong>
         <span class="muted">${esc(activeWhy(st))}${am.source === "schedule" ? ` · <a href="#/schedule">${esc(tr("Schedule"))}</a>` : ""}</span></p>
+      ${st.schedule_override?.active
+        ? `<p><button data-cmd="override-end" type="button" class="cmd" hx-delete="${API}/schedule/override" hx-swap="none">${esc(tr("End override now"))}</button></p>`
+        : ""}
       ${flowMarkup(true)}
       ${limitsLegend(st)}
     </article>
@@ -2353,7 +2370,39 @@ async function loadSettings() {
 // activityNav switches between the change log and the raw messages.
 function activityNav(cur) {
   const a = (route, label) => `<a href="#/${route}" ${route === cur ? 'aria-current="page"' : ""}>${esc(label)}</a>`;
-  return `<nav class="subnav" aria-label="${esc(tr("Activity"))}">${a("activity", tr("Changes"))}${a("messages", tr("Raw messages"))}</nav>`;
+  return `<nav class="subnav" aria-label="${esc(tr("Activity"))}">${a("activity", tr("Changes"))}${a("notices", tr("Notices"))}${a("messages", tr("Raw messages"))}</nav>`;
+}
+
+// ---------- notices (D-030) ----------
+
+const NOTICE_KIND = { info: "ok", warning: "warn", critical: "err" };
+
+// renderNotices: every notice that was news — foxess-local's own and
+// automations' — newest first (the last 100).
+async function renderNotices() {
+  let list = null;
+  try {
+    const r = await apiFetch("/notices?limit=100");
+    if (r.ok) list = (await r.json()).notices;
+  } catch { /* shown as unavailable */ }
+  let lastDay = "";
+  const items = (list ?? []).map((n) => {
+    const day = dayLabel(n.ts);
+    const head = day !== lastDay ? `<li class="day">${esc(day)}</li>` : "";
+    lastDay = day;
+    return `${head}<li class="item">
+      <span class="item-mark ${NOTICE_KIND[n.severity] ?? "warn"}" aria-hidden="true"></span>
+      <div class="item-main">
+        <div class="item-title">${esc(n.title)}</div>
+        ${n.message ? `<div class="small">${esc(n.message)}</div>` : ""}
+        <div class="item-meta muted small"><time datetime="${esc(n.ts)}" title="${esc(fmtTime(n.ts))}">${fmtAgo(n.ts)}</time> · ${esc(n.origin)}</div>
+      </div>
+    </li>`;
+  }).join("");
+  return `
+  ${pageHead(tr("Notices"), esc(tr("Every notice from foxess-local and from automations, newest first, whether or not a notification target is set.")))}
+  ${activityNav("notices")}
+  <ul class="list">${list === null ? `<li class="empty muted">${esc(tr("The notices could not be loaded."))}</li>` : items || `<li class="empty muted">${esc(tr("No notices."))}</li>`}</ul>`;
 }
 
 // msgStatus is a message's status chip: what happened to the frame, the

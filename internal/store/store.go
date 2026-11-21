@@ -499,6 +499,22 @@ ALTER TABLE telemetry ADD COLUMN soc_est INTEGER;
 ALTER TABLE buckets15m ADD COLUMN soc_est_last INTEGER;
 `
 
+// schemaV14 (D-030, 2026-11-21): notices from automations carry their
+// origin (the token's name) through the outbox, and every notice is kept
+// for the web UI's list (pruned by NoticeAdd).
+const schemaV14 = `
+ALTER TABLE notify_outbox ADD COLUMN origin TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS notices (
+  id       INTEGER PRIMARY KEY,
+  ts       TEXT NOT NULL,
+  origin   TEXT NOT NULL,
+  event    TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  title    TEXT NOT NULL,
+  message  TEXT NOT NULL
+);
+`
+
 // wrappedPVMin is the bucket sol_max that can only come from a wrapped
 // PV reading.
 const wrappedPVMin = 32768
@@ -615,6 +631,7 @@ func migrate(db *sql.DB, path string) error {
 		{11, schemaV11},
 		{12, schemaV12},
 		{13, schemaV13},
+		{14, schemaV14},
 	}
 	latest := migrations[len(migrations)-1].version
 	if n > latest {

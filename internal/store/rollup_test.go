@@ -258,6 +258,7 @@ func TestRepairWrappedPV(t *testing.T) {
 	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 8`); err != nil {
 		t.Fatal(err)
 	}
+	undoV14(t, s)
 	undoV13Columns(t, s)
 	undoV12Columns(t, s)
 	undoV10Columns(t, s)

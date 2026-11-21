@@ -42,7 +42,14 @@ type Notice struct {
 	Severity Severity
 	Title    string
 	Message  string
+	// Origin names an automation's token for a notice it sent (D-030);
+	// "" for foxess-local's own.
+	Origin string
 }
+
+// Journal keeps every notice that was news (not a repeat within
+// DedupWindow), delivered or not: the web UI lists them (D-030).
+type Journal func(ts time.Time, nt Notice)
 
 // Targets are where notices go ("" = not configured). Read at every
 // send, so a change in the UI applies to the next delivery.
@@ -123,6 +130,7 @@ type Notifier struct {
 	clock   func() time.Time
 	send    Transport
 	outbox  Outbox
+	journal Journal // nil: none
 
 	mu   sync.Mutex
 	wake chan struct{}        // made on first use (wakeup)
@@ -138,6 +146,10 @@ func WithTransport(t Transport) Option { return func(n *Notifier) { n.send = t }
 // WithOutbox keeps the pending notices in o (the database, so they
 // survive a restart); the default is in memory.
 func WithOutbox(o Outbox) Option { return func(n *Notifier) { n.outbox = o } }
+
+// WithJournal records each notice that is news in j, whether or not a
+// target is configured.
+func WithJournal(j Journal) Option { return func(n *Notifier) { n.journal = j } }
 
 // New builds a notifier; Run delivers.
 func New(targets func() Targets, clock func() time.Time, opts ...Option) *Notifier {
@@ -165,15 +177,18 @@ func (n *Notifier) wakeup() chan struct{} {
 }
 
 // Notify stores a notice for delivery (never blocks on the network):
-// dropped when nothing is configured, or when the same notice went out
-// within DedupWindow.
+// dropped when the same notice went out within DedupWindow; journalled,
+// then queued for the configured targets (none: not queued).
 func (n *Notifier) Notify(nt Notice) {
-	mask := n.targetMask()
-	if mask == 0 {
-		return
-	}
 	now := n.clock()
 	if !n.fresh(nt, now) {
+		return
+	}
+	if n.journal != nil {
+		n.journal(now, nt)
+	}
+	mask := n.targetMask()
+	if mask == 0 {
 		return
 	}
 	if _, err := n.outbox.Add(Pending{Notice: nt, Created: now, Targets: mask, Next: now}); err != nil {
@@ -188,7 +203,7 @@ func (n *Notifier) Notify(nt Notice) {
 
 // fresh records a notice for dedup and reports whether it is news.
 func (n *Notifier) fresh(nt Notice, now time.Time) bool {
-	key := nt.Event + "\x00" + nt.Message
+	key := nt.Origin + "\x00" + nt.Event + "\x00" + nt.Message
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if last, ok := n.sent[key]; ok && now.Sub(last) < DedupWindow {
@@ -341,10 +356,14 @@ func (n *Notifier) requests(nt Notice, ts time.Time, mask int) []request {
 	t := n.targets()
 	var out []request
 	if t.WebhookURL != "" && mask&targetWebhook != 0 {
-		body, _ := json.Marshal(map[string]string{ //nolint:errchkjson // a map of strings always marshals
+		fields := map[string]string{
 			"source": source, "event": nt.Event, "severity": string(nt.Severity),
 			"title": nt.Title, "message": nt.Message, "ts": ts.UTC().Format(time.RFC3339),
-		})
+		}
+		if nt.Origin != "" {
+			fields["origin"] = nt.Origin
+		}
+		body, _ := json.Marshal(fields) //nolint:errchkjson // a map of strings always marshals
 		out = append(out, request{
 			kind: "webhook", bit: targetWebhook, url: t.WebhookURL,
 			header: http.Header{"Content-Type": {"application/json"}}, body: body,
@@ -353,13 +372,21 @@ func (n *Notifier) requests(nt Notice, ts time.Time, mask int) []request {
 	if t.NtfyURL != "" && mask&targetNtfy != 0 {
 		h := http.Header{
 			"Content-Type": {"text/plain; charset=utf-8"},
-			"Title":        {nt.Title},
+			"Title":        {ntfyTitle(nt)},
 			"Priority":     {strconv.Itoa(ntfyPriority[nt.Severity])},
 			"Tags":         {ntfyTags[nt.Severity]},
 		}
 		out = append(out, request{kind: "ntfy", bit: targetNtfy, url: t.NtfyURL, header: h, body: []byte(nt.Message)})
 	}
 	return out
+}
+
+// ntfyTitle is the push's title: an automation's notice names it.
+func ntfyTitle(nt Notice) string {
+	if nt.Origin == "" {
+		return nt.Title
+	}
+	return nt.Origin + ": " + nt.Title
 }
 
 func (n *Notifier) post(ctx context.Context, r request) error {

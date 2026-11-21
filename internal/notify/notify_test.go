@@ -289,3 +289,61 @@ func TestNotifyTest(t *testing.T) {
 		}
 	})
 }
+
+// TestNotifyJournalAndOrigin (D-030): every notice that is news goes to
+// the journal, with no target set too, and a repeat does not; an
+// automation's notice carries its origin (the webhook's origin field,
+// ntfy's title) and dedups apart from another origin's.
+func TestNotifyJournalAndOrigin(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := &fakeTransport{}
+		var mu sync.Mutex
+		tg := Targets{}
+		var journal []Notice
+		n := New(func() Targets { mu.Lock(); defer mu.Unlock(); return tg }, time.Now, WithTransport(f.send),
+			WithJournal(func(_ time.Time, nt Notice) { mu.Lock(); journal = append(journal, nt); mu.Unlock() }))
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { n.Run(ctx); close(done) }()
+		spike := Notice{Event: "sidecar.price-spike", Severity: Info, Title: "Price spike", Message: "$1500/MWh", Origin: "aemo-spike"}
+		n.Notify(spike)
+		n.Notify(spike) // a repeat
+		mu.Lock()
+		tg = both()
+		mu.Unlock()
+		other := spike
+		other.Origin = otherOrigin
+		n.Notify(other)
+		synctest.Wait()
+		cancel()
+		<-done
+		mu.Lock()
+		defer mu.Unlock()
+		if len(journal) != 2 || journal[0].Origin != "aemo-spike" || journal[1].Origin != otherOrigin {
+			t.Fatalf("journal %+v", journal)
+		}
+		checkOriginPosts(t, f.all())
+	})
+}
+
+// otherOrigin is the second automation of TestNotifyJournalAndOrigin.
+const otherOrigin = "another-sidecar"
+
+// checkOriginPosts: otherOrigin's notice as delivered — the webhook's
+// origin field, ntfy's prefixed title.
+func checkOriginPosts(t *testing.T, ps []post) {
+	t.Helper()
+	if len(ps) != 2 {
+		t.Fatalf("posts %+v", ps)
+	}
+	for _, p := range ps {
+		if p.url == hookURL {
+			var body map[string]string
+			if err := json.Unmarshal([]byte(p.body), &body); err != nil || body["origin"] != otherOrigin || body["source"] != "foxess-local" {
+				t.Fatalf("webhook %q", p.body)
+			}
+		} else if p.header.Get("Title") != otherOrigin+": Price spike" {
+			t.Fatalf("ntfy title %q", p.header.Get("Title"))
+		}
+	}
+}

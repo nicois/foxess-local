@@ -329,7 +329,7 @@ func (o storeOutbox) Due(now time.Time) ([]notify.Pending, error) {
 	for _, r := range rows {
 		out = append(out, notify.Pending{
 			ID: r.ID, Created: r.Created, Targets: r.Targets, Attempts: r.Attempts, Next: r.Next,
-			Notice: notify.Notice{Event: r.Event, Severity: notify.Severity(r.Severity), Title: r.Title, Message: r.Message},
+			Notice: notify.Notice{Event: r.Event, Severity: notify.Severity(r.Severity), Title: r.Title, Message: r.Message, Origin: r.Origin},
 		})
 	}
 	return out, nil
@@ -342,6 +342,6 @@ func (o storeOutbox) Delete(id int64) error { return o.st.OutboxDelete(id) }
 func toRow(p notify.Pending) store.OutboxRow {
 	return store.OutboxRow{
 		ID: p.ID, Created: p.Created, Event: p.Notice.Event, Severity: string(p.Notice.Severity),
-		Title: p.Notice.Title, Message: p.Notice.Message, Targets: p.Targets, Attempts: p.Attempts, Next: p.Next,
+		Title: p.Notice.Title, Message: p.Notice.Message, Origin: p.Notice.Origin, Targets: p.Targets, Attempts: p.Attempts, Next: p.Next,
 	}
 }
