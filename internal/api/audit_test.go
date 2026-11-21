@@ -156,7 +156,9 @@ func (h *harness) messagesGet(t *testing.T, q string) []messageEntryBody {
 }
 
 // assertOldestMbwrite checks one entry against an mbwrite PDU (frame
-// type mapped per the spec enum, length, hex).
+// type mapped per the spec enum, length, hex) and the seeded header
+// (seedFrame's device and fn: the device bytes carry the sender's clock,
+// which a classifier must not key on — profile §3).
 func assertOldestMbwrite(t *testing.T, e messageEntryBody, pdu []byte) {
 	t.Helper()
 	if e.Frame != "modbus-write" || e.Length != len(pdu) {
@@ -164,6 +166,9 @@ func assertOldestMbwrite(t *testing.T, e messageEntryBody, pdu []byte) {
 	}
 	if want := hex.EncodeToString(pdu); e.Hex != want {
 		t.Fatalf("hex: got %q, want %q", e.Hex, want)
+	}
+	if e.Device != "aa6b0119" || e.Fn != 0x10 {
+		t.Fatalf("header: got device=%q fn=%#x, want aa6b0119 0x10", e.Device, e.Fn)
 	}
 }
 
@@ -239,6 +244,8 @@ type messageEntryBody struct {
 	Frame   string    `json:"frame"`
 	Length  int       `json:"length"`
 	Hex     string    `json:"hex"`
+	Device  string    `json:"device"`
+	Fn      int       `json:"fn"`
 	Summary *string   `json:"summary"`
 }
 

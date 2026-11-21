@@ -111,3 +111,27 @@ func TestMbechoVsMbWrite(t *testing.T) {
 		t.Errorf("dev0=0x12: got %s, want mbwrite", kind)
 	}
 }
+
+// TestBootstrapRespAnySessionByte: the bootstrap responses classify by
+// their device lead byte and payload, not by device[1]. The inverter's
+// session byte moved from 0x6a to 0x6b on 2026-11-19 and the real cloud
+// followed on 2026-11-20 (profile §3); a 0x6b response classified as
+// other, so full held it and the inverter re-registered for ever.
+func TestBootstrapRespAnySessionByte(t *testing.T) {
+	for _, dev1 := range []byte{0x6a, 0x6b, 0x00, 0xff} {
+		for i, dev0 := range []byte{0xaa, 0xac, 0xab} {
+			f := Frame{Device: [4]byte{dev0, dev1, 0x01, 0x19}, Fn: 0x0a, Payload: trioPayloads[i]}
+			if kind, _ := Decode(f); kind != KindBootstrapResp {
+				t.Errorf("dev % x payload % x: got %s, want bootstrapresp", f.Device[:], f.Payload, kind)
+			}
+		}
+	}
+	// Only the three response lead bytes: an empty response frame with
+	// another lead byte is not a bootstrap response.
+	for _, dev0 := range []byte{0x85, 0xa0, 0x2a, 0xff} {
+		f := Frame{Device: [4]byte{dev0, 0x6b, 0x01, 0x19}, Payload: nil}
+		if kind, _ := Decode(f); kind == KindBootstrapResp {
+			t.Errorf("dev % x: classified bootstrapresp", f.Device[:])
+		}
+	}
+}

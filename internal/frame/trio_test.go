@@ -32,11 +32,11 @@ var trioObserved = []struct {
 	name string
 	p    TrioParams
 }{
-	{t2Session, TrioParams{SessionBytes: [2]byte{0xea, 0xcb}, FnBase: 0x56, Deltas: [3]byte{0, 0, 1}}},
-	{sess1104b, TrioParams{SessionBytes: [2]byte{0xea, 0xe6}, FnBase: 0xa9, Deltas: [3]byte{0, 1, 1}}},
-	{sess1105a, TrioParams{SessionBytes: [2]byte{0xeb, 0xd6}, FnBase: 0x80, Deltas: [3]byte{0, 1, 1}}},
-	{sess1105b, TrioParams{SessionBytes: [2]byte{0xec, 0x5c}, FnBase: 0x94, Deltas: [3]byte{0, 1, 1}}},
-	{sessLive, TrioParams{SessionBytes: [2]byte{0xec, 0x5f}, FnBase: 0xa2, Deltas: [3]byte{0, 1, 1}}},
+	{t2Session, TrioParams{TimeHigh: 0x6a, SessionBytes: [2]byte{0xea, 0xcb}, FnBase: 0x56, Deltas: [3]byte{0, 0, 1}}},
+	{sess1104b, TrioParams{TimeHigh: 0x6a, SessionBytes: [2]byte{0xea, 0xe6}, FnBase: 0xa9, Deltas: [3]byte{0, 1, 1}}},
+	{sess1105a, TrioParams{TimeHigh: 0x6a, SessionBytes: [2]byte{0xeb, 0xd6}, FnBase: 0x80, Deltas: [3]byte{0, 1, 1}}},
+	{sess1105b, TrioParams{TimeHigh: 0x6a, SessionBytes: [2]byte{0xec, 0x5c}, FnBase: 0x94, Deltas: [3]byte{0, 1, 1}}},
+	{sessLive, TrioParams{TimeHigh: 0x6a, SessionBytes: [2]byte{0xec, 0x5f}, FnBase: 0xa2, Deltas: [3]byte{0, 1, 1}}},
 }
 
 // trioPayloadWant are the fixed response payloads r1..r3.
@@ -77,8 +77,8 @@ func checkTrioFrame(t *testing.T, i int, f Frame, p TrioParams) {
 	if kind != KindBootstrapResp {
 		t.Errorf("r%d kind: got %s, want bootstrapresp", i+1, kind)
 	}
-	if f.Device[0] != trioReqDev0[i]|respBit || f.Device[1] != SessionDev1 {
-		t.Errorf("r%d device: got % x, want %02x %02x", i+1, f.Device[:], trioReqDev0[i]|respBit, SessionDev1)
+	if f.Device[0] != trioReqDev0[i]|respBit || f.Device[1] != p.TimeHigh {
+		t.Errorf("r%d device: got % x, want %02x %02x", i+1, f.Device[:], trioReqDev0[i]|respBit, p.TimeHigh)
 	}
 	if f.Device[2] != p.SessionBytes[0] || f.Device[3] != p.SessionBytes[1] {
 		t.Errorf("r%d session bytes: got %02x %02x, want %02x %02x",
@@ -114,6 +114,9 @@ func TestBootstrapTrioT2ByteExact(t *testing.T) {
 // The instant reproduces the 11-11 21:24 session exactly (S f442, q 5e).
 func TestTrioParamsAt(t *testing.T) {
 	p := TrioParamsAt(time.Unix(1794392670, 0))
+	if p.TimeHigh != 0x6a {
+		t.Errorf("H: got %#x, want 0x6a", p.TimeHigh)
+	}
 	if p.SessionBytes != [2]byte{0xf4, 0x42} {
 		t.Errorf("S: got % x, want f4 42", p.SessionBytes)
 	}
@@ -136,6 +139,9 @@ func TestTrioParamsAt(t *testing.T) {
 	if p3.SessionBytes != [2]byte{0xf4, 0x42} {
 		t.Errorf("S wrap: got % x, want f4 42", p3.SessionBytes)
 	}
+	if p3.TimeHigh != 0x6b {
+		t.Errorf("H carry: got %#x, want 0x6b", p3.TimeHigh)
+	}
 	// +255 s: q rolls down to 0x5d and S carries.
 	p4 := TrioParamsAt(time.Unix(1794392670+255, 0))
 	if p4.SessionBytes != [2]byte{0xf4, 0x43} {
@@ -143,5 +149,10 @@ func TestTrioParamsAt(t *testing.T) {
 	}
 	if p4.FnBase != 0x5d {
 		t.Errorf("q roll: got %#x, want 0x5d", p4.FnBase)
+	}
+	// The live cloud's 2026-11-21 04:08:41Z response: device aa 6b 01 19.
+	p5 := TrioParamsAt(time.Date(2026, 11, 21, 4, 8, 41, 0, time.UTC))
+	if got := [3]byte{p5.TimeHigh, p5.SessionBytes[0], p5.SessionBytes[1]}; got != [3]byte{0x6b, 0x01, 0x19} {
+		t.Errorf("live 2026-11-21: got % x, want 6b 01 19", got)
 	}
 }

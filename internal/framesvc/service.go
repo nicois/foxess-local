@@ -572,10 +572,10 @@ func (s *Service) upstreamC2S(fl *flow, frames []frame.Frame, askers []asker, se
 
 // pinLocalSession pins the session identity for a locally-served flow
 // from the inverter's own session-pattern c2s frame (device
-// [x, 0x6a, S, ctr]): a local session has no upstream s2c to observe
+// [x, H, S, ctr], its clock / 256 — frame.SessionFrame): a local session has no upstream s2c to observe
 // (observeSession runs only on s2c), and the gateway stamps injections
-// with the session's tail — the inverter's own S byte, which the real
-// cloud mirrors in its s2c frames (profile §3/§4/§5).
+// with the session's tail — the inverter's own clock bytes (profile
+// §3/§4/§5).
 func (s *Service) pinLocalSession(fl *flow, frames []frame.Frame) {
 	if fl.leg == nil {
 		return // mirror flow: the identity comes from the upstream s2c
@@ -586,7 +586,7 @@ func (s *Service) pinLocalSession(fl *flow, frames []frame.Frame) {
 		return
 	}
 	for i := range frames {
-		if frames[i].Device[1] != frame.SessionDev1 {
+		if !frame.SessionFrame(frames[i]) {
 			continue
 		}
 		fl.dev = [4]byte{0x11, frames[i].Device[1], frames[i].Device[2], frames[i].Device[3]}

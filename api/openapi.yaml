@@ -2764,7 +2764,7 @@ components:
           description: Whether the inverter confirmed (read-back) an allowed write.
     MessageEntry:
       type: object
-      required: [ts, dir, frame, length, hex]
+      required: [ts, dir, frame, length, hex, device, fn]
       properties:
         ts:
           type: string
@@ -2778,6 +2778,19 @@ components:
           description: Payload bytes.
         hex:
           type: string
+          description: The payload, hex.
+        device:
+          type: string
+          pattern: '^[0-9a-f]{8}$'
+          description: >-
+            The frame header's four device bytes, hex. For session frames
+            the last three are the sender's clock / 256 (the inverter's in
+            local time, the cloud's in UTC).
+        fn:
+          type: integer
+          minimum: 0
+          maximum: 255
+          description: The frame header's envelope function byte.
         summary:
           type: [string, 'null']
           description: >-

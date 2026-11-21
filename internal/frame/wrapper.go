@@ -8,14 +8,14 @@ import (
 
 // Push-mode wrapper frame (cutover doc §3.3, 11-15 corpus): the
 // inverter's ~3 s-cadence frame during the initial burst. The payload
-// (451 B) = 13 B prefix (0x6a + inner S + 7×00 + 01 b6) + one complete
+// (451 B) = 13 B prefix (clock top byte + inner S + 7×00 + 01 b6) + one complete
 // 438 B inner frame (typically the 425 B snap02 TLV). The outer frame's
 // dev0 is 0x37; the envelope fn varies (0x64/0x83 observed) and is not
 // a discriminator — the classifier key is plen 451 + dev0 0x37.
 const (
 	wrapperLen    = 451  // wrapper payload length
 	wrapperDev0   = 0x37 // wrapper outer device lead byte
-	wrapperPrefix = 13   // 0x6a + inner S + 7×00 + 01 b6
+	wrapperPrefix = 13   // clock top byte (0x6a, 0x6b…) + inner S + 7×00 + 01 b6
 )
 
 // Wrapper is the decoded wrapper frame: the identity and class of the
@@ -27,15 +27,13 @@ type Wrapper struct {
 	InnerClass Kind
 }
 
-// ParseWrapper validates the wrapper payload (prefix head, inner frame
-// markers, plen fill, inner CRC and terminator) and reports the embedded
-// inner frame's identity and class.
+// ParseWrapper validates the wrapper payload (inner frame markers, plen
+// fill, inner CRC and terminator) and reports the embedded inner frame's
+// identity and class. The prefix head is the session clock's top byte
+// (decode.go), not a constant, so it is not checked.
 func ParseWrapper(p []byte) (Wrapper, error) {
 	if len(p) != wrapperLen {
 		return Wrapper{}, fmt.Errorf("frame: ParseWrapper: want %d B payload, got %d", wrapperLen, len(p))
-	}
-	if p[0] != SessionDev1 {
-		return Wrapper{}, fmt.Errorf("frame: ParseWrapper: prefix head 0x%02x, want 0x6a", p[0])
 	}
 	inner := p[wrapperPrefix:]
 	if (inner[0] != startE && inner[0] != startF) || inner[0] != inner[1] {

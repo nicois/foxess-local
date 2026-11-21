@@ -35,10 +35,20 @@ func TestParseWrapperDecodesCorpusFrame(t *testing.T) {
 
 	w, err := ParseWrapper(p)
 	require.NoError(t, err)
-	require.Equal(t, [4]byte{0x02, SessionDev1, 0xeb, 0x65}, w.InnerDev)
+	require.Equal(t, [4]byte{0x02, 0x6a, 0xeb, 0x65}, w.InnerDev)
 	require.Equal(t, byte(0xc7), w.InnerFn)
 	require.Equal(t, 425, w.InnerPlen)
 	require.Equal(t, SnapKind(0x02), w.InnerClass, "the inner frame is a snap02")
+}
+
+// TestParseWrapperAnySessionByte: the prefix head is the session byte,
+// which is not a constant (0x6b since 2026-11-19, profile §3/§4).
+func TestParseWrapperAnySessionByte(t *testing.T) {
+	p := append([]byte(nil), wrapperFixture...)
+	p[0] = 0x6b
+	w, err := ParseWrapper(p)
+	require.NoError(t, err)
+	require.Equal(t, SnapKind(0x02), w.InnerClass)
 }
 
 func TestParseWrapperRejectsBrokenPayloads(t *testing.T) {

@@ -483,6 +483,7 @@
   "grid (+ import)": "rete (+ prelievo)",
   "grid import {w}": "prelievo dalla rete {w}",
   "grid {w} {state}": "rete {w} {state}",
+  "header: device {device}, fn {fn}": "intestazione: dispositivo {device}, fn {fn}",
   "held": "trattenuto",
   "hide data table": "nascondi tabella",
   "history not loaded yet": "storico non ancora caricato",

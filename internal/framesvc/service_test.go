@@ -2,6 +2,7 @@ package framesvc
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -205,7 +206,17 @@ func TestOffModeNeverDialsTheCloud(t *testing.T) {
 // tail (pinned from the inverter's c2s session-pattern frame — a local
 // session has no upstream s2c to observe) with the gateway's default
 // envelope fn. The inverter's echo acks it; nothing reaches the cloud.
+//
+// The session byte (device[1]) is not a constant: 0x6a in the corpus,
+// 0x6b on the live inverter since 2026-11-19 (profile §3/§4). Both pin.
 func TestOffModeLocalCommand(t *testing.T) {
+	for _, dev := range [][4]byte{devKA, {0x06, 0x6b, 0x01, 0x19}} {
+		t.Run(fmt.Sprintf("%02x", dev[1]), func(t *testing.T) { testOffModeLocalCommand(t, dev) })
+	}
+}
+
+func testOffModeLocalCommand(t *testing.T, devKeepalive [4]byte) {
+	t.Helper()
 	r := newRigBase(t, offPosture())
 	r.newService(WithServePolicy(offServePolicy{}))
 	var (
@@ -227,9 +238,9 @@ func TestOffModeLocalCommand(t *testing.T) {
 		r.rec.waitOpens(t, 1)
 		require.Len(t, readExact(t, fl.client, trioBytes), trioBytes)
 
-		// The keepalive carries the session pattern (device[1] 0x6a) —
-		// the identity source for a local session.
-		_, err = fl.client.Write(keepaliveFrame(t))
+		// The keepalive carries the session pattern (device[1], the
+		// session byte) — the identity source for a local session.
+		_, err = fl.client.Write(mkFrame(t, startC2S, devKeepalive, fnData, make([]byte, keepalivePayloadLen)))
 		require.NoError(t, err)
 
 		time.Sleep(3 * time.Second)
@@ -265,7 +276,7 @@ func TestOffModeLocalCommand(t *testing.T) {
 		r.endFlow(t, fl, upCloudEnd, 0)
 	})
 	require.True(t, done)
-	require.Equal(t, [4]byte{0x12, frame.SessionDev1, 0xeb, 0x66}, devTail,
+	require.Equal(t, [4]byte{0x12, devKeepalive[1], devKeepalive[2], devKeepalive[3]}, devTail,
 		"device must carry the inverter's own session tail")
 	require.Equal(t, byte(0x10), fn, "envelope fn: the gateway's default (no upstream s2c to observe)")
 	require.Equal(t, pduWriteWM, payload)

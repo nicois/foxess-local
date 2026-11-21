@@ -483,6 +483,7 @@
   "grid (+ import)": "réseau (+ soutirage)",
   "grid import {w}": "soutirage réseau {w}",
   "grid {w} {state}": "réseau {w} {state}",
+  "header: device {device}, fn {fn}": "en-tête : appareil {device}, fn {fn}",
   "held": "retenu",
   "hide data table": "masquer le tableau",
   "history not loaded yet": "historique pas encore chargé",

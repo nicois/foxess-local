@@ -483,6 +483,7 @@
   "grid (+ import)": "Netz (+ Bezug)",
   "grid import {w}": "Netzbezug {w}",
   "grid {w} {state}": "Netz {w} {state}",
+  "header: device {device}, fn {fn}": "Kopf: Gerät {device}, fn {fn}",
   "held": "zurückgehalten",
   "hide data table": "Datentabelle ausblenden",
   "history not loaded yet": "Verlauf noch nicht geladen",

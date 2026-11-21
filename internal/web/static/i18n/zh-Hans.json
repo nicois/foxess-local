@@ -483,6 +483,7 @@
   "grid (+ import)": "电网（+ 取电）",
   "grid import {w}": "电网取电 {w}",
   "grid {w} {state}": "电网 {w} {state}",
+  "header: device {device}, fn {fn}": "帧头：设备 {device}，fn {fn}",
   "held": "已暂扣",
   "hide data table": "隐藏数据表",
   "history not loaded yet": "历史数据尚未加载",

@@ -17,13 +17,31 @@ const (
 	serialQueryLen = 57   // per-inverter status query
 	serialQuerySN0 = 0x36 // "6"
 	serialQuerySN1 = 0x30 // "0"
-
-	// SessionDev1 is the constant device[1] byte of every session frame:
-	// the inverter's c2s session-pattern frames (keepalive 06 6a S ctr,
-	// snapshots 5a 6a S ctr) and the s2c bootstrap responses (profile
-	// §3/§4).
-	SessionDev1 = 0x6a
 )
+
+// Session-pattern frames — the inverter's keepalives, telemetry and
+// snapshot chunks, and the cloud's bootstrap responses — carry a clock in
+// device[1:4]: the sender's seconds counter / 256 (profile §3/§4). The
+// inverter counts in local time and the cloud in UTC, so their bytes
+// differ by the UTC offset. device[1] is the counter's top byte: 0x6a
+// until 2026-11-20 08:08:32 (0x6b000000), 0x6b until 2027-06-02. It is
+// not a constant, and no classifier may key on it.
+
+// bootstrapRespDev0 are the response lead bytes: the registration
+// requests' (0x2a, 0x2c, 0x2b) with the response bit.
+var bootstrapRespDev0 = [3]byte{0x2a | respBit, 0x2c | respBit, 0x2b | respBit}
+
+// SessionFrame reports whether f is one of the inverter's session-pattern
+// frames (keepalive, telemetry or a snapshot chunk), whose device[1:4]
+// is its session clock.
+func SessionFrame(f Frame) bool {
+	kind, _ := Decode(f)
+	if kind == KindKeepalive || kind == KindTele {
+		return true
+	}
+	snap, ok := classSnap(f)
+	return ok && kind == snap
+}
 
 // Kind is the message class of a decoded frame.
 type Kind string
@@ -178,9 +196,12 @@ func classMbusWrite(f Frame) (Kind, bool) {
 		(p[1] == fn06 || p[1] == fn10)
 }
 
+// classBootstrapResp keys on the response lead byte and the fixed
+// payload; device[1:4] is the sender's clock (see SessionFrame).
 func classBootstrapResp(f Frame) (Kind, bool) {
-	return KindBootstrapResp, f.Device[0]&respBit != 0 &&
-		f.Device[1] == SessionDev1 && isTrioPayload(f.Payload)
+	d := f.Device[0]
+	lead := d == bootstrapRespDev0[0] || d == bootstrapRespDev0[1] || d == bootstrapRespDev0[2]
+	return KindBootstrapResp, lead && isTrioPayload(f.Payload)
 }
 
 // classWrapper keys on the wrapper payload length + dev0 — the envelope

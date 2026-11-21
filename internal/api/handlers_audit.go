@@ -263,12 +263,16 @@ func summarizeOther(rec *store.FrameRecord) string {
 
 // messageEntry is the spec's MessageEntry (the /messages items).
 type messageEntry struct {
-	TS      time.Time `json:"ts"`
-	Dir     string    `json:"dir"`
-	Frame   string    `json:"frame"`
-	Length  int       `json:"length"`
-	Hex     string    `json:"hex"`
-	Summary *string   `json:"summary"`
+	TS     time.Time `json:"ts"`
+	Dir    string    `json:"dir"`
+	Frame  string    `json:"frame"`
+	Length int       `json:"length"`
+	Hex    string    `json:"hex"`
+	// Device and Fn are the frame header: the four device bytes (hex)
+	// and the envelope function byte.
+	Device  string  `json:"device"`
+	Fn      int     `json:"fn"`
+	Summary *string `json:"summary"`
 	// Decision is what happened to the frame: forwarded, dropped,
 	// injected (written by this app) or residue (a partial frame at
 	// close).
@@ -421,6 +425,8 @@ func messageEntryOf(rec *store.FrameRecord) messageEntry {
 		Frame:  frameTypeOf(rec.Class),
 		Length: len(rec.Payload),
 		Hex:    hex.EncodeToString(rec.Payload),
+		Device: hex.EncodeToString(rec.Dev[:]),
+		Fn:     int(rec.Fn),
 	}
 	if len(rec.Decoded) > 0 {
 		sum := string(rec.Decoded)

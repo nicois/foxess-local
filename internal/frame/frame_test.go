@@ -93,6 +93,7 @@ func TestSplitSingle(t *testing.T) {
 func t2TrioBuf(t *testing.T) []byte {
 	t.Helper()
 	trio := BootstrapTrio(trioReqDev0, TrioParams{
+		TimeHigh:     0x6a,
 		SessionBytes: t2SessionBytes,
 		FnBase:       t2FnBase,
 		Deltas:       t2Deltas,

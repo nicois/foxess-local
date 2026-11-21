@@ -511,7 +511,7 @@ func slotRegisters(groups [8][7]int) []int {
 func (h *harness) seedFrame(ts time.Time, dir string, class frame.Kind, decision store.Decision, payload []byte, decoded json.RawMessage) {
 	h.st.RecordFrame(store.FrameRecord{
 		ConnID: testConnID, Dir: dirOf(dir), TS: ts, Class: class,
-		Off: 0, Fn: 0x10, Plen: len(payload),
+		Off: 0, Dev: [4]byte{0xaa, 0x6b, 0x01, 0x19}, Fn: 0x10, Plen: len(payload),
 		Payload: payload, Decision: decision, Origin: "", Decoded: decoded,
 	})
 	h.st.Flush()

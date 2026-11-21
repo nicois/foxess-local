@@ -43,6 +43,16 @@ version; anything else bumps the patch version.
 
 ### Fixed
 
+- Cloud forwarding `full` works again. Since 2026-11-20 08:08 UTC it held
+  the cloud's replies to the inverter's registration, so the inverter
+  never finished connecting and sent no data until you switched back.
+  A byte in those replies is a clock, and it ticked over from `6a` to
+  `6b` that morning; foxess-local had taken it for a constant. `off`
+  mode had the same fault: its commands went out without the session's
+  clock bytes. foxess-local's own replies now carry the clock as the
+  cloud's do.
+- Activity → Messages and `GET /api/v1/messages` show each frame's
+  header (its device bytes and function byte), not only its payload.
 - Opening another page in the web UI starts at its top. It kept the
   previous page's scroll position, so after scrolling down Activity, the
   Inverter page opened part-way down.

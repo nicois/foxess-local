@@ -2937,7 +2937,7 @@ async function renderMessages() {
         <div class="item-title"><span class="mono">${esc(m.frame)}</span> <span class="muted small num">${fmtBytes(m.length)}</span> ${msgStatus(m)}</div>
         <div class="item-meta muted small"><time datetime="${esc(m.ts)}">${fmtTime(m.ts)}</time>${msgFirmware(m) ? "" : m.summary ? " · " + esc(m.summary) : ""}</div>
         ${msgFirmware(m)}
-        ${m.hex ? `<details class="hex"><summary>${esc(tr("raw bytes"))}</summary><pre>${esc(m.hex)}</pre></details>` : ""}
+        ${m.hex || m.device ? `<details class="hex"><summary>${esc(tr("raw bytes"))}</summary><pre>${m.device ? esc(tr("header: device {device}, fn {fn}", { device: m.device, fn: "0x" + (m.fn ?? 0).toString(16).padStart(2, "0") })) + "\n" : ""}${esc(m.hex || "")}</pre></details>` : ""}
       </div>
     </li>`;
   }).join("");

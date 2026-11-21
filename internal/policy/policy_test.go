@@ -71,6 +71,22 @@ func TestFullPassesKnownKinds(t *testing.T) {
 	}
 }
 
+// TestFullPassesLiveBootstrapResp: the real cloud's 2026-11-21
+// bootstrap responses (device aa/ac/ab 6b 01 19, the inverter's session
+// byte 0x6b) pass in full. Holding them stalled every full session: the
+// inverter re-registers every 12 s until a response arrives (profile §3).
+func TestFullPassesLiveBootstrapResp(t *testing.T) {
+	for _, f := range []frame.Frame{
+		{Device: [4]byte{0xaa, 0x6b, 0x01, 0x19}, Fn: 0x0a, Payload: []byte{0x01, 0x01, 0x01, 0x00, 0x00}},
+		{Device: [4]byte{0xac, 0x6b, 0x01, 0x19}, Fn: 0x0c, Payload: nil},
+		{Device: [4]byte{0xab, 0x6b, 0x01, 0x19}, Fn: 0x0d, Payload: []byte{0x01}},
+	} {
+		k, _ := frame.Decode(f)
+		v := Decide(Posture{Mode: ModeFull}, f, k)
+		require.Equal(t, ActionPass, v.Action, "dev % x: kind %s, %s", f.Device[:], k, v.Reason)
+	}
+}
+
 // TestFullHoldsUnrecognised (owner, 2026-11-18): full mode does not let
 // firmware through. Firmware frames have never been seen on this
 // inverter, so they cannot be recognised; instead every kind the cloud is

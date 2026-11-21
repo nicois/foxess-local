@@ -483,6 +483,7 @@
   "grid (+ import)": "red (+ importación)",
   "grid import {w}": "importación de red {w}",
   "grid {w} {state}": "red {w} {state}",
+  "header: device {device}, fn {fn}": "cabecera: dispositivo {device}, fn {fn}",
   "held": "retenido",
   "hide data table": "ocultar tabla",
   "history not loaded yet": "historial aún no cargado",
