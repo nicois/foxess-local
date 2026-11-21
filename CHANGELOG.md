@@ -20,6 +20,15 @@ version; anything else bumps the patch version.
 
 ## [Unreleased]
 
+### Changed
+
+- "Running now" says when a schedule window ends instead of naming its
+  group, and for a force discharge or force charge the SoC it stops at:
+  "Force discharge · until 20:00, down to 50 %".
+- The dashboard's state of charge moves smoothly between readings: it is
+  carried forward at its recent rate for up to 10 s, then the next
+  reading takes over.
+
 ## [v0.4.0] - 2026-11-21
 
 ### Added

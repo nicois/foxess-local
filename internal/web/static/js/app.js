@@ -169,6 +169,7 @@ function gate(msg) {
   teardownSSE();
   stopHistTimer();
   stopFreshTimer();
+  stopSocTimer();
   stopAvgTimer();
   S.state = null;
   S.public = false;
@@ -770,6 +771,7 @@ function queueSnapshot(d) {
     S.state.power = s.power;
     S.state.battery = { ...(S.state.battery || {}), soc_pct: s.soc_pct, soc_estimate_pct: s.soc_estimate_pct, state: s.battery_state };
     S.state.as_of = s.ts;
+    noteSoc(s.soc_estimate_pct, s.ts);
     if (routeName() === "dashboard") paintNow(S.state);
     if (routeName() === "inverter") { paintNow(S.state); paintLimits(S.state); }
   });
@@ -1042,6 +1044,7 @@ async function render() {
   if (routeName() !== "dashboard") {
     stopHistTimer();
     stopFreshTimer();
+    stopSocTimer();
     stopAvgTimer();
   }
   const html = await ROUTES[routeName()]();
@@ -1254,7 +1257,8 @@ async function loadQuirks() {
   } catch { return null; }
 }
 
-// activeWhy: why the running mode applies — a schedule window, the
+// activeWhy: why the running mode applies — a schedule window (its end,
+// and a forced mode's target SoC), an override, the
 // schedule's default (all-day) group, or the base work mode. The default
 // group's 00:00–23:59 window says nothing useful, so it is named instead
 // (owner, 2026-11-20).
@@ -1263,8 +1267,13 @@ function activeWhy(st) {
   if (am.source !== "schedule") return tr("the base work mode (no schedule group applies)");
   const ov = st.schedule_override;
   if (ov?.active && ov.group === am.group) return tr("override by {holder} until {time}", { holder: ov.holder, time: ov.end });
-  if (st.schedule?.groups?.[am.group - 1]?.default) return tr("default mode");
-  return tr("schedule group {n} ({from}–{to})", { n: am.group, from: am.start, to: am.end });
+  const g = st.schedule?.groups?.[am.group - 1];
+  if (g?.default) return tr("default mode");
+  // the group's number says nothing: when it ends does, and for a force
+  // charge / discharge the SoC it stops at (owner, 2026-11-21)
+  if (g && am.mode === "force-discharge") return tr("until {to}, down to {soc} %", { to: am.end, soc: g.fd_soc_pct });
+  if (g && am.mode === "force-charge") return tr("until {to}, up to {soc} %", { to: am.end, soc: g.fd_soc_pct });
+  return tr("until {to}", { to: am.end });
 }
 
 // nowModeHTML: what the inverter is running and why (Home), linking
@@ -1334,16 +1343,49 @@ function paintNow(st) {
   paintFreshness();
 }
 
-function paintBattery(st) {
-  const b = st?.battery;
-  const w = nowPower(st)?.battery_w;
-  // the estimate between the inverter's whole-percent readings (two
-  // decimals, D-028) when there is one, else the reported SoC
-  const est = b?.soc_estimate_pct;
-  const soc = est ?? b?.soc_pct;
-  const socTxt = soc == null ? null : est != null ? est.toFixed(2) : String(Math.round(soc));
+// The SoC estimate arrives every ~5 s and moves ~0.04 % a step while
+// discharging hard. Between readings the dashboard carries it forward at
+// the rate of its last two readings (owner, 2026-11-21) — the estimate's
+// own rate, so the estimator's learnt factor is in it — for at most
+// SOC_EXTRAP_MS. A faster change than SOC_RATE_MAX is a jump (a BMS
+// anchor), not a rate: 10 kW from a 42 kWh pack is ~24 %/h. The
+// screen-reader value stays on the readings.
+const SOC_EXTRAP_MS = 10000;
+const SOC_RATE_MAX = 40 / 3600000; // %/ms
+const SOC_TICK_MS = 250;
+
+// noteSoc records one estimate reading (server time ts) for the
+// extrapolation; the base is local time, so clock skew does not matter.
+function noteSoc(est, ts) {
+  const at = Date.parse(ts);
+  const prev = S.socView;
+  if (est == null || !Number.isFinite(at)) { S.socView = null; return; }
+  if (prev && at === prev.ts && est === prev.est) return;
+  const dt = prev ? at - prev.ts : 0;
+  let rate = dt > 0 && dt <= 30000 ? (est - prev.est) / dt : 0;
+  if (Math.abs(rate) > SOC_RATE_MAX) rate = 0;
+  S.socView = { est, ts: at, base: Date.now(), rate, shown: prev?.shown ?? null, dir: Math.sign(rate) };
+}
+
+// socShown is the SoC to display now: the last reading carried forward,
+// never stepping back against the direction of travel by a hair (the
+// next reading landing just behind the carried value).
+function socShown(est) {
+  const v = S.socView;
+  if (est == null || !v || v.est !== est) return est;
+  let x = v.est + v.rate * Math.min(Math.max(Date.now() - v.base, 0), SOC_EXTRAP_MS);
+  if (v.dir && v.shown != null && (x - v.shown) * v.dir < 0 && Math.abs(x - v.shown) < 0.05) x = v.shown;
+  x = Math.max(0, Math.min(100, x));
+  v.shown = x;
+  return x;
+}
+
+// paintSoc paints the SoC figure and bar (soc: the value to show).
+function paintSoc(soc, est) {
+  const socTxt = soc == null ? null : est != null ? soc.toFixed(2) : String(Math.round(soc));
   const socEl = byId("soc");
-  if (socEl) {
+  if (socEl && socEl.dataset.t !== (socTxt ?? "")) {
+    socEl.dataset.t = socTxt ?? "";
     if (socTxt == null) socEl.textContent = "—";
     else {
       // the decimals smaller than the whole percent
@@ -1354,16 +1396,39 @@ function paintBattery(st) {
       socEl.replaceChildren(whole, small, " %");
     }
   }
-  const meter = byId("soc-meter");
-  if (meter) {
-    meter.setAttribute("aria-valuenow", soc == null ? 0 : soc);
-    meter.setAttribute("aria-valuetext", soc == null ? tr("unknown") : tr("{n} percent", { n: socTxt }));
-  }
   const bar = byId("soc-bar");
   if (bar) {
     bar.style.width = (soc == null ? 0 : Math.max(0, Math.min(100, soc))) + "%";
     bar.classList.toggle("low", soc != null && soc < 20 && soc >= 10);
     bar.classList.toggle("crit", soc != null && soc < 10);
+  }
+}
+
+let socTimer = 0;
+function startSocTimer() {
+  if (!socTimer) socTimer = setInterval(() => {
+    const est = S.state?.battery?.soc_estimate_pct;
+    if (est != null && S.socView?.rate) paintSoc(socShown(est), est);
+  }, SOC_TICK_MS);
+}
+function stopSocTimer() {
+  clearInterval(socTimer);
+  socTimer = 0;
+}
+
+function paintBattery(st) {
+  const b = st?.battery;
+  const w = nowPower(st)?.battery_w;
+  // the estimate between the inverter's whole-percent readings (two
+  // decimals, D-028) when there is one, else the reported SoC
+  const est = b?.soc_estimate_pct;
+  const soc = est ?? b?.soc_pct;
+  paintSoc(est != null ? socShown(est) : soc, est);
+  const meter = byId("soc-meter");
+  if (meter) {
+    const txt = soc == null ? null : est != null ? est.toFixed(2) : String(Math.round(soc));
+    meter.setAttribute("aria-valuenow", soc == null ? 0 : soc);
+    meter.setAttribute("aria-valuetext", soc == null ? tr("unknown") : tr("{n} percent", { n: txt }));
   }
   const f = flowOf(nowPower(st)).batt;
   const phrase = byId("batt-phrase");
@@ -1687,6 +1752,7 @@ function afterDashboard() {
   renderHistory(S.histRange);
   startHistTimer();
   startFreshTimer();
+  startSocTimer();
   startAvgTimer();
 }
 
