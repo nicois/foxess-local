@@ -56,6 +56,7 @@ release:
 sign:
 	@test -n "$(VERSION)" || { echo "make sign VERSION=vX.Y.Z" >&2; exit 2; }
 	@test -w $(DIST)/SHA256SUMS.minisig || { echo "$(DIST)/SHA256SUMS.minisig is not writable by $$(id -un): run make release first" >&2; exit 2; }
+	@bash deploy/sign-check.sh "$(VERSION)" "$(DIST)"
 	minisign -S -s $(SIGN_KEY) -m $(DIST)/SHA256SUMS -x $(DIST)/SHA256SUMS.minisig -t "foxess-local $(VERSION)"
 
 verify-release:

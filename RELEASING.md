@@ -94,6 +94,10 @@ only accept binaries signed by the key built into them.
    `make -C <this checkout> sign VERSION=v0.2.0` (minisign asks for the
    key password). `make release` leaves `dist/SHA256SUMS.minisig` as an
    empty file that account may write; the build account reads the result.
+   `make sign` first runs `deploy/sign-check.sh`, which refuses a
+   `VERSION` that is not a release tag (`v0.4.1.rc.1`), a `SHA256SUMS`
+   that does not match the files, and binaries that do not carry
+   `VERSION` (a stale `dist/`). It reads the binaries without running them.
 4. Verify with the new binary's own verifier (this also cross-checks the
    app's minisign implementation against the real tool):
    `make verify-release`.
