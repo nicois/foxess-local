@@ -11,6 +11,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -99,13 +101,22 @@ func TestETagRevalidation(t *testing.T) {
 	}
 }
 
-// TestModulePreload: the shell names the modules app.js imports, so the
-// browser fetches them alongside app.js instead of after it.
+// TestModulePreload: the shell names every module app.js imports, so
+// the browser fetches them alongside app.js instead of after it.
 func TestModulePreload(t *testing.T) {
 	r := doGET(t, "/")
 	body, _ := io.ReadAll(r.Body)
 	_ = r.Body.Close()
-	for _, m := range []string{"static/js/i18n.js", "static/js/charts.js"} {
+	app, err := os.ReadFile("static/js/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	imports := regexp.MustCompile(`(?m)^import .* from "\./([a-z0-9]+\.js)";`).FindAllStringSubmatch(string(app), -1)
+	if len(imports) < 3 {
+		t.Fatalf("app.js imports: found %d, want i18n.js, charts.js, socview.js at least", len(imports))
+	}
+	for _, im := range imports {
+		m := "static/js/" + im[1]
 		if !strings.Contains(string(body), `<link rel="modulepreload" href="`+m+`">`) {
 			t.Errorf("index.html does not preload %s", m)
 		}

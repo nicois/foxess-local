@@ -26,8 +26,8 @@ version; anything else bumps the patch version.
   group, and for a force discharge or force charge the SoC it stops at:
   "Force discharge · until 20:00, down to 50 %".
 - The dashboard's state of charge moves smoothly between readings: it is
-  carried forward at its recent rate for up to 10 s, then the next
-  reading takes over.
+  carried forward at the rate the battery's power gives, for up to 6 s,
+  and it never steps back while the battery keeps going the same way.
 - The live feed (`GET /api/v1/events`) no longer replays missed
   snapshots: a snapshot only says what the values are now. A reconnect
   replays the missed configuration, connection and system events, then

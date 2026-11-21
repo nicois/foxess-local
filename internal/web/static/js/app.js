@@ -18,6 +18,7 @@
 
 import { tr, locale, LANGS, currentLang, setLang } from "./i18n.js";
 import { smallMultiples } from "./charts.js";
+import { socView } from "./socview.js";
 
 // API is the API's path, relative to the page: the UI also works behind
 // a reverse proxy under a path prefix (/foxess/ → /foxess/api/v1). A
@@ -771,7 +772,6 @@ function queueSnapshot(d) {
     S.state.power = s.power;
     S.state.battery = { ...(S.state.battery || {}), soc_pct: s.soc_pct, soc_estimate_pct: s.soc_estimate_pct, state: s.battery_state };
     S.state.as_of = s.ts;
-    noteSoc(s.soc_estimate_pct, s.ts);
     if (routeName() === "dashboard") paintNow(S.state);
     if (routeName() === "inverter") { paintNow(S.state); paintLimits(S.state); }
   });
@@ -1343,42 +1343,11 @@ function paintNow(st) {
   paintFreshness();
 }
 
-// The SoC estimate arrives every ~5 s and moves ~0.04 % a step while
-// discharging hard. Between readings the dashboard carries it forward at
-// the rate of its last two readings (owner, 2026-11-21) — the estimate's
-// own rate, so the estimator's learnt factor is in it — for at most
-// SOC_EXTRAP_MS. A faster change than SOC_RATE_MAX is a jump (a BMS
-// anchor), not a rate: 10 kW from a 42 kWh pack is ~24 %/h. The
-// screen-reader value stays on the readings.
-const SOC_EXTRAP_MS = 10000;
-const SOC_RATE_MAX = 40 / 3600000; // %/ms
+// socv carries the SoC estimate between readings (socview.js); the
+// dashboard asks it for the value every SOC_TICK_MS. The screen-reader
+// value stays on the readings.
+const socv = socView();
 const SOC_TICK_MS = 250;
-
-// noteSoc records one estimate reading (server time ts) for the
-// extrapolation; the base is local time, so clock skew does not matter.
-function noteSoc(est, ts) {
-  const at = Date.parse(ts);
-  const prev = S.socView;
-  if (est == null || !Number.isFinite(at)) { S.socView = null; return; }
-  if (prev && at === prev.ts && est === prev.est) return;
-  const dt = prev ? at - prev.ts : 0;
-  let rate = dt > 0 && dt <= 30000 ? (est - prev.est) / dt : 0;
-  if (Math.abs(rate) > SOC_RATE_MAX) rate = 0;
-  S.socView = { est, ts: at, base: Date.now(), rate, shown: prev?.shown ?? null, dir: Math.sign(rate) };
-}
-
-// socShown is the SoC to display now: the last reading carried forward,
-// never stepping back against the direction of travel by a hair (the
-// next reading landing just behind the carried value).
-function socShown(est) {
-  const v = S.socView;
-  if (est == null || !v || v.est !== est) return est;
-  let x = v.est + v.rate * Math.min(Math.max(Date.now() - v.base, 0), SOC_EXTRAP_MS);
-  if (v.dir && v.shown != null && (x - v.shown) * v.dir < 0 && Math.abs(x - v.shown) < 0.05) x = v.shown;
-  x = Math.max(0, Math.min(100, x));
-  v.shown = x;
-  return x;
-}
 
 // paintSoc paints the SoC figure and bar (soc: the value to show).
 function paintSoc(soc, est) {
@@ -1408,7 +1377,8 @@ let socTimer = 0;
 function startSocTimer() {
   if (!socTimer) socTimer = setInterval(() => {
     const est = S.state?.battery?.soc_estimate_pct;
-    if (est != null && S.socView?.rate) paintSoc(socShown(est), est);
+    const v = est == null ? null : socv.value(Date.now());
+    if (v != null) paintSoc(v, est);
   }, SOC_TICK_MS);
 }
 function stopSocTimer() {
@@ -1423,7 +1393,10 @@ function paintBattery(st) {
   // decimals, D-028) when there is one, else the reported SoC
   const est = b?.soc_estimate_pct;
   const soc = est ?? b?.soc_pct;
-  paintSoc(est != null ? socShown(est) : soc, est);
+  // every reading reaches the carry (a snapshot, or a full state): keyed
+  // by its time, so a repaint of the same one does not restart it
+  socv.reading(est, w, b?.capacity_wh, st?.as_of, Date.now());
+  paintSoc(est != null ? socv.value(Date.now()) ?? est : soc, est);
   const meter = byId("soc-meter");
   if (meter) {
     const txt = soc == null ? null : est != null ? est.toFixed(2) : String(Math.round(soc));
