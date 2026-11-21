@@ -20,6 +20,8 @@ version; anything else bumps the patch version.
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-11-21
+
 ### Added
 
 - Schedule override for automations (`PUT /api/v1/schedule/override`): a
