@@ -60,12 +60,13 @@ func main() {
 	pprofAddr := flag.String("pprof", "", "serve the Go profiler on this address (e.g. 127.0.0.1:6060)")
 	eps := flag.Int("eps", 0, "simulated EPS (backup) port load, W")
 	version := flag.String("version", "devui", "the version /config reports (a restart with another one exercises the UI's reload into an update)")
+	freeFirst := flag.Bool("free-group1", false, "seed the schedule with group 1 off and the windows one slot down (the override convention, D-029)")
 	stateDir := flag.String("dir", "", "keep the token store (and a seeded database) in this directory instead of a temporary one: a restart keeps the browser's token valid (pass -db DIR/devui.db then)")
 	flag.Parse()
 	epsW = int32(*eps) //nolint:gosec // G115: a small wattage flag
 
 	dir := devDir(*stateDir)
-	st := openStore(*dbPath, dir, *model, uint16(*master)) //nolint:gosec // G115: flag is a register value
+	st := openStore(*dbPath, dir, *model, uint16(*master), *freeFirst) //nolint:gosec // G115: flag is a register value
 	if *pprofAddr != "" {
 		go servePprof(*pprofAddr)
 	}
@@ -151,7 +152,7 @@ func devToken(tok *api.TokenStore, kept bool) string {
 
 // openStore opens dbPath (an existing database, e.g. from tools/synthdb)
 // or a seeded temporary one in dir.
-func openStore(dbPath, dir, model string, master uint16) *store.Store {
+func openStore(dbPath, dir, model string, master uint16, freeFirst bool) *store.Store {
 	path := dbPath
 	if path == "" {
 		path = filepath.Join(dir, "devui.db")
@@ -162,7 +163,7 @@ func openStore(dbPath, dir, model string, master uint16) *store.Store {
 		log.Fatal(err)
 	}
 	if dbPath == "" {
-		seed(st, time.Now(), model, master)
+		seed(st, time.Now(), model, master, freeFirst)
 	} else {
 		fmt.Printf("devui: opened %s in %v\n", path, time.Since(t0).Round(time.Millisecond))
 	}
@@ -320,7 +321,10 @@ func seedTelemetry(st *store.Store, now time.Time) {
 	}
 }
 
-func seed(st *store.Store, now time.Time, model string, master uint16) {
+// seed fills a fresh store. freeFirst leaves schedule group 1 off and
+// puts each window (and its parameter block) one slot down, as the
+// override convention has it (D-029).
+func seed(st *store.Store, now time.Time, model string, master uint16, freeFirst bool) {
 	seedTelemetry(st, now)
 	regs := make([]uint16, 15)
 	padded := model + "               "
@@ -341,32 +345,7 @@ func seed(st *store.Store, now time.Time, model string, master uint16) {
 	st.RecordRegisters(now, 41007, block)
 	st.RecordRegisters(now, 41200, []uint16{10000, 7000, 0}) // load / generation limits
 	st.RecordRegisters(now, 48000, []uint16{1, 0, 0, 0, 0, 0, 0, 0, 0, 0})
-	table := make([]uint16, 80)
-	groups := [][]uint16{
-		{1, 0x0B02, 0x0D3A, 6, 0x640A, 99, 9948, 0, 1, 2},
-		{1, 0x1132, 0x1400, 7, 0x640A, 50, 10500, 0, 3, 2},
-		{1, 0x0000, 0x173B, 1, 0x640B, 10, 0, 0, 1, 2},
-	}
-	for k := range 8 {
-		g := []uint16{0, 0, 0, 1, 0x640A, 10, 0, 0, 0, 2}
-		if k < len(groups) {
-			g = groups[k]
-		}
-		copy(table[10*k:], g)
-	}
-	st.RecordRegisters(now, 48010, table)
-	// the groups' parameter blocks as the owner's 2026-11-18 session left
-	// them: force charge import ≤ 35 kW with solar, force discharge export
-	// ≤ 10 kW without solar (r1:r2 / r3:r4 U32, r6 from-PV power)
-	for k, p := range [][]uint16{
-		{2, 0, 35000, 1, 34464, 0, 20000},
-		{2, 1, 34464, 0, 10000, 0, 0},
-		{2, 1, 34464, 1, 34464, 0, 20000},
-	} {
-		blk := make([]uint16, 50)
-		copy(blk, p)
-		st.RecordRegisters(now, 57000+50*k, blk)
-	}
+	seedSchedule(st, now, freeFirst)
 	snap := make([]byte, 141)
 	copy(snap, "DEVUI0000000001")
 	copy(snap[33:], "1.73")
@@ -391,4 +370,41 @@ func seed(st *store.Store, now time.Time, model string, master uint16) {
 	}
 	seedActivity(st, len(frames), now)
 	st.Flush()
+}
+
+// seedSchedule seeds the schedule table and its groups' parameter blocks
+// (freeFirst: group 1 off, every window one slot down — D-029's
+// convention).
+func seedSchedule(st *store.Store, now time.Time, freeFirst bool) {
+	table := make([]uint16, 80)
+	groups := [][]uint16{
+		{1, 0x0B02, 0x0D3A, 6, 0x640A, 99, 9948, 0, 1, 2},
+		{1, 0x1132, 0x1400, 7, 0x640A, 50, 10500, 0, 3, 2},
+		{1, 0x0000, 0x173B, 1, 0x640B, 10, 0, 0, 1, 2},
+	}
+	params := [][]uint16{
+		{2, 0, 35000, 1, 34464, 0, 20000},
+		{2, 1, 34464, 0, 10000, 0, 0},
+		{2, 1, 34464, 1, 34464, 0, 20000},
+	}
+	if freeFirst {
+		groups = append([][]uint16{{0, 0, 0, 1, 0x640A, 10, 0, 0, 0, 2}}, groups...)
+		params = append([][]uint16{{2, 1, 34464, 1, 34464, 0, 20000}}, params...)
+	}
+	for k := range 8 {
+		g := []uint16{0, 0, 0, 1, 0x640A, 10, 0, 0, 0, 2}
+		if k < len(groups) {
+			g = groups[k]
+		}
+		copy(table[10*k:], g)
+	}
+	st.RecordRegisters(now, 48010, table)
+	// the groups' parameter blocks as the owner's 2026-11-18 session left
+	// them: force charge import ≤ 35 kW with solar, force discharge export
+	// ≤ 10 kW without solar (r1:r2 / r3:r4 U32, r6 from-PV power)
+	for k, p := range params {
+		blk := make([]uint16, 50)
+		copy(blk, p)
+		st.RecordRegisters(now, 57000+50*k, blk)
+	}
 }

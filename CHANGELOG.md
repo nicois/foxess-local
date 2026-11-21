@@ -38,6 +38,10 @@ version; anything else bumps the patch version.
 
 ### Fixed
 
+- The Schedule page lists a group that is off but comes before an
+  enabled one, as "off · free for an override". The inverter runs the
+  first enabled group by number, so such a group is where an
+  automation's override goes; the page hid it like an unused group.
 - Coming back to the web UI after a while no longer replays the missed
   readings on the dashboard at speed.
 

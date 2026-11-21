@@ -572,6 +572,7 @@
   "ntfy topic URL": "URL du topic ntfy",
   "of {total}": "sur {total}",
   "off": "désactivé",
+  "off · free for an override": "désactivé · libre pour un forçage",
   "off — the schedule below is ignored": "désactivé — le planning ci-dessous est ignoré",
   "ok": "ok",
   "on": "activé",

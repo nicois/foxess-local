@@ -2214,17 +2214,21 @@ function schedDefault(g) {
   </article>`;
 }
 
-function schedGroup(g) {
+// schedGroup renders one group. gap: it is off, but an enabled group
+// comes after it — the inverter runs the first enabled group by number,
+// so it is a slot an automation's override can take (D-029), and it is
+// shown (owner, 2026-11-21). An off group with nothing after it is
+// unused: kept in the form (the save sends all eight), hidden until "Add
+// a window" brings it up.
+function schedGroup(g, gap) {
   const i = g.index;
   const on = g.enabled;
   const dis = on ? "" : " disabled";
   const force = FORCE_MODES.includes(g.work_mode);
   const summary = on
     ? `${esc(SCHED_TEXT[g.work_mode] ?? g.work_mode)} · <span class="num">${esc(g.start)}–${esc(g.end)}</span>`
-    : `<span class="muted">${esc(tr("off"))}</span>`;
-  // an unused group stays in the form (the save sends all eight), hidden
-  // until "Add a window" brings it up
-  return `<div class="group k-${schedKind(g.work_mode)}${on ? " on" : ""}" data-group="${i}"${on ? "" : " data-unused hidden"}>
+    : `<span class="muted">${esc(gap ? tr("off · free for an override") : tr("off"))}</span>`;
+  return `<div class="group k-${schedKind(g.work_mode)}${on ? " on" : ""}" data-group="${i}"${on || gap ? "" : " data-unused hidden"}>
     <input type="checkbox" switch name="g${i}-enabled" ${on ? "checked" : ""} aria-label="${esc(tr("Group {n} enabled", { n: i }))}">
     <details>
       <summary><span class="g-title">${esc(tr("Group {n}", { n: i }))}</span><span class="g-sum">${summary}</span></summary>
@@ -2257,8 +2261,11 @@ async function renderSchedule() {
   const ok = writable("schedule");
   const def = groups.find((g) => g.default);
   const windows = groups.filter((g) => !g.default);
-  const spare = windows.some((g) => !g.enabled);
-  const shown = windows.filter((g) => g.enabled).length;
+  // an off group with an enabled group after it is a gap (schedGroup)
+  const lastOn = Math.max(0, ...groups.filter((g) => g.enabled).map((g) => g.index));
+  const gap = (g) => !g.enabled && g.index < lastOn;
+  const spare = windows.some((g) => !g.enabled && !gap(g));
+  const shown = windows.filter((g) => g.enabled || gap(g)).length;
   return `
   ${pageHead(tr("Schedule"), esc(def
     ? tr("Daily time windows, and the default mode that runs outside them.")
@@ -2271,7 +2278,7 @@ async function renderSchedule() {
     </article>
     ${def ? `<div class="groups${sch?.enabled ? "" : " master-off"}">${schedDefault(def)}</div>` : ""}
     <h3 class="sub-head">${esc(tr("Windows"))}</h3>
-    <div class="groups${sch?.enabled ? "" : " master-off"}">${windows.map(schedGroup).join("")}
+    <div class="groups${sch?.enabled ? "" : " master-off"}">${windows.map((g) => schedGroup(g, gap(g))).join("")}
       ${shown ? "" : `<p class="muted small" id="sched-none">${esc(def ? tr("No windows: the default mode runs all day.") : tr("No windows: the work mode runs all day."))}</p>`}
     </div>
     <button type="button" class="ghost" data-action="sched-add" ${spare ? "" : "disabled"}>${esc(tr("Add a window"))}</button>
