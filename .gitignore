@@ -13,6 +13,14 @@ bin/
 /data/
 .worktrees/
 
+# tool binaries built in the repo root (go build ./tools/…)
+/devui
+/socreplay
+/synthdb
+/loadgen
+/changelog
+/i18n
+
 # recon tooling build artifacts
 /mon150
 tools/mon150/mon150
