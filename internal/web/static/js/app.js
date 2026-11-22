@@ -1152,18 +1152,20 @@ function fmtDuration(h) {
 // flowOf: per-entity direction + phrase for the current power reading.
 // The power-flow diagram (viewBox 400×300, the box is 4:3 so node
 // percentages and SVG units agree): DC sources into the inverter, its AC
-// output into the switchboard, which feeds the home and meets the grid;
+// output into the switchboard, which feeds the home and meets the grid
+// (grid, switchboard and home on one vertical line, the switchboard's
+// label in the wide gap from the inverter: clear at phone width);
 // the EPS (backup) port hangs off the inverter itself. The top row is
 // outside the house (solar, grid), the bottom row inside (battery,
 // backup, home). [key, from x,y,
 // to x,y, arrow position along the line]; "fwd" flows from → to.
 const FLOW_LINES = [
-  ["solar", 60, 50, 180, 150, 0.42],
-  ["batt", 180, 150, 60, 250, 0.6], // fwd = charging (inverter → battery)
-  ["ac", 180, 150, 288, 150, 0.75], // fwd = inverter AC output
-  ["home", 288, 150, 340, 250, 0.5],
-  ["grid", 340, 50, 288, 150, 0.5], // fwd = import (grid → switchboard)
-  ["eps", 180, 150, 200, 258, 0.5], // fwd = backup port output
+  ["solar", 60, 50, 160, 150, 0.42],
+  ["batt", 160, 150, 60, 250, 0.6], // fwd = charging (inverter → battery)
+  ["ac", 160, 150, 340, 150, 0.8], // fwd = inverter AC output
+  ["home", 340, 150, 340, 250, 0.3],
+  ["grid", 340, 50, 340, 150, 0.7], // fwd = import (grid → switchboard)
+  ["eps", 160, 150, 190, 258, 0.5], // fwd = backup port output
 ];
 
 // paintFlowLine sets one connector's state and its arrow's direction.
@@ -1753,11 +1755,11 @@ function flowNode(k, label, area) {
 // marker at x,y in the viewBox) — the Inverter page's legend explains each.
 const FLOW_LIMITS = [
   // each sits on the stretch of its line no node covers at phone width
-  { n: 1, x: 300, y: 126, key: "grid" },   // the grid connection (CT)
-  { n: 2, x: 244, y: 132, key: "port" },   // the inverter's grid port
-  { n: 3, x: 128, y: 194, key: "batt" },   // the battery
-  { n: 4, x: 180, y: 94, key: "inv" },     // the inverter's output rating
-  { n: 5, x: 230, y: 199, key: "eps" },    // the backup (EPS) port
+  { n: 1, x: 362, y: 118, key: "grid" },   // the grid connection (CT)
+  { n: 2, x: 250, y: 132, key: "port" },   // the inverter's grid port
+  { n: 3, x: 92, y: 186, key: "batt" },    // the battery (beside its line: the nodes cover most of it on a phone)
+  { n: 4, x: 160, y: 94, key: "inv" },     // the inverter's output rating
+  { n: 5, x: 218, y: 199, key: "eps" },    // the backup (EPS) port
 ];
 
 const fmtKW = (w) => (w == null ? "—" : (w / 1000).toFixed(w % 1000 === 0 ? 0 : 1) + " kW");
@@ -1843,7 +1845,7 @@ function flowMarkup(withLimits) {
           ${FLOW_LINES.map(([k, x1, y1, x2, y2]) =>
             `<line id="fl-${k}" class="fl s-${k} idle" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`).join("")}
           ${FLOW_LINES.map(([k]) => `<path id="ar-${k}" class="ar s-${k} idle" d="M-6,-5 L6,0 L-6,5 Z"/>`).join("")}
-          <circle class="board-dot" cx="288" cy="150" r="5"/>
+          <circle class="board-dot" cx="340" cy="150" r="5"/>
           ${marks}
         </svg>
         <span class="board-label muted">${esc(tr("switchboard"))}</span>

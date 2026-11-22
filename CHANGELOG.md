@@ -22,6 +22,9 @@ version; anything else bumps the patch version.
 
 ### Changed
 
+- The power-flow diagram puts the grid, the switchboard and the home on
+  one vertical line and moves the inverter left, so the "switchboard"
+  label is no longer partly hidden on a phone.
 - "Running now" says when a schedule window ends instead of naming its
   group, and for a force discharge or force charge the SoC it stops at:
   "Force discharge · until 20:00, down to 50 %".
