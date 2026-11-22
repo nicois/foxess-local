@@ -3180,8 +3180,10 @@ components:
       description: >-
         Any confirmed register change: an own command, an observed cloud
         push, or a setting the periodic settings read found changed on the
-        inverter itself (its panel). `state` is the full new snapshot; the
-        client diffs on `changed`.
+        inverter itself (its panel); or `active-mode` alone, when the
+        running mode (`state.active_mode`) changed with the time — a
+        schedule window started or ended on the inverter's clock. `state`
+        is the full new snapshot; the client diffs on `changed`.
       required: [changed, state]
       properties:
         changed:
@@ -3189,7 +3191,7 @@ components:
           minItems: 1
           items:
             type: string
-            enum: [work-mode, limits, meter-compensation, schedule, forward-mode, identity, write-budget]
+            enum: [work-mode, limits, meter-compensation, schedule, forward-mode, identity, write-budget, active-mode]
         state:
           $ref: '#/components/schemas/State'
     ConnectionEvent:

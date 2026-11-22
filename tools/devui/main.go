@@ -92,6 +92,7 @@ func main() {
 	}), api.WithNotifier(notifier),
 		api.WithCaptures(wincap.New(filepath.Join(dir, "captures"), 256<<20, time.Now, "devui")))
 	go apiH.RunOverrides(context.Background())
+	go apiH.RunActiveMode(context.Background())
 	go live(st, bus, &est, func() int { return set.Get().CapacityWh })
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/{rest...}", apiH)

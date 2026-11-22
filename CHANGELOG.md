@@ -38,6 +38,10 @@ version; anything else bumps the patch version.
 
 ### Fixed
 
+- "Running now" changes when a schedule window starts or ends. It used to
+  keep showing the previous mode until the page was reloaded. The live
+  feed sends a `config` event with `changed: [active-mode]` at the
+  change.
 - The Schedule page lists a group that is off but comes before an
   enabled one, as "off · free for an override". The inverter runs the
   first enabled group by number, so such a group is where an

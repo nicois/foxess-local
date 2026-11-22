@@ -719,7 +719,8 @@ func (h *handle) Start(ctx context.Context) {
 	go h.live.Run(ctx, livenessTick)
 	go h.diskGuard().Run(ctx)
 	if h.apiSrv != nil {
-		go h.apiSrv.RunOverrides(ctx) // clears an ended schedule override (D-029)
+		go h.apiSrv.RunOverrides(ctx)  // clears an ended schedule override (D-029)
+		go h.apiSrv.RunActiveMode(ctx) // "Running now" follows a window's start / end
 	}
 	h.startNotify(ctx)
 	h.startCaptures(ctx)
@@ -909,9 +910,13 @@ func (h *handle) gwObs(res gateway.Result) {
 // state builds the config event's full State snapshot ("" when the
 // build fails — the Changed list still names the register).
 func (h *handle) state() api.State {
-	st, err := api.StateFor(h.st, h.fwd, h.clk, api.ServerInfo{
+	info := api.ServerInfo{
 		BatteryCapacityWh: h.capacityWh(), Online: h.onlineFunc(), Energy: h.energy.energy, WriteBudget: h.writeBudget,
-	})
+	}
+	if h.set != nil { // the site zone: active_mode without a fresh clock reading
+		info.Settings = h.set
+	}
+	st, err := api.StateFor(h.st, h.fwd, h.clk, info)
 	if err != nil {
 		return api.State{TS: h.clk()}
 	}
