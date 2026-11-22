@@ -5,12 +5,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -34,55 +36,164 @@ func TestParseDispatchCSV(t *testing.T) {
 	}
 }
 
-// fakeNEMWeb serves a listing naming file and the file as a zip of csv.
-func fakeNEMWeb(t *testing.T, file string, csv []byte) (*httptest.Server, *int) {
+const (
+	oldReport  = "PUBLIC_DISPATCHIS_202611211045_0000000549774000.zip"
+	report     = "PUBLIC_DISPATCHIS_202611211050_0000000549774272.zip"
+	nextReport = "PUBLIC_DISPATCHIS_202611211055_0000000549774500.zip"
+)
+
+// fakeNEMWeb is an in-memory NEMWeb (no sockets, so it runs inside a
+// synctest bubble): the listing names an older report plus newest, and
+// each report is served as a zip of its CSV.
+type fakeNEMWeb struct {
+	mu       sync.Mutex
+	newest   string
+	reports  map[string][]byte // name → zip
+	listings int
+	zips     int
+}
+
+func newFakeNEMWeb(t *testing.T) *fakeNEMWeb {
+	t.Helper()
+	return &fakeNEMWeb{reports: map[string][]byte{}}
+}
+
+// publish adds a report built from csv and makes it the newest.
+func (f *fakeNEMWeb) publish(t *testing.T, name string, csv []byte) {
 	t.Helper()
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	w, _ := zw.Create(strings.TrimSuffix(file, ".zip") + ".CSV")
+	w, err := zw.Create(strings.TrimSuffix(name, ".zip") + ".CSV")
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, _ = w.Write(csv)
-	_ = zw.Close()
-	zips := 0
-	mux := http.NewServeMux()
-	mux.HandleFunc(dispatchDir, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == dispatchDir {
-			_, _ = w.Write([]byte(`<A HREF="/Reports/CURRENT/DispatchIS_Reports/PUBLIC_DISPATCHIS_202611211045_0000000549774000.zip">old</A><br>` +
-				`<A HREF="/Reports/CURRENT/DispatchIS_Reports/` + file + `">` + file + `</A><br>`))
-			return
-		}
-		if r.URL.Path != dispatchDir+file {
-			http.NotFound(w, r)
-			return
-		}
-		zips++
-		_, _ = w.Write(buf.Bytes())
-	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	return srv, &zips
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reports[name], f.newest = buf.Bytes(), name
 }
 
-// TestNEMWebLatest: the newest report in the listing is fetched once
-// and its region's price returned; an unknown region is an error.
-func TestNEMWebLatest(t *testing.T) {
+// client is a NEMWeb reading f.
+func (f *fakeNEMWeb) client() *NEMWeb {
+	return &NEMWeb{Base: "http://nemweb.test", Client: &http.Client{Transport: f}}
+}
+
+func (f *fakeNEMWeb) counts() (listings, zips int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.listings, f.zips
+}
+
+func (f *fakeNEMWeb) RoundTrip(r *http.Request) (*http.Response, error) {
+	if err := r.Context().Err(); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rec := httptest.NewRecorder()
+	switch name := strings.TrimPrefix(r.URL.Path, dispatchDir); {
+	case r.URL.Path == dispatchDir:
+		f.listings++
+		_, _ = rec.WriteString(`<A HREF="/Reports/CURRENT/DispatchIS_Reports/` + oldReport + `">old</A><br>` +
+			`<A HREF="/Reports/CURRENT/DispatchIS_Reports/` + f.newest + `">` + f.newest + `</A><br>`)
+	case f.reports[name] != nil:
+		f.zips++
+		_, _ = rec.Write(f.reports[name])
+	default:
+		rec.WriteHeader(http.StatusNotFound)
+	}
+	return rec.Result(), nil
+}
+
+func dispatchCSV(t *testing.T) []byte {
+	t.Helper()
 	csv, err := os.ReadFile("testdata/dispatch-price.csv")
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv, zips := fakeNEMWeb(t, "PUBLIC_DISPATCHIS_202611211050_0000000549774272.zip", csv)
-	n := &NEMWeb{Base: srv.URL, Client: srv.Client()}
-	for range 2 {
-		p, err := n.Latest(context.Background(), vic1)
-		if err != nil || p.RRP != 35.94 {
+	return csv
+}
+
+// TestNEMWebLatest: the newest report is fetched and its region's price
+// returned; an unknown region is an error, at once.
+func TestNEMWebLatest(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newFakeNEMWeb(t)
+		f.publish(t, report, dispatchCSV(t))
+		n := f.client()
+		start := time.Now()
+		if p, err := n.Latest(t.Context(), vic1); err != nil || p.RRP != 35.94 {
 			t.Fatalf("%+v %v", p, err)
 		}
-	}
-	if *zips != 1 {
-		t.Fatalf("fetched the report %d times", *zips)
-	}
-	if _, err := n.Latest(context.Background(), "WA1"); err == nil {
-		t.Fatal("WA1 has a price")
-	}
+		if _, zips := f.counts(); zips != 1 {
+			t.Fatalf("fetched the report %d times", zips)
+		}
+		n = f.client()
+		if _, err := n.Latest(t.Context(), "WA1"); err == nil {
+			t.Fatal("WA1 has a price")
+		}
+		if d := time.Since(start); d != 0 {
+			t.Fatalf("took %v, want no wait", d)
+		}
+	})
+}
+
+// TestNEMWebLatestWaitsForNewReport: when the listing still names the
+// report already read, Latest rechecks every retryPeriod and returns
+// the new report's price as soon as it appears; the old price is never
+// returned again.
+func TestNEMWebLatestWaitsForNewReport(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		csv := dispatchCSV(t)
+		f := newFakeNEMWeb(t)
+		f.publish(t, report, csv)
+		n := f.client()
+		if _, err := n.Latest(t.Context(), vic1); err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			time.Sleep(12 * time.Second)
+			f.publish(t, nextReport, bytes.ReplaceAll(csv, []byte("35.94"), []byte("412.5")))
+		}()
+		start := time.Now()
+		p, err := n.Latest(t.Context(), vic1)
+		if err != nil || p.RRP != 412.5 {
+			t.Fatalf("%+v %v", p, err)
+		}
+		// one listing for the first call, then at 0, 5, 10 and 15 s
+		if d := time.Since(start); d != 3*retryPeriod {
+			t.Fatalf("took %v, want %v", d, 3*retryPeriod)
+		}
+		if listings, zips := f.counts(); listings != 5 || zips != 2 {
+			t.Fatalf("%d listings, %d zips", listings, zips)
+		}
+	})
+}
+
+// TestNEMWebLatestNoNewReport: no new report within retryWindow is an
+// error (the deadline), not the previous price.
+func TestNEMWebLatestNoNewReport(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newFakeNEMWeb(t)
+		f.publish(t, report, dispatchCSV(t))
+		n := f.client()
+		if _, err := n.Latest(t.Context(), vic1); err != nil {
+			t.Fatal(err)
+		}
+		start := time.Now()
+		if p, err := n.Latest(t.Context(), vic1); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("%+v %v, want the deadline", p, err)
+		}
+		if d := time.Since(start); d != retryWindow {
+			t.Fatalf("gave up after %v, want %v", d, retryWindow)
+		}
+		if _, zips := f.counts(); zips != 1 {
+			t.Fatalf("fetched %d reports", zips)
+		}
+	})
 }
 
 const (

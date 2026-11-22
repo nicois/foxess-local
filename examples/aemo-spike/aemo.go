@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -44,33 +45,46 @@ type NEMWeb struct {
 }
 
 const (
-	dispatchDir  = "/Reports/Current/DispatchIS_Reports/"
-	listingLimit = 4 << 20 // bounds the listing read
-	zipLimit     = 2 << 20 // bounds one report
-	userAgent    = "foxess-local-aemo-spike-example"
-	lineBuf      = 64 << 10 // the listing's first line buffer
 	csvLimit     = 16 << 20 // bounds one report's CSV (~170 KB)
+	dispatchDir  = "/Reports/Current/DispatchIS_Reports/"
+	lineBuf      = 64 << 10         // the listing's first line buffer
+	listingLimit = 4 << 20          // bounds the listing read
+	retryPeriod  = 5 * time.Second  // how often to recheck during the window
+	retryWindow  = 30 * time.Second // how long to keep looking for new pricing data
+	userAgent    = "foxess-local-aemo-spike-example"
+	zipLimit     = 2 << 20 // bounds one report
 )
 
 var dispatchFileRe = regexp.MustCompile(`PUBLIC_DISPATCHIS_\d{12}_\d{16}\.zip`)
 
 // Latest returns region's price from the newest dispatch report.
 func (n *NEMWeb) Latest(ctx context.Context, region string) (Price, error) {
-	name, err := n.newestFile(ctx)
-	if err != nil {
-		return Price{}, err
-	}
-	if name != n.lastFile {
-		body, err := n.get(ctx, dispatchDir+name, zipLimit)
+	ctx, cancelFunction := context.WithTimeout(ctx, retryWindow)
+	defer cancelFunction()
+	var name string
+	var err error
+	for {
+		name, err = n.newestFile(ctx)
 		if err != nil {
 			return Price{}, err
 		}
-		prices, err := parseDispatchZip(body)
-		if err != nil {
-			return Price{}, fmt.Errorf("%s: %w", name, err)
+		if name != n.lastFile {
+			break
 		}
-		n.lastFile, n.last = name, prices
+		slog.Info("new pricing not yet available", "newest filename", name)
+		if err = sleep(ctx, retryPeriod); err != nil {
+			return Price{}, err
+		}
 	}
+	body, err := n.get(ctx, dispatchDir+name, zipLimit)
+	if err != nil {
+		return Price{}, err
+	}
+	prices, err := parseDispatchZip(body)
+	if err != nil {
+		return Price{}, fmt.Errorf("%s: %w", name, err)
+	}
+	n.lastFile, n.last = name, prices
 	p, ok := n.last[region]
 	if !ok {
 		return Price{}, fmt.Errorf("%s: no price for %s", n.lastFile, region)
@@ -215,4 +229,15 @@ func priceRow(rec []string, col map[string]int) (Price, bool, error) {
 		return Price{}, false, fmt.Errorf("SETTLEMENTDATE %q: %w", vals[2], err)
 	}
 	return Price{Region: vals[0], RRP: rrp, At: at}, true, nil
+}
+
+func sleep(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
