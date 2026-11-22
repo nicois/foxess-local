@@ -242,3 +242,49 @@ func TestForecastForceDischargeAlerts(t *testing.T) {
 		t.Fatalf("after the session: alerts %+v", got)
 	}
 }
+
+// TestForecastForceChargeAhead (owner, 2026-11-22): no forecast while an
+// enabled force charge runs before the expected breach; it is sent once
+// none does.
+func TestForecastForceChargeAhead(t *testing.T) {
+	// 60 % falling 15 %/h: 20 % at 02:40
+	soc := func(h float64) float64 { return 60 - 15*h }
+	run := func(chargeAt time.Duration) []Alert {
+		var w Watch
+		var out []Alert
+		for at := time.Duration(0); at <= time.Hour; at += 5 * time.Second {
+			now := t0.Add(at)
+			est := soc(at.Hours())
+			s := Session{ChargeWithin: func(d time.Duration) bool { return !t0.Add(chargeAt).After(now.Add(d)) }}
+			out = append(out, w.Observe(now, int(math.Round(est)), est, params, s)...)
+		}
+		return out
+	}
+	if got := run(2*time.Hour + 30*time.Minute); len(got) != 0 {
+		t.Fatalf("a force charge at 02:30, before the 02:40 breach: alerts %+v", got)
+	}
+	if got := run(3 * time.Hour); len(got) != 1 || got[0].Kind != KindForecastLow {
+		t.Fatalf("a force charge at 03:00, after the breach: alerts %+v", got)
+	}
+}
+
+// TestForecastTimeZone (owner, 2026-11-22): the expected time names its
+// zone — the site's, else UTC.
+func TestForecastTimeZone(t *testing.T) {
+	mel, err := time.LoadLocation("Australia/Melbourne")
+	if err != nil {
+		t.Skip("no tzdata:", err)
+	}
+	for _, c := range []struct {
+		zone *time.Location
+		want []string
+	}{{nil, []string{"02:39 UTC", "02:40 UTC"}}, {mel, []string{"13:39 AEDT", "13:40 AEDT"}}} {
+		p := params
+		p.Zone = c.zone
+		var w Watch
+		got := feed(&w, p, time.Hour, func(h float64) float64 { return 60 - 15*h })
+		if len(got) != 1 || !strings.Contains(got[0].Detail, c.want[0]) && !strings.Contains(got[0].Detail, c.want[1]) {
+			t.Errorf("zone %v: alerts %+v, want %q", c.zone, got, c.want[1])
+		}
+	}
+}

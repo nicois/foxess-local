@@ -87,3 +87,40 @@ func forceDischargeAt(sched Schedule, now time.Time) (time.Duration, int, bool) 
 	end := day.Add(time.Duration(minuteOf(g.End)) * time.Minute)
 	return end.Sub(now), g.FdSocPct, true
 }
+
+// ForceChargeWithin reports whether a force charge runs within d from
+// now (the inverter's wall time), for the battery forecast (owner,
+// 2026-11-22): no forecast-low alert while one comes before the
+// expected breach. False while the wall time or the schedule is unknown.
+func (s *Server) ForceChargeWithin(d time.Duration) bool {
+	st, err := s.st.QueryState()
+	if err != nil {
+		return false
+	}
+	now, known := s.wallNow()
+	if !known {
+		return false
+	}
+	cfg := s.scanConfigRegs(st.SchedTS)
+	return forceChargeWithin(scheduleOf(st.Schedule, cfg.schedOn), now, d)
+}
+
+// scheduleDay is the schedule's period: its windows repeat daily.
+const scheduleDay = 24 * time.Hour
+
+// forceChargeWithin is ForceChargeWithin at now (inverter-local time):
+// some minute in [now, now + d] runs a force charge (the group deciding
+// that minute, as activeMode resolves it). The schedule repeats daily,
+// so a day's minutes cover any longer d.
+func forceChargeWithin(sched Schedule, now time.Time, d time.Duration) bool {
+	if !sched.Enabled {
+		return false
+	}
+	end := now.Add(min(d, scheduleDay))
+	for t := now.Truncate(time.Minute); !t.After(end); t = t.Add(time.Minute) {
+		if activeMode(sched, "", t).Mode == workModeForceCharge {
+			return true
+		}
+	}
+	return false
+}

@@ -107,3 +107,40 @@ func TestForceDischargeAt(t *testing.T) {
 		t.Error("scheduler off: a force discharge reported")
 	}
 }
+
+// TestForceChargeWithin (owner, 2026-11-22): the battery forecast stays
+// quiet when a force charge will run before the forecast breach — an
+// enabled force-charge window, the one running at that minute (the
+// first enabled group by index), within [now, now + d]; across midnight
+// too.
+func TestForceChargeWithin(t *testing.T) {
+	sched := Schedule{Enabled: true, Groups: []ScheduleGroup{
+		{Index: 1, Enabled: true, Start: tm1102, End: tm1358, WorkMode: workModeForceCharge},
+		{Index: 2, Enabled: true, Start: "01:00", End: "02:00", WorkMode: workModeForceCharge},
+		{Index: 3, Enabled: false, Start: "16:30", End: "17:30", WorkMode: workModeForceCharge},
+		{Index: 4, Enabled: true, Start: hhmmZero, End: hhmmDayEnd, WorkMode: workModeSelfUse},
+	}}
+	at := func(h, m int) time.Time { return time.Date(2026, 11, 22, h, m, 30, 0, time.UTC) }
+	cases := []struct {
+		name string
+		now  time.Time
+		d    time.Duration
+		want bool
+	}{
+		{"reaches the start", at(9, 0), 2*time.Hour + 2*time.Minute, true},
+		{"ends before it", at(9, 0), 2 * time.Hour, false},
+		{"inside one", at(12, 0), 0, true},
+		{"after its end", at(13, 58), 3 * time.Hour, false},
+		{"disabled group", at(16, 0), 3 * time.Hour, false},
+		{"across midnight", at(23, 0), 2 * time.Hour, true},
+	}
+	for _, c := range cases {
+		if got := forceChargeWithin(sched, c.now, c.d); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
+	}
+	sched.Enabled = false
+	if forceChargeWithin(sched, at(9, 0), 6*time.Hour) {
+		t.Error("scheduler off: a force charge reported")
+	}
+}

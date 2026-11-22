@@ -32,6 +32,10 @@ type socWatch struct {
 	// forecast runs the measured fall until the discharge is expected to
 	// end, then the house's usage (owner, 2026-11-20).
 	fd atomic.Pointer[func() (time.Duration, int, bool)]
+	// fc reports whether a force charge runs within d from now
+	// (api.Server's ForceChargeWithin): no forecast-low alert while one
+	// comes before the expected breach (owner, 2026-11-22).
+	fc atomic.Pointer[func(time.Duration) bool]
 }
 
 // socLearnedKey is the store key holding the learnt energy per percent
@@ -107,12 +111,15 @@ func (h *handle) observeSoc(soc byte, battW, selfW int32, now time.Time) *float6
 	}
 	v := h.set.Get()
 	est := h.soc.est.Observe(now, int(soc), int(battW), v.CapacityWh)
-	p := socalert.Params{Threshold: v.SocThresholdPct, Horizon: v.SocHorizon, Window: v.SocWindow, P: v.SocPValue}
+	p := socalert.Params{Threshold: v.SocThresholdPct, Horizon: v.SocHorizon, Window: v.SocWindow, P: v.SocPValue, Zone: v.SiteZone}
 	var sess socalert.Session
 	if fd := h.soc.fd.Load(); fd != nil {
 		if left, cut, ok := (*fd)(); ok {
 			sess = socalert.Session{Forced: true, Left: left, CutoffPct: float64(cut)}
 		}
+	}
+	if fc := h.soc.fc.Load(); fc != nil {
+		sess.ChargeWithin = *fc
 	}
 	if v.CapacityWh > 0 { // the measured rates, %/h
 		capPct := float64(v.CapacityWh) / pctPerUnit

@@ -16,6 +16,11 @@
 // from that usage's spread. After a session, its readings are left out
 // of the line.
 //
+// A forecast is not sent while an enabled force charge will run before
+// the expected breach (owner, 2026-11-22): the charge will lift the
+// battery first. It is tested at each reading, so the alert follows
+// once no such charge remains (the window disabled, or now past it).
+//
 // Each fires once. battery-low re-arms when the charge recovers more
 // than rearmMargin points above the threshold; the forecast re-arms when
 // the charge recovers that far above where it was when the forecast
@@ -63,6 +68,9 @@ type Params struct {
 	Horizon   time.Duration
 	Window    time.Duration
 	P         float64
+	// Zone is the site's time zone, which the times in an alert are
+	// written in; nil: UTC.
+	Zone *time.Location
 }
 
 // Alert is one decision.
@@ -91,6 +99,9 @@ type Session struct {
 	RatesKnown bool
 	BattRate   float64 // the battery power over the capacity, %/h (+ = charging)
 	HouseRate  float64 // solar less the house load over the capacity, %/h
+	// ChargeWithin reports whether an enabled force charge runs within d
+	// from now; nil: none known.
+	ChargeWithin func(d time.Duration) bool
 }
 
 // forcedAvg is how far back the force discharge's rate is averaged;
@@ -144,15 +155,26 @@ func (w *Watch) Observe(now time.Time, soc int, est float64, p Params, s Session
 	if w.forecastSent {
 		return nil
 	}
-	forecast := w.forecast
-	if s.Forced {
-		forecast = w.forecastSession
-	}
-	if a, ok := forecast(now, soc, p, s); ok {
+	if a, ok := w.forecastAlert(now, soc, p, s); ok {
 		w.forecastSent, w.forecastSoc = true, soc
 		return []Alert{a}
 	}
 	return nil
+}
+
+// forecastAlert is the forecast for this reading — through a force
+// discharge when one runs — unless a force charge comes before the
+// expected breach.
+func (w *Watch) forecastAlert(now time.Time, soc int, p Params, s Session) (Alert, bool) {
+	forecast := w.forecast
+	if s.Forced {
+		forecast = w.forecastSession
+	}
+	a, eta, ok := forecast(now, soc, p, s)
+	if !ok || s.ChargeWithin != nil && s.ChargeWithin(max(eta.Sub(now), 0)) {
+		return Alert{}, false
+	}
+	return a, true
 }
 
 // fit is a least-squares line through readings, x in hours relative
@@ -217,28 +239,28 @@ func (f fit) se(x float64) float64 {
 
 // forecast fits the window's readings (outside a force discharge) and
 // tests the bound at the horizon.
-func (w *Watch) forecast(now time.Time, soc int, p Params, _ Session) (Alert, bool) {
+func (w *Watch) forecast(now time.Time, soc int, p Params, _ Session) (Alert, time.Time, bool) {
 	f, ok := w.fitSamples(now, p, false)
 	if !ok || f.slope >= 0 {
-		return Alert{}, false
+		return Alert{}, time.Time{}, false
 	}
 	x0 := p.Horizon.Hours()
 	upper := f.icept + f.slope*x0 + tQuantile(p.P, f.n-lineParams)*f.se(x0)
 	if upper > float64(p.Threshold) {
-		return Alert{}, false
+		return Alert{}, time.Time{}, false
 	}
 	eta := now.Add(time.Duration((float64(p.Threshold) - f.icept) / f.slope * float64(time.Hour)))
 	return Alert{KindForecastLow, fmt.Sprintf(
 		"Battery %d %%, falling %s %%/h: expected at %d %% by about %s (%s %% confident within %s).",
-		soc, fmtRate(f.slope), p.Threshold, eta.Format("15:04"), fmtConf(p.P), fmtHorizon(p.Horizon))}, true
+		soc, fmtRate(f.slope), p.Threshold, fmtClock(eta, p.Zone), fmtConf(p.P), fmtHorizon(p.Horizon))}, eta, true
 }
 
 // forecastSession forecasts during a force discharge: the measured fall
 // until the discharge is expected to end, then the house's recent usage.
-func (w *Watch) forecastSession(now time.Time, soc int, p Params, s Session) (Alert, bool) {
+func (w *Watch) forecastSession(now time.Time, soc int, p Params, s Session) (Alert, time.Time, bool) {
 	forced, house, ok := w.sessionRates(now, s)
 	if !ok {
-		return Alert{}, false
+		return Alert{}, time.Time{}, false
 	}
 	rF := mean(forced)
 	rH, sdH := mean(house), stddev(house)
@@ -251,7 +273,7 @@ func (w *Watch) forecastSession(now time.Time, soc int, p Params, s Session) (Al
 	nH := float64(len(house))
 	upper := yEnd + rH*rest + tQuantile(p.P, len(house)-1)*sdH/math.Sqrt(nH)*rest
 	if upper > thr {
-		return Alert{}, false
+		return Alert{}, time.Time{}, false
 	}
 	var etaH float64
 	switch {
@@ -265,8 +287,8 @@ func (w *Watch) forecastSession(now time.Time, soc int, p Params, s Session) (Al
 	eta := now.Add(time.Duration(etaH * float64(time.Hour)))
 	return Alert{KindForecastLow, fmt.Sprintf(
 		"Battery %d %%, force discharging at %s %%/h until %s, then the house uses %s %%/h: expected at %d %% by about %s (%s %% confident within %s).",
-		soc, fmtRate(rF), now.Add(time.Duration(hEnd*float64(time.Hour))).Format("15:04"), fmtRate(rH),
-		p.Threshold, eta.Format("15:04"), fmtConf(p.P), fmtHorizon(p.Horizon))}, true
+		soc, fmtRate(rF), fmtClock(now.Add(time.Duration(hEnd*float64(time.Hour))), p.Zone), fmtRate(rH),
+		p.Threshold, fmtClock(eta, p.Zone), fmtConf(p.P), fmtHorizon(p.Horizon))}, eta, true
 }
 
 // sessionRates gathers the battery's rates over the last forcedAvg of
@@ -299,6 +321,16 @@ func dischargeEnd(est, rF float64, s Session, x0 float64) float64 {
 		return math.Min(h, (s.CutoffPct-est)/rF)
 	}
 	return h
+}
+
+// fmtClock writes a time of day with its zone's abbreviation ("13:40
+// AEDT"), in zone, else UTC: a notice is read away from the site, so a
+// bare time is ambiguous.
+func fmtClock(t time.Time, zone *time.Location) string {
+	if zone == nil {
+		zone = time.UTC
+	}
+	return t.In(zone).Format("15:04 MST")
 }
 
 // fmtRate writes a falling rate (−%/h) as a positive one, to 0.1 %/h.

@@ -172,18 +172,19 @@ func TestSocWatchForceDischarge(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if got := forcedFall(t, st, false); len(got) != 1 || got[0].Type != socalert.KindForecastLow {
+	if got := forcedFall(t, st, false, false); len(got) != 1 || got[0].Type != socalert.KindForecastLow {
 		t.Fatalf("no session: %+v", got)
 	}
-	if got := forcedFall(t, st, true); len(got) != 0 {
+	if got := forcedFall(t, st, true, false); len(got) != 0 {
 		t.Fatalf("in a force discharge ending at 55 %%: %+v", got)
 	}
 }
 
 // forcedFall feeds 30 min of a 3 kW discharge from 70 % (30 %/h on
 // 10 kWh; the house uses 300 W) — in a force discharge ending after
-// 30 min with a 20 % cut-off, or not — and returns the system events.
-func forcedFall(t *testing.T, st *store.Store, forced bool) []api.SystemEvent {
+// 30 min with a 20 % cut-off, or not; with a force charge ahead, or
+// not — and returns the system events.
+func forcedFall(t *testing.T, st *store.Store, forced, charge bool) []api.SystemEvent {
 	t.Helper()
 	set, _, err := buildSettings(st, &config.Config{Battery: config.Battery{CapacityWh: 10000}}, time.Now)
 	if err != nil {
@@ -195,6 +196,10 @@ func forcedFall(t *testing.T, st *store.Store, forced bool) []api.SystemEvent {
 	if forced {
 		fd := func() (time.Duration, int, bool) { return start.Add(30 * time.Minute).Sub(cur), 20, true }
 		h.soc.fd.Store(&fd)
+	}
+	if charge {
+		fc := func(time.Duration) bool { return true }
+		h.soc.fc.Store(&fc)
 	}
 	sub := h.bus.Subscribe()
 	defer sub.Close()
@@ -213,5 +218,18 @@ func forcedFall(t *testing.T, st *store.Store, forced bool) []api.SystemEvent {
 		default:
 			return got
 		}
+	}
+}
+
+// TestSocWatchForceChargeAhead (owner, 2026-11-22): a force charge due
+// before the forecast breach keeps the forecast quiet.
+func TestSocWatchForceChargeAhead(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if got := forcedFall(t, st, false, true); len(got) != 0 {
+		t.Fatalf("a force charge ahead: %+v", got)
 	}
 }

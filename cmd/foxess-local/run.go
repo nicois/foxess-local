@@ -492,6 +492,9 @@ func (h *handle) buildMux(cfg *config.Config, tok *api.TokenStore) http.Handler 
 	// the battery forecast follows a force discharge until its expected end
 	fd := apiH.ForceDischargeNow
 	h.soc.fd.Store(&fd)
+	// …and stays quiet when a force charge comes before the breach
+	fc := apiH.ForceChargeWithin
+	h.soc.fc.Store(&fc)
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/{rest...}", apiH)
 	mux.Handle("/healthz", apiH)

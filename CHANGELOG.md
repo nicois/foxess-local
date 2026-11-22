@@ -22,6 +22,13 @@ version; anything else bumps the patch version.
 
 ### Changed
 
+- The low-battery forecast (`battery-forecast-low`) is not sent while
+  an enabled force-charge window will run before the expected breach.
+  It follows if the window is disabled or passes without lifting the
+  charge.
+- The low-battery forecast's times name their time zone: the site's
+  (Setup → Time zone), or UTC until one is chosen ("by about 13:40
+  AEDT").
 - The power-flow diagram puts the grid, the switchboard and the home on
   one vertical line and moves the inverter left, so the "switchboard"
   label is no longer partly hidden on a phone.
