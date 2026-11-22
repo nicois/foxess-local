@@ -1556,9 +1556,11 @@ a.badge { text-decoration: none; &:hover { text-decoration: underline; } }
    aside (display: contents) so its two sections are the grid's items;
    each becomes the size container its container queries need. The
    class is the script's (fitWide): at least 1400 px wide, and only
-   while the whole live view fits the window's height. */
+   while the whole live view fits the window's height. It is not
+   ".wide": that is the full-width button's, whose top margin pushed the
+   page 8 px past the window (a scrollbar for nothing). */
 @media (min-width: 1400px) {
-  #app.wide[data-route="dashboard"] {
+  #app.wide-dash[data-route="dashboard"] {
     display: grid;
     grid-template-columns: minmax(0, 40rem) minmax(0, 1fr);
     /* header, three banners, the live view, the footer; the last row
@@ -1585,6 +1587,9 @@ a.badge { text-decoration: none; &:hover { text-decoration: underline; } }
       top: 0;
       height: 100vh;
       overflow-y: auto;
+      /* its rows keep their content's height: stretched, they spread
+         the spare height as empty space inside the charts panel */
+      align-content: start;
       margin: 0;
       padding: 1rem 1.25rem;
       border-left: 1px solid var(--line);

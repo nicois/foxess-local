@@ -1087,12 +1087,12 @@ function fitWide() {
   const app = byId("app");
   const now = document.querySelector("#view .now");
   if (app.dataset.route !== "dashboard" || !now || window.innerWidth < WIDE_MIN_PX) {
-    app.classList.remove("wide");
+    app.classList.remove("wide-dash");
     return;
   }
-  app.classList.add("wide");
+  app.classList.add("wide-dash");
   const bottom = now.getBoundingClientRect().bottom + window.scrollY + parseFloat(getComputedStyle(now).marginBottom);
-  app.classList.toggle("wide", bottom <= window.innerHeight);
+  app.classList.toggle("wide-dash", bottom <= window.innerHeight);
 }
 
 function watchWide() {

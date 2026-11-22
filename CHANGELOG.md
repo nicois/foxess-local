@@ -41,6 +41,9 @@ version; anything else bumps the patch version.
 
 ### Fixed
 
+- The wide dashboard no longer shows a scrollbar when everything fits:
+  the history panel stopped growing past its last chart, and the page
+  no longer sits 8 px lower than the window.
 - "Running now" changes when a schedule window starts or ends. It used to
   keep showing the previous mode until the page was reloaded. The live
   feed sends a `config` event with `changed: [active-mode]` at the
