@@ -20,6 +20,8 @@ version; anything else bumps the patch version.
 
 ## [Unreleased]
 
+## [v0.4.1] - 2026-11-22
+
 ### Changed
 
 - The low-battery forecast (`battery-forecast-low`) is not sent while
