@@ -20,6 +20,12 @@ version; anything else bumps the patch version.
 
 ## [Unreleased]
 
+### Fixed
+
+- The Inverter page's "Running now" panel now updates live when the
+  schedule changes — an override set, ended or expired, a schedule
+  edit — not only when the running mode changes at a minute boundary.
+
 ## [v0.4.1] - 2026-11-22
 
 ### Changed

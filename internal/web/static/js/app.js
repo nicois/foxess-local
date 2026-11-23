@@ -785,7 +785,7 @@ onSSE("snapshot", queueSnapshot);
 // poll found changed on the inverter itself.
 const ROUTE_SECTIONS = {
   "dashboard": ["work-mode", "limits", "meter-compensation", "identity"],
-  "inverter": ["work-mode", "limits", "meter-compensation", "identity", "active-mode"],
+  "inverter": ["work-mode", "limits", "meter-compensation", "identity", "active-mode", "schedule"],
   "schedule": ["schedule", "identity"],
   "device": ["identity"],
 };
