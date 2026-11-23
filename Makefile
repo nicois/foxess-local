@@ -1,6 +1,6 @@
 GIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
-.PHONY: all foxess-local installer fmdata tag release sign verify-release image synthdb pgo
+.PHONY: all foxess-local installer fmdata tag release sign verify-release publish image synthdb pgo
 all: foxess-local installer
 
 # The app binary, stamped with the git short hash. The stamp is the
@@ -35,6 +35,10 @@ fmdata:
 #   make release VERSION=v0.2.0 REPO=owner/foxess-local
 #   make sign VERSION=v0.2.0  # as the key's account: minisign with SIGN_KEY
 #   make verify-release  # the new binary verifies its own release
+#   make publish VERSION=v0.2.0 [REPO=owner/foxess-local]
+#                        # one-shot: build, push the tag, wait for
+#                        # the CI draft and for the signature,
+#                        # verify, upload, publish
 VERSION ?=
 REPO ?=
 DIST ?= dist
@@ -61,6 +65,14 @@ sign:
 
 verify-release:
 	deploy/verify-release.sh "$(DIST)"
+
+# One-shot asset path (RELEASING.md, steps 2-5): build dist/ from the
+# tag, push the tag, wait for the CI draft, wait for the signature,
+# verify, upload SHA256SUMS.minisig, publish. The tag must exist
+# locally first (make tag / make tag PRE=1); gh needs a write token.
+publish:
+	@test -n "$(VERSION)" || { echo "make publish VERSION=vX.Y.Z" >&2; exit 2; }
+	deploy/publish.sh "$(VERSION)" "$(REPO)" "$(DIST)"
 
 # Container image for this machine's architecture from a release build in
 # $(DIST) (podman or docker); CI builds the multi-arch image (image.yml).
