@@ -9,7 +9,8 @@
 #
 # The tag must exist locally first (make tag / make tag PRE=1). Needs a
 # gh token that can write to the repo (GH_TOKEN or GITHUB_TOKEN in the
-# environment); the tag push uses the normal git credentials. Neither
+# environment); the tag push goes over https with the same token (via
+# the gh credential helper). Neither
 # CI nor this script holds the signing key: `make sign` is run on the
 # machine with the key, and this script polls for
 # dist/SHA256SUMS.minisig until it appears.
@@ -69,7 +70,7 @@ if gh release view "$VERSION" >/dev/null 2>&1; then
 	echo "==> a $VERSION release already exists on GitHub: skipping the push and CI"
 else
 	echo "==> pushing the tag"
-	git push origin "$VERSION"
+	git push "https://github.com/$REPO.git" "$VERSION"
 	echo "==> waiting for the CI draft (workflow 'release', tag $VERSION; ${CI_TIMEOUT}s budget)"
 	deadline=$(( $(date +%s) + CI_TIMEOUT ))
 	while :; do
