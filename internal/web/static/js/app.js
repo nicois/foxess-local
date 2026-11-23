@@ -16,7 +16,7 @@
 //     the collected values into the typed JSON body (htmx 4 has no
 //     built-in JSON encoding — its default body is URLSearchParams).
 
-import { tr, locale, LANGS, currentLang, setLang } from "./i18n.js";
+import { tr, locale, setLang } from "./i18n.js";
 import { smallMultiples } from "./charts.js";
 import { socView } from "./socview.js";
 
@@ -2389,7 +2389,7 @@ async function renderSystem() {
     ${hubLink("notifications", tr("Notifications"), esc(tr("where alerts go, and the battery alert level")), ICO.bell)}
     ${hubLink("access", tr("Access"), esc(tr("tokens, and what visitors without a token can see")), ICO.key)}
     ${hubLink("updates", tr("Updates"), esc(cfg?.version ?? "—"), ICO.update)}
-    ${hubLink("site", tr("Site"), esc(tr("time zone, inverter clock, battery capacity, language")), ICO.site)}
+    ${hubLink("site", tr("Site"), esc(tr("time zone, inverter clock, battery capacity")), ICO.site)}
     ${hubLink("storage", tr("Storage"), esc(tr("how much history is kept, and how often it is saved")), ICO.storage)}
     ${hubLink("help", tr("Help"), esc(tr("report a problem, diagnostic bundle, API description")), ICO.help)}
     ${setup?.completed || !setup ? hubLink("setup", tr("Setup"), esc(tr("the first-run checks and choices, again")), ICO.setup) : ""}
@@ -3094,7 +3094,6 @@ async function renderSite() {
   <section class="stack">
     ${zonePanel(ctx, cfg)}
     ${capacityPanel(ctx)}
-    ${languagePanel()}
   </section>`;
 }
 
@@ -3263,19 +3262,6 @@ function clockOffsetText(d, zone) {
   return `<span class="warn">${esc(d > 0
     ? tr("{d} ahead of the site's time — see Setup", { d: t })
     : tr("{d} behind the site's time — see Setup", { d: t }))}</span>`;
-}
-
-// languagePanel: the UI language (kept on this device; the browser's
-// language until one is picked). The translations are machine-made.
-function languagePanel() {
-  const cur = currentLang();
-  return `<article class="panel">
-      <h3>${esc(tr("Language"))}</h3>
-      <label>${esc(tr("Language of this page"))}<select id="lang-select">
-        ${LANGS.map(([code, name]) => `<option value="${code}" ${code === cur ? "selected" : ""}>${esc(name)}</option>`).join("")}
-      </select></label>
-      <p class="muted small">${esc(tr("Kept on this device. The translations other than English are machine-made: corrections are welcome (one file per language, internal/web/static/i18n/ in the repository)."))}</p>
-    </article>`;
 }
 
 // updatesPanel: the release check and the no-root self-upgrade (D-023).

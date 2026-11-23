@@ -20,6 +20,14 @@ version; anything else bumps the patch version.
 
 ## [Unreleased]
 
+### Added
+
+- The UI language can be chosen from the header: a globe icon shows the
+  current language, the switcher changes it — on every page and for
+  every visitor, including the tokenless dashboard (the System → Site
+  language panel is replaced by it). Until a language is picked on a
+  device, the page follows the request's Accept-Language.
+
 ### Fixed
 
 - The Inverter page's "Running now" panel now updates live when the

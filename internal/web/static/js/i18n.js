@@ -7,8 +7,10 @@
 // entry falls back to the English. index.html marks its static text with
 // data-i18n="English" (and data-i18n-aria-label, -title, -placeholder).
 //
-// The language: the one picked in the UI (kept on this device), else the
-// browser's first supported language, else English. Changing it reloads
+// The language: the one picked in the UI (kept on this device), else
+// this request's Accept-Language (data-lang-hint on <html>, set by the
+// server), else the browser's first supported language, else English.
+// Changing it reloads
 // the page. The catalogue loads before app.js runs (top-level await), so
 // app.js may call tr() while it initialises.
 //
@@ -33,11 +35,15 @@ function stored() {
   try { return localStorage.getItem(KEY); } catch { return null; }
 }
 
-// detect: the stored choice, else the browser's first supported language.
+// detect: the stored choice, else this request's Accept-Language (the
+// server's data-lang-hint on <html>), else the browser's first
+// supported language.
 function detect() {
   const known = (c) => LANGS.some(([k]) => k === c);
   const want = stored();
   if (want && known(want)) return want;
+  const hint = document.documentElement.dataset.langHint;
+  if (hint && known(hint)) return hint;
   for (const l of navigator.languages ?? [navigator.language ?? "en"]) {
     const low = String(l).toLowerCase();
     if (low.startsWith("zh")) return "zh-Hans";
@@ -78,6 +84,9 @@ function translateDOM() {
 
 lang = detect();
 document.documentElement.lang = lang;
+// the header switcher shows the active language
+const langSelect = document.getElementById("lang-select");
+if (langSelect) langSelect.value = lang;
 if (lang !== "en") {
   try {
     const r = await fetch(new URL(`static/i18n/${lang}.json`, document.baseURI));

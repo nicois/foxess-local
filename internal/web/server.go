@@ -40,7 +40,16 @@ func serveUI(w http.ResponseWriter, r *http.Request) {
 	p := path.Clean(r.URL.Path)
 	switch {
 	case p == "/" || p == "/index.html":
-		serveFile(w, r, "static/index.html", cacheAssets)
+		// the shell follows the request's Accept-Language (data-lang-hint
+		// on <html>): vary it so a shared cache never hands one visitor's
+		// variant to another
+		a := loadAsset("static/index.html")
+		if hint := langHint(r.Header.Get("Accept-Language")); hint != "" {
+			if va := loadHintShell(hint); va != nil {
+				a = va
+			}
+		}
+		writeAsset(w, r, a, cacheAssets, "Accept-Language")
 	case strings.HasPrefix(p, "/static/"):
 		name := strings.TrimPrefix(p, "/")
 		cc := cacheAssets
@@ -54,19 +63,29 @@ func serveUI(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveFile writes one embedded asset (404 when missing; the embed FS
-// also rejects any traversal, and the mux cleans the path before us):
-// gzipped for a client that accepts it, with an ETag, and 304 when the
-// client's copy still matches.
+// also rejects any traversal, and the mux cleans the path before us).
 func serveFile(w http.ResponseWriter, r *http.Request, name, cacheControl string) {
 	a := loadAsset(name)
 	if a == nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	writeAsset(w, r, a, cacheControl, "")
+}
+
+// writeAsset sends one prepared asset: gzipped for a client that
+// accepts it, with an ETag, and 304 when the client's copy still
+// matches. vary is the extra request header this body depends on (the
+// shell's Accept-Language; "" for the other assets).
+func writeAsset(w http.ResponseWriter, r *http.Request, a *asset, cacheControl, vary string) {
 	h := w.Header()
 	body, tag := a.plain, a.etag
 	if a.compressible {
-		h.Set("Vary", "Accept-Encoding")
+		if vary != "" {
+			h.Set("Vary", vary+", Accept-Encoding")
+		} else {
+			h.Set("Vary", "Accept-Encoding")
+		}
 		if acceptsGzip(r) {
 			body, tag = a.gz, a.etagGz
 			h.Set("Content-Encoding", "gzip")

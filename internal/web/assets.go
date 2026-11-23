@@ -22,6 +22,8 @@ type asset struct {
 	contentType  string
 }
 
+const htmlOpen = `<html lang="en">`
+
 var (
 	assetsMu sync.Mutex
 	assets   = map[string]*asset{}
@@ -44,6 +46,40 @@ func loadAsset(name string) *asset {
 	if err != nil {
 		return nil
 	}
+	assets[name] = prepare(data, name)
+	return assets[name]
+}
+
+// loadHintShell prepares the index shell with data-lang-hint="<hint>"
+// on the <html> tag (nil when the shell cannot be read): the request's
+// Accept-Language, so a cached copy never shows the wrong language.
+func loadHintShell(hint string) *asset {
+	assetsMu.Lock()
+	defer assetsMu.Unlock()
+	name := "static/index.html?hint=" + hint
+	if a, ok := assets[name]; ok {
+		return a
+	}
+	base, err := staticFS.ReadFile("static/index.html")
+	if err != nil {
+		return nil
+	}
+	body := base
+	if before, after, ok := bytes.Cut(base, []byte(htmlOpen)); ok {
+		open := `<html lang="en" data-lang-hint="` + hint + `">`
+		body = make([]byte, 0, len(base)+len(open)-len(htmlOpen))
+		body = append(body, before...)
+		body = append(body, open...)
+		body = append(body, after...)
+	}
+	assets[name] = prepare(body, "static/index.html")
+	return assets[name]
+}
+
+// prepare turns one file's bytes into a sendable asset: the ETag is a
+// SHA-256 prefix of the exact bytes sent, so two bodies never share a
+// tag (the hint shell variants revalidate against their own body).
+func prepare(data []byte, name string) *asset {
 	sum := sha256.Sum256(data)
 	tag := hex.EncodeToString(sum[:])[:etagLen]
 	a := &asset{plain: data, etag: `"` + tag + `"`, contentType: contentType(name)}
@@ -56,7 +92,6 @@ func loadAsset(name string) *asset {
 			a.etagGz = `"` + tag + `-gz"`
 		}
 	}
-	assets[name] = a
 	return a
 }
 
