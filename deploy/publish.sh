@@ -134,7 +134,7 @@ else
 fi
 
 # 6) publish (a no-op when it already is).
-if [ "$(gh release view "$VERSION" --json draft --jq .draft)" = "true" ]; then
+if [ "$(gh release view "$VERSION" --json isDraft --jq .isDraft)" = "true" ]; then
 	echo "==> publishing"
 	gh release edit "$VERSION" --draft=false
 fi
