@@ -76,7 +76,10 @@ only accept binaries signed by the key built into them.
    `make tag PRE=1` tags `vX.Y.Z-rc.N` (the next version, the next free
    rc number) without touching `CHANGELOG.md`; its notes are the
    Unreleased section as it stands. Push the tag alone
-   (`git push origin vX.Y.Z-rc.N`). CI builds the draft and marks it a
+   (`git push origin vX.Y.Z-rc.N` — or `deploy/push-release.sh
+   vX.Y.Z-rc.N`, which pushes over https with the repo's writer token
+   from the environment, `GH_FOXESS_LOCAL` first, then `GH_TOKEN`/
+   `GITHUB_TOKEN`). CI builds the draft and marks it a
    prerelease. Check, sign and publish it as below. Only installations
    that opted in to prereleases (System → Updates → Update
    choices) are offered it, and its container image is never tagged
