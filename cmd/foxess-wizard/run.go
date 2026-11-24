@@ -132,7 +132,7 @@ func runCmd(args []string, stderr io.Writer) int {
 	srv := &web.Server{Wizard: l, Password: id.Password, Host: id.Host, LockoutPath: filepath.Join(stateDir, "lockout")}
 	h := srv.Handler()
 	l.Operator = srv.Operator
-	l.Portal = &captive.Portal{Procs: captive.Exec{}, Listen: captive.HTTP{}, Handler: h}
+	l.Portal = &captive.Portal{Procs: captive.Exec{Log: func(m string, a ...any) { log.Error(m, a...) }}, Listen: captive.HTTP{}, Handler: h}
 
 	hs := &http.Server{Addr: ":" + strconv.Itoa(web.Port), Handler: h, ReadHeaderTimeout: readHeaderTimeout}
 	go func() {
