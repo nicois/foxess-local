@@ -343,7 +343,10 @@ func TestInstallerDetectMACNoAddress(t *testing.T) {
 }
 
 // testInverterEnv is a gate.env with an inverter address.
-const testInverterEnv = "INVERTER_IP=192.0.2.10\n"
+const (
+	testInverterIP  = "192.0.2.10"
+	testInverterEnv = "INVERTER_IP=" + testInverterIP + "\n"
+)
 
 // TestInstallerGateInverterIP (D-031): the inverter address in gate.env
 // (the last INVERTER_IP line), empty for an install without one or no
@@ -355,7 +358,7 @@ func TestInstallerGateInverterIP(t *testing.T) {
 	for body, want := range map[string]string{
 		"":                                       "",
 		"INVERTER_IP=\nTPROXY_PORT=1\n":          "",
-		testInverterEnv:                          "192.0.2.10",
+		testInverterEnv:                          testInverterIP,
 		"INVERTER_IP=\nINVERTER_IP=192.0.2.11\n": "192.0.2.11",
 	} {
 		path := env
@@ -381,13 +384,13 @@ func TestInstallerSetsInverterLater(t *testing.T) {
 	if err := os.WriteFile(env, []byte("INVERTER_IP=\nINVERTER_MAC=\nTPROXY_PORT=14431\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	script := "INVERTER_IP=192.0.2.10\n" + strings.ReplaceAll(line, "/etc/foxess-local/gate.env", env)
+	script := testInverterEnv + strings.ReplaceAll(line, "/etc/foxess-local/gate.env", env)
 	//nolint:gosec // G204: a fragment of this repository's installer
 	if out, err := exec.Command("bash", "-c", script).CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
 	got, _ := os.ReadFile(env) //nolint:gosec // G304: a test temp file
-	if string(got) != "INVERTER_IP=192.0.2.10\nINVERTER_MAC=\nTPROXY_PORT=14431\n" {
+	if string(got) != testInverterEnv+"INVERTER_MAC=\nTPROXY_PORT=14431\n" {
 		t.Fatalf("gate.env:\n%s", got)
 	}
 }

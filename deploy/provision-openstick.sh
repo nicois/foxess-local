@@ -6,14 +6,31 @@
 # changed kernel gets its modules rebuilt).
 #
 # Usage (as root, on the stick):
-#   provision-openstick.sh [--inverter-ip IP] [--forward-mode MODE]
+#   provision-openstick.sh [--inverter-ip IP | --appliance] [--forward-mode MODE]
 #                          [--version vX.Y.Z] [--hostname NAME]
+#                          [--from DIR [--allow-unsigned]]
 #                          [--ssh-keys-only] [--check] [--force]
+#   provision-openstick.sh --seal [--check]
 #
 #   --inverter-ip IP     also install foxess-local: download the release
 #                        for this stick, verify its signature, run its
 #                        installer (skipped when already installed: an
 #                        installed copy updates itself)
+#   --appliance          prepare an appliance stick for someone else
+#                        (D-031): foxess-local without an inverter, the
+#                        setup wizard, the stick's hotspot name and
+#                        password, and its label (~/foxess-label/);
+#                        ModemManager masked, the IMEI checked
+#   --seal               last, after --appliance and a test: SSH keys
+#                        only (refused without one), well-known account
+#                        passwords replaced, the wizard's state cleared,
+#                        and this Wi-Fi connection removed (run it over
+#                        USB): the stick then starts its hotspot, and
+#                        every boot is "unconfigured" until set up
+#   --from DIR           take the release files from DIR instead of
+#                        downloading them (still verified)
+#   --allow-unsigned     with --from: accept files without a signature
+#                        (a development build; never for a real stick)
 #   --forward-mode MODE  off | telemetry_only | full, for the installer's
 #                        first-install question (asked when omitted)
 #   --version TAG        the release to install (default: the latest)
@@ -43,7 +60,8 @@
 #      TCP only). Takes about 5 minutes and ~250 MB of downloads,
 #      packages and scratch space; the source is deleted afterwards.
 #   8. warns about the image's well-known default password
-#   9. with --inverter-ip: installs foxess-local (signed release)
+#   9. with --inverter-ip: installs foxess-local (signed release);
+#      with --appliance: the appliance (see above)
 set -euo pipefail
 
 REPO="${FOXESS_REPO:-nicois/foxess-local}"
@@ -63,6 +81,7 @@ die() {
 }
 
 INVERTER_IP="" FORWARD_MODE="" VERSION="" NEW_HOSTNAME="" KEYS_ONLY="" CHECK="" FORCE=""
+APPLIANCE="" SEAL="" FROM="" ALLOW_UNSIGNED=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--inverter-ip) INVERTER_IP="${2:-}"; shift 2 ;;
@@ -74,12 +93,23 @@ while [ $# -gt 0 ]; do
 	--hostname) NEW_HOSTNAME="${2:-}"; shift 2 ;;
 	--hostname=*) NEW_HOSTNAME="${1#*=}"; shift ;;
 	--ssh-keys-only) KEYS_ONLY=1; shift ;;
+	--appliance) APPLIANCE=1; shift ;;
+	--seal) SEAL=1; shift ;;
+	--from) FROM="${2:-}"; shift 2 ;;
+	--from=*) FROM="${1#*=}"; shift ;;
+	--allow-unsigned) ALLOW_UNSIGNED=1; shift ;;
 	--check) CHECK=1; shift ;;
 	--force) FORCE=1; shift ;;
-	-h | --help) sed -n '2,46p' "$0"; exit 0 ;;
+	-h | --help) sed -n '2,64p' "$0"; exit 0 ;;
 	*) die "unknown option $1 (see --help)" ;;
 	esac
 done
+[ -z "$APPLIANCE" ] || [ -z "$INVERTER_IP" ] || die "--appliance installs without an inverter (the wizard sets it): drop --inverter-ip"
+if [ -n "$SEAL" ] && [ -n "$APPLIANCE$INVERTER_IP$FROM" ]; then
+	die "--seal is a separate, last run: first --appliance, then test the stick, then --seal alone"
+fi
+[ -z "$ALLOW_UNSIGNED" ] || [ -n "$FROM" ] || die "--allow-unsigned needs --from (it is for local development builds)"
+[ -z "$FROM" ] || [ -d "$FROM" ] || die "--from: $FROM is not a directory"
 case "$FORWARD_MODE" in "" | off | telemetry_only | full) ;; *) die "--forward-mode: off, telemetry_only or full" ;; esac
 case "$VERSION" in "" | v[0-9]*.[0-9]*.[0-9]*) ;; *) die "--version: a release tag like v0.2.0" ;; esac
 if [ -n "$NEW_HOSTNAME" ] && ! echo "$NEW_HOSTNAME" | grep -Eq '^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$'; then
@@ -392,18 +422,15 @@ step_tproxy() {
 # well-known passwords of OpenStick images and their guides
 DEFAULT_PASSWORDS="1 user root openstick 123456 12345678 password"
 step_accounts() {
-	local u hash p
+	local u
 	command -v perl >/dev/null || return 0 # perl-base: always there on Debian
-	while IFS=: read -r u hash _; do
-		case "$hash" in \$*) ;; *) continue ;; esac
-		for p in $DEFAULT_PASSWORDS; do
-			# shellcheck disable=SC2016 # perl's own variables
-			if [ "$(perl -e 'print crypt($ARGV[0], $ARGV[1]) eq $ARGV[1] ? 1 : 0' "$p" "$hash")" = 1 ]; then
-				warn "the account '$u' still has a well-known default password: change it (passwd $u)"
-				break
-			fi
-		done
-	done </etc/shadow
+	for u in $(default_password_accounts); do
+		if [ -n "$APPLIANCE" ]; then
+			warn "the account '$u' still has a well-known default password: --seal replaces it"
+		else
+			warn "the account '$u' still has a well-known default password: change it (passwd $u)"
+		fi
+	done
 }
 
 step_ssh() {
@@ -449,10 +476,56 @@ step_hostname() {
 	fi
 }
 
-# ---- 10. foxess-local ----
+# ---- 10. release files ----
+# fetch_release FILE...: the release's FILEs into $REL (a temporary
+# directory), verified: SHA256SUMS signed with the release key, and each
+# FILE listed there and matching. --from DIR takes them from DIR;
+# --allow-unsigned accepts a development build without a signature.
+REL=""
+fetch_release() {
+	local base f
+	REL="$(mktemp -d /var/tmp/foxess-release.XXXXXX)"
+	# shellcheck disable=SC2064 # expand now
+	trap "rm -rf '$REL'" EXIT
+	if [ -n "$FROM" ]; then
+		for f in SHA256SUMS SHA256SUMS.minisig; do [ ! -f "$FROM/$f" ] || cp "$FROM/$f" "$REL/"; done
+		for f in "$@"; do cp "$FROM/$f" "$REL/" || die "--from: $FROM has no $f"; done
+	else
+		if [ -n "$VERSION" ]; then base="https://github.com/$REPO/releases/download/$VERSION"; else
+			base="https://github.com/$REPO/releases/latest/download"
+		fi
+		say "downloading ${VERSION:-the latest release}:$(printf ' %s' "$@")"
+		for f in SHA256SUMS SHA256SUMS.minisig "$@"; do
+			curl -fsSL --retry 3 -o "$REL/$f" "$base/$f" || die "download failed: $base/$f"
+		done
+	fi
+	if [ -f "$REL/SHA256SUMS.minisig" ]; then
+		minisign -Vqm "$REL/SHA256SUMS" -P "$RELEASE_KEY" || die "SHA256SUMS: bad signature — do not install; report it"
+	elif [ -n "$ALLOW_UNSIGNED" ]; then
+		warn "no signature: unverified development files (--allow-unsigned); never for a real stick"
+	else
+		die "--from: $FROM has no SHA256SUMS.minisig (a development build needs --allow-unsigned)"
+	fi
+	if [ -f "$REL/SHA256SUMS" ]; then
+		for f in "$@"; do
+			grep -q "  $f\$" "$REL/SHA256SUMS" || die "SHA256SUMS does not list $f"
+		done
+		(cd "$REL" && sha256sum -c --quiet --ignore-missing SHA256SUMS) || die "a file does not match SHA256SUMS"
+	else
+		[ -n "$ALLOW_UNSIGNED" ] || die "no SHA256SUMS"
+		warn "no SHA256SUMS: the files are not checked"
+	fi
+	for f in "$@"; do case "$f" in *_linux_*) chmod +x "$REL/$f" ;; esac; done
+}
+drop_release() {
+	rm -rf "$REL"
+	trap - EXIT
+}
+
+# ---- 11. foxess-local ----
 step_install() {
 	[ -n "$INVERTER_IP" ] || return 0
-	local bin=/var/lib/foxess-local/bin/foxess-local dl base f
+	local bin=/var/lib/foxess-local/bin/foxess-local
 	if [ -x "$bin" ]; then
 		ok "foxess-local installed ($("$bin" version 2>/dev/null || echo "version unknown")); it updates itself"
 		return
@@ -461,29 +534,198 @@ step_install() {
 		would "install foxess-local ${VERSION:-(latest release)} for inverter $INVERTER_IP"
 		return
 	fi
-	if [ -n "$VERSION" ]; then base="https://github.com/$REPO/releases/download/$VERSION"; else
-		base="https://github.com/$REPO/releases/latest/download"
-	fi
-	dl="$(mktemp -d /var/tmp/foxess-release.XXXXXX)"
-	# shellcheck disable=SC2064 # expand now
-	trap "rm -rf '$dl'" EXIT
-	say "downloading foxess-local ${VERSION:-(latest release)}"
-	for f in SHA256SUMS SHA256SUMS.minisig installer.sh foxess-local_linux_arm64; do
-		curl -fsSL --retry 3 -o "$dl/$f" "$base/$f" || die "download failed: $base/$f"
-	done
-	minisign -Vqm "$dl/SHA256SUMS" -P "$RELEASE_KEY" || die "SHA256SUMS: bad signature — do not install; report it"
-	for f in installer.sh foxess-local_linux_arm64; do
-		grep -q "  $f\$" "$dl/SHA256SUMS" || die "SHA256SUMS does not list $f"
-	done
-	(cd "$dl" && sha256sum -c --quiet --ignore-missing SHA256SUMS) || die "a download does not match SHA256SUMS"
-	chmod +x "$dl/foxess-local_linux_arm64"
-	changed "verified $("$dl/foxess-local_linux_arm64" version) (key $RELEASE_KEY)"
+	fetch_release installer.sh foxess-local_linux_arm64
+	changed "verified $("$REL/foxess-local_linux_arm64" version) (key $RELEASE_KEY)"
 	local args=(install --inverter-ip "$INVERTER_IP" --fix)
 	[ -z "$FORWARD_MODE" ] || args+=(--forward-mode "$FORWARD_MODE")
-	bash "$dl/installer.sh" "${args[@]}"
-	rm -rf "$dl"
-	trap - EXIT
+	bash "$REL/installer.sh" "${args[@]}"
+	drop_release
 }
+
+# ---- 12. the appliance (D-031) ----
+WIZARD_DIR=/usr/local/lib/foxess-wizard
+WIZARD="$WIZARD_DIR/foxess-wizard"
+WIZARD_ID=/etc/foxess-wizard/hotspot.env
+WIZARD_UNIT='# provision-openstick.sh --appliance: the OpenStick setup wizard (D-031)
+[Unit]
+Description=foxess OpenStick setup wizard
+Wants=NetworkManager.service
+After=NetworkManager.service
+
+[Service]
+ExecStart=/usr/local/lib/foxess-wizard/foxess-wizard run
+Restart=always
+RestartSec=5
+RuntimeDirectory=foxess-wizard
+RuntimeDirectoryMode=0700
+StateDirectory=foxess-wizard
+StateDirectoryMode=0700
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target'
+
+# label_dir: where the label goes — the home of the account that ran sudo
+label_dir() {
+	local user="${SUDO_USER:-root}"
+	echo "$(getent passwd "$user" | cut -d: -f6)/foxess-label"
+}
+
+# step_modemmanager: ModemManager hands the IMEI to any local user over
+# D-Bus, and the stick never uses the modem: masked.
+step_modemmanager() {
+	if ! systemctl cat ModemManager.service >/dev/null 2>&1; then
+		ok "ModemManager: not installed"
+	elif [ "$(systemctl is-enabled ModemManager.service 2>/dev/null)" = masked ]; then
+		ok "ModemManager: masked"
+	elif [ -n "$CHECK" ]; then
+		would "stop and mask ModemManager (it shares the IMEI with every local user)"
+	else
+		systemctl disable --now ModemManager.service >/dev/null 2>&1 || true
+		systemctl mask ModemManager.service >/dev/null
+		changed "ModemManager stopped and masked"
+	fi
+}
+
+step_appliance() {
+	local need="" lbl
+	[ -x /var/lib/foxess-local/bin/foxess-local ] || need="installer.sh foxess-local_linux_arm64"
+	[ -x "$WIZARD" ] || need="$need foxess-wizard_linux_arm64"
+	if [ -n "$CHECK" ]; then
+		[ -z "$need" ] || would "install from ${FROM:-${VERSION:-the latest release}}:$need"
+	elif [ -n "$need" ]; then
+		# shellcheck disable=SC2086 # a word list
+		fetch_release $need
+	fi
+	# foxess-local, waiting for an inverter address (the wizard sets it)
+	if [ -x /var/lib/foxess-local/bin/foxess-local ]; then
+		ok "foxess-local installed ($(/var/lib/foxess-local/bin/foxess-local version 2>/dev/null || echo "version unknown"))"
+	elif [ -z "$CHECK" ]; then
+		local args=(install --no-inverter --fix)
+		[ -z "$FORWARD_MODE" ] || args+=(--forward-mode "$FORWARD_MODE")
+		bash "$REL/installer.sh" "${args[@]}"
+		changed "foxess-local installed, without an inverter"
+	fi
+	# the wizard: root-owned, it replaces itself when it updates
+	if [ -x "$WIZARD" ]; then
+		ok "wizard installed ($("$WIZARD" version 2>/dev/null || echo "version unknown"))"
+	elif [ -z "$CHECK" ]; then
+		install -d -m 0755 -o root -g root "$WIZARD_DIR"
+		install -m 0755 -o root -g root "$REL/foxess-wizard_linux_arm64" "$WIZARD"
+		changed "wizard $("$WIZARD" version) installed ($WIZARD)"
+	fi
+	[ -z "$REL" ] || drop_release
+	if put_file /etc/systemd/system/foxess-wizard.service "$WIZARD_UNIT" "wizard service unit"; then
+		systemctl daemon-reload
+	fi
+	# the stick's hotspot name and password: made once, kept (the label names them)
+	if [ -f "$WIZARD_ID" ]; then
+		ok "hotspot name and password ($WIZARD_ID)"
+	elif [ -n "$CHECK" ]; then
+		would "make the stick's hotspot name and password ($WIZARD_ID)"
+	else
+		"$WIZARD" init -config "$WIZARD_ID" >/dev/null
+		changed "hotspot name and password made ($WIZARD_ID)"
+	fi
+	step_modemmanager
+	[ -z "$CHECK" ] || return 0
+	if "$WIZARD" imei-check; then
+		ok "the wizard reads the IMEI: compare its last four digits with the one under the cover"
+	else
+		warn "the wizard cannot read a valid IMEI: the operations that ask for it fall back to the"
+		warn "  stick's password alone. Fine for a test stick; check the modem before giving it away."
+	fi
+	lbl="$(label_dir)"
+	"$WIZARD" label -config "$WIZARD_ID" -out "$lbl" | sed 's/^/    /'
+	[ -z "${SUDO_USER:-}" ] || chown -R "$SUDO_USER:" "$lbl"
+	if systemctl is-active -q foxess-wizard.service; then
+		systemctl restart foxess-wizard.service
+		ok "wizard running (restarted)"
+	else
+		systemctl enable --now foxess-wizard.service
+		changed "wizard enabled and started"
+	fi
+}
+
+# ---- --seal ----
+# client_wifi: the UUIDs of the Wi-Fi client connections (the
+# preparer's network), not the hotspots.
+client_wifi() {
+	local uuid type
+	while IFS=: read -r uuid type; do
+		[ "$type" = 802-11-wireless ] || continue
+		[ "$(nmcli -g 802-11-wireless.mode con show "$uuid" 2>/dev/null)" = infrastructure ] || continue
+		echo "$uuid"
+	done < <(nmcli -t -f UUID,TYPE con show)
+}
+
+# random_password: 20 characters of base32 (96 bits).
+random_password() {
+	local p
+	p="$(head -c 12 /dev/urandom | base32)"
+	echo "${p//=/}"
+}
+
+# default_password_accounts: the accounts whose password is a
+# well-known one.
+default_password_accounts() {
+	local u hash p
+	while IFS=: read -r u hash _; do
+		case "$hash" in \$*) ;; *) continue ;; esac
+		for p in $DEFAULT_PASSWORDS; do
+			# shellcheck disable=SC2016 # perl's own variables
+			if [ "$(perl -e 'print crypt($ARGV[0], $ARGV[1]) eq $ARGV[1] ? 1 : 0' "$p" "$hash")" = 1 ]; then
+				echo "$u"
+				break
+			fi
+		done
+	done </etc/shadow
+}
+
+seal() {
+	local u newpw="" uuids
+	[ -x "$WIZARD" ] && [ -f "$WIZARD_ID" ] || die "--seal: this stick is not an appliance yet (run --appliance first)"
+	say "sealing (D-031)"
+	KEYS_ONLY=1
+	step_ssh
+	for u in $(default_password_accounts); do
+		if [ -n "$CHECK" ]; then
+			would "replace the well-known password of '$u'"
+		elif [ "$u" = "${SUDO_USER:-root}" ]; then
+			newpw="$(random_password)"
+			echo "$u:$newpw" | chpasswd
+			changed "the password of '$u' replaced (shown below, once)"
+		else
+			passwd -q -l "$u"
+			changed "'$u' locked (it had a well-known password)"
+		fi
+	done
+	uuids="$(client_wifi | tr '\n' ' ')"
+	if [ -n "$CHECK" ]; then
+		would "clear the wizard's state, remove the Wi-Fi client connections (${uuids:-none}), start the wizard"
+		return
+	fi
+	systemctl stop foxess-wizard.service
+	find /var/lib/foxess-wizard -mindepth 1 -delete 2>/dev/null || true
+	changed "the wizard's state cleared: the next start is unconfigured"
+	# after this script has finished: over Wi-Fi, the session ends here
+	systemd-run --quiet --collect --unit foxess-seal --on-active=5 \
+		/bin/sh -c "for u in $uuids; do nmcli con delete \$u; done; systemctl start foxess-wizard.service"
+	echo
+	say "sealed. In 5 seconds the stick forgets this Wi-Fi network (an SSH session over Wi-Fi ends)"
+	say "  and starts its hotspot $(sed -n 's/^SSID=//p' "$WIZARD_ID"). Unplug it whenever you like."
+	if [ -n "$newpw" ]; then
+		say "  the password of '${SUDO_USER:-root}' (sudo needs it; shown once, keep it):"
+		echo "    $newpw"
+	fi
+}
+
+if [ -n "$SEAL" ]; then
+	seal
+	exit 0
+fi
 
 say "1/9 apt sources"
 step_apt_suites
@@ -503,13 +745,22 @@ say "8/9 accounts"
 step_accounts
 step_ssh
 step_hostname
-say "9/9 foxess-local"
-if [ -n "$INVERTER_IP" ]; then step_install; else ok "not installing (no --inverter-ip)"; fi
+if [ -n "$APPLIANCE" ]; then
+	say "9/9 appliance"
+	step_appliance
+else
+	say "9/9 foxess-local"
+	if [ -n "$INVERTER_IP" ]; then step_install; else ok "not installing (no --inverter-ip)"; fi
+fi
 
 addr="$(ip -4 -o route get 1.1.1.1 2>/dev/null | grep -oE 'src [0-9.]+' | cut -d' ' -f2 || true)"
 echo
 if [ -n "$CHECK" ]; then
 	say "check done"
+elif [ -n "$APPLIANCE" ]; then
+	say "done: the appliance is prepared. The label is in $(label_dir)/."
+	say "  Check it on the home network: $(sed -n 's/^HOST=//p' "$WIZARD_ID" 2>/dev/null).local:18081 (the password is on the label)"
+	say "  Then seal it, over USB (it removes this Wi-Fi connection): sudo bash $0 --seal"
 elif [ -x /var/lib/foxess-local/bin/foxess-local ]; then
 	say "done. Web UI: http://${addr:-<this stick>}:18080/"
 	say "next: set the inverter's gateway to ${addr:-the address of this stick} (INSTALL.md, step 4)"

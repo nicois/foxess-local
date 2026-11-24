@@ -28,7 +28,7 @@ const (
 // once its device exists (~9.5 s after boot, spike S4).
 const imeiTimeout = 10 * time.Second
 
-const usage = "usage: foxess-wizard run|demo|version|imei-check [flags]"
+const usage = "usage: foxess-wizard run|demo|version|imei-check|init|label [flags]"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -49,6 +49,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runCmd(args[1:], stderr)
 	case "demo":
 		return demoCmd(args[1:], stderr)
+	case "init":
+		return initCmd(args[1:], stdout, stderr)
+	case "label":
+		return labelCmd(args[1:], stdout, stderr)
 	default:
 		_, _ = fmt.Fprintln(stderr, usage)
 		return exitUsage

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -22,6 +21,7 @@ import (
 	"foxesslocal/internal/wizard/bootcount"
 	"foxesslocal/internal/wizard/captive"
 	"foxesslocal/internal/wizard/health"
+	"foxesslocal/internal/wizard/identity"
 	"foxesslocal/internal/wizard/led"
 	"foxesslocal/internal/wizard/loop"
 	"foxesslocal/internal/wizard/mdns"
@@ -32,52 +32,14 @@ import (
 
 // Where the wizard keeps things on the stick.
 const (
-	configFile = "/etc/foxess-wizard/hotspot.env" // SSID, PASSWORD, HOST; root 0600, written at preparation
-	stateDir   = "/var/lib/foxess-wizard"
-	iface      = "wlan0"
+	stateDir = "/var/lib/foxess-wizard"
+	iface    = "wlan0"
 
 	readHeaderTimeout = 10 * time.Second
 	mdnsRetry         = 30 * time.Second
 	shutdownWait      = 5 * time.Second
 	stateDirMode      = 0o700
 )
-
-// identity is the stick's hotspot and name, from preparation.
-type identity struct{ SSID, Password, Host string }
-
-func readIdentity(path string) (identity, error) {
-	f, err := os.Open(path) //nolint:gosec // G304: the wizard's fixed config path, or a test's
-	if err != nil {
-		return identity{}, err
-	}
-	defer func() { _ = f.Close() }()
-	var id identity
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		k, v, ok := strings.Cut(strings.TrimSpace(sc.Text()), "=")
-		if !ok || strings.HasPrefix(k, "#") {
-			continue
-		}
-		switch k {
-		case "SSID":
-			id.SSID = v
-		case "PASSWORD":
-			id.Password = v
-		case "HOST":
-			id.Host = v
-		}
-	}
-	if err := sc.Err(); err != nil {
-		return identity{}, err
-	}
-	if id.SSID == "" || id.Password == "" || id.Host == "" {
-		return identity{}, fmt.Errorf("%s: SSID, PASSWORD and HOST are all needed", path)
-	}
-	if err := netmgr.Validate(id.SSID, id.Password); err != nil {
-		return identity{}, fmt.Errorf("%s: %w", path, err)
-	}
-	return id, nil
-}
 
 // uptime reads the system's uptime: boots are counted by it (there is
 // no battery-backed clock).
@@ -100,12 +62,12 @@ func uptime() time.Duration {
 func runCmd(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	cfg := fs.String("config", configFile, "the stick's hotspot and name")
+	cfg := fs.String("config", identity.Path, "the stick's hotspot and name")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
 	log := slog.New(slog.NewTextHandler(stderr, nil))
-	id, err := readIdentity(*cfg)
+	id, err := identity.Read(*cfg)
 	if err != nil {
 		log.Error("config", "err", err)
 		return exitFailed

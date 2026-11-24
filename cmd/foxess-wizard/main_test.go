@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"foxesslocal/internal/wizard/identity"
 )
 
 func invoke(t *testing.T, args ...string) (int, string, string) {
@@ -41,34 +43,41 @@ func TestIMEICheckNoDevice(t *testing.T) {
 	}
 }
 
-func TestReadIdentity(t *testing.T) {
-	dir := t.TempDir()
-	good := filepath.Join(dir, "good")
-	if err := os.WriteFile(good, []byte("# from preparation\nSSID=foxess-1a2b\nPASSWORD=stick-password\nHOST=foxess-1a2b\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	id, err := readIdentity(good)
-	if err != nil || id != (identity{SSID: "foxess-1a2b", Password: "stick-password", Host: "foxess-1a2b"}) {
-		t.Fatalf("identity %+v %v", id, err)
-	}
-	for name, body := range map[string]string{ //nolint:gosec // G101: test fixtures, not credentials
-		"no host":        "SSID=foxess-1a2b\nPASSWORD=stick-password\n",
-		"short password": "SSID=foxess-1a2b\nPASSWORD=short\nHOST=foxess-1a2b\n",
-	} {
-		p := filepath.Join(dir, strings.ReplaceAll(name, " ", "-"))
-		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := readIdentity(p); err == nil {
-			t.Errorf("%s: accepted", name)
-		}
-	}
-}
-
 func TestDemoSnapshots(t *testing.T) {
 	for _, s := range []string{"unconfigured", "joining", "normal", "degraded", "home_lost", "hotspot", "awaiting_inverter"} {
 		if got := demoSnapshot(s, "").Decision.State.String(); got != s {
 			t.Errorf("demo %s shows %s", s, got)
+		}
+	}
+}
+
+// TestInitAndLabel: init creates the identity once and keeps it on a
+// re-run (the label names it); label writes the text and the PNG.
+func TestInitAndLabel(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "etc", "hotspot.env")
+	code, out, errOut := invoke(t, "init", "-config", cfg)
+	if code != 0 || !strings.Contains(out, "created") {
+		t.Fatalf("init: %d %q %q", code, out, errOut)
+	}
+	first, err := identity.Read(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, out, _ := invoke(t, "init", "-config", cfg); code != 0 || !strings.Contains(out, "kept "+first.SSID) {
+		t.Fatalf("second init: %d %q", code, out)
+	}
+	if again, _ := identity.Read(cfg); again != first {
+		t.Fatalf("identity changed: %+v -> %+v", first, again)
+	}
+	labels := filepath.Join(dir, "labels")
+	code, out, errOut = invoke(t, "label", "-config", cfg, "-out", labels)
+	if code != 0 || !strings.Contains(out, first.Password) {
+		t.Fatalf("label: %d %q %q", code, out, errOut)
+	}
+	for _, ext := range []string{".txt", ".png"} {
+		if fi, err := os.Stat(filepath.Join(labels, first.SSID+"-label"+ext)); err != nil || fi.Size() == 0 {
+			t.Errorf("%s: %v", ext, err)
 		}
 	}
 }
