@@ -80,6 +80,7 @@ Invariants that must hold across all implementations. C-001…C-006 were ratifie
 **Rationale**: owner directive. One statically linked binary on an always-on Linux box is the zero-babysit deployment; pure Go keeps builds reproducible and the Docker image distroless-small.
 **Violation consequence**: build/deploy friction returns (CGO cross-compilation, native libraries, extra processes to monitor) — operational simplicity degrades exactly where it matters.
 **Traces**: D-001; `go.mod` (`go 1.27` directive); `deploy/release.sh` (static `CGO_ENABLED=0` builds) and `deploy/container/Containerfile` (the root plan-1 Dockerfile was removed 2026-11-17, audit M5).
+**Scope** (owner, 2026-11-24; D-031): the constraint covers foxess-local, the system that touches the inverter. The OpenStick setup wizard (`cmd/foxess-wizard`) is appliance tooling, like `provision-openstick.sh`, and lies outside it. It is a second, root-owned binary that never speaks the inverter's protocol, never writes a register and never sits in the data path. It is built pure Go and static, like foxess-local, but may run OS programs (`nmcli`, `dnsmasq`, `systemctl`).
 
 ## Proposed
 
