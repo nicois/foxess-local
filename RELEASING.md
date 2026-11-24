@@ -86,7 +86,8 @@ only accept binaries signed by the key built into them.
    `latest`. When it holds up, `make tag` makes the release.
 
       **One-shot (`make publish`)**: with a write-token `gh` in the
-      environment (`GITHUB_TOKEN=...`), `make publish VERSION=v0.5.0-rc.1
+      environment (`GH_FOXESS_LOCAL`, or `GH_TOKEN`/`GITHUB_TOKEN`),
+      `make publish VERSION=v0.5.0-rc.1
       REPO=<owner>/<repo>` does steps 2-5 in one go: it builds `dist/`,
       pushes the tag, waits for the CI draft, then prints a prompt and
       polls for `dist/SHA256SUMS.minisig` while `make sign` runs on the

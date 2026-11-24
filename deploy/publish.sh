@@ -8,9 +8,9 @@
 # e.g. deploy/publish.sh v0.5.0-rc.1 nicois/foxess-local dist
 #
 # The tag must exist locally first (make tag / make tag PRE=1). Needs a
-# gh token that can write to the repo (GH_TOKEN or GITHUB_TOKEN in the
-# environment); the tag push goes over https with the same token (via
-# the gh credential helper). Neither
+# gh token that can write to the repo (GH_FOXESS_LOCAL, then GH_TOKEN
+# or GITHUB_TOKEN, in the environment); the tag push goes over https
+# with the same token (via the gh credential helper). Neither
 # CI nor this script holds the signing key: `make sign` is run on the
 # machine with the key, and this script polls for
 # dist/SHA256SUMS.minisig until it appears.
@@ -38,7 +38,18 @@ if [ -z "$REPO" ]; then
 	REPO="$(git remote get-url origin 2>/dev/null | sed -E 's#^git@github.com:##; s#^https://github.com/##; s#\.git$##')"
 fi
 [ -n "$REPO" ] || die "REPO (owner/repo) is required, or set the origin remote"
-command -v gh >/dev/null || die "gh is required (with a write token: GH_TOKEN or GITHUB_TOKEN)"
+command -v gh >/dev/null || die "gh is required (with a write token)"
+
+# gh and its git credential helper use GH_TOKEN when it is set; this
+# machine holds the repo's writer token as GH_FOXESS_LOCAL
+if [ -n "${GH_FOXESS_LOCAL:-}" ]; then
+	GH_TOKEN="$GH_FOXESS_LOCAL"
+elif [ -z "${GH_TOKEN:-}" ]; then
+	GH_TOKEN="${GITHUB_TOKEN:-}"
+fi
+[ -n "${GH_TOKEN:-}" ] ||
+	die "no writer token in the environment (GH_FOXESS_LOCAL, GH_TOKEN or GITHUB_TOKEN)"
+export GH_TOKEN
 git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null ||
 	die "tag $VERSION not found locally: run make tag (or make tag PRE=1) first"
 
@@ -51,7 +62,7 @@ tagcommit="$(git rev-parse "$VERSION^{commit}")"
 # The writer token is needed for the upload and publish; fail early.
 pushperm="$(gh api "repos/$REPO" --jq '.permissions.push // false' 2>/dev/null || echo false)"
 [ "$pushperm" = "true" ] ||
-	die "the gh token cannot write to $REPO: set GH_TOKEN/GITHUB_TOKEN to a writer token"
+	die "the gh token cannot write to $REPO: set GH_FOXESS_LOCAL/GH_TOKEN/GITHUB_TOKEN to a writer token"
 
 # 1) the local assets (release.sh also refuses a local go.mod replace).
 echo "==> building $DIST/ for $VERSION"
