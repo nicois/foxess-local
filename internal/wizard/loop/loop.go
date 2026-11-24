@@ -36,6 +36,12 @@ type Radio interface {
 	HotspotDown(ctx context.Context) error
 }
 
+// Portal is the captive portal, up while the hotspot is (captive.Portal).
+type Portal interface {
+	Up(ctx context.Context) error
+	Down()
+}
+
 // Lights shows a pattern (led.Driver).
 type Lights interface{ Set(p led.Pattern) error }
 
@@ -55,6 +61,7 @@ type Loop struct {
 	HotspotSSID  string
 	HotspotPSK   string
 	Operator     func() bool // an operator has a live session on the hotspot
+	Portal       Portal      // optional
 	Tick         time.Duration
 	Log          *slog.Logger
 
@@ -85,6 +92,15 @@ type JoinResult struct {
 	At   time.Time
 	Err  string // empty on success
 	err  error
+}
+
+// NewJoinResult builds a result (the demo page's; the loop makes its own).
+func NewJoinResult(ssid string, at time.Time, err error) *JoinResult {
+	r := &JoinResult{SSID: ssid, At: at, err: err}
+	if err != nil {
+		r.Err = err.Error()
+	}
+	return r
 }
 
 // Error is the join's error, for errors.Is.
@@ -187,7 +203,7 @@ func (l *Loop) handle(ctx context.Context, r request) {
 func (l *Loop) join(ctx context.Context, ssid, psk string) {
 	l.publishBusy()
 	if st, err := l.Radio.Active(ctx); err == nil && st.Role == netmgr.RoleHotspot {
-		if err := l.Radio.HotspotDown(ctx); err != nil {
+		if err := l.hotspotDown(ctx); err != nil {
 			l.log().Warn("hotspot down for a join", "err", err)
 		}
 	}
@@ -212,13 +228,13 @@ func (l *Loop) rescan(ctx context.Context) {
 	st, err := l.Radio.Active(ctx)
 	onHotspot := err == nil && st.Role == netmgr.RoleHotspot
 	if onHotspot {
-		if err := l.Radio.HotspotDown(ctx); err != nil {
+		if err := l.hotspotDown(ctx); err != nil {
 			l.log().Warn("hotspot down for a scan", "err", err)
 		}
 	}
 	l.scan(ctx)
 	if onHotspot {
-		if err := l.Radio.HotspotUp(ctx, l.HotspotSSID, l.HotspotPSK); err != nil {
+		if err := l.hotspotUp(ctx); err != nil {
 			l.log().Warn("hotspot up after a scan", "err", err)
 		}
 	}
@@ -302,19 +318,41 @@ func (l *Loop) apply(ctx context.Context, d state.Decision, role netmgr.Role) bo
 	switch {
 	case d.Radio == state.RadioHotspot && role != netmgr.RoleHotspot:
 		l.scan(ctx) // no scanning once the hotspot is up (S2)
-		if err := l.Radio.HotspotUp(ctx, l.HotspotSSID, l.HotspotPSK); err != nil {
+		if err := l.hotspotUp(ctx); err != nil {
 			l.log().Error("hotspot up", "err", err)
 			return false
 		}
 		return true
 	case d.Radio == state.RadioHome && role == netmgr.RoleHotspot:
-		if err := l.Radio.HotspotDown(ctx); err != nil {
+		if err := l.hotspotDown(ctx); err != nil {
 			l.log().Error("hotspot down", "err", err)
 			return false
 		}
 		return true
 	}
 	return false
+}
+
+// hotspotUp raises the hotspot, then its captive portal (dnsmasq needs
+// the address to bind).
+func (l *Loop) hotspotUp(ctx context.Context) error {
+	if err := l.Radio.HotspotUp(ctx, l.HotspotSSID, l.HotspotPSK); err != nil {
+		return err
+	}
+	if l.Portal != nil {
+		if err := l.Portal.Up(ctx); err != nil {
+			l.log().Error("captive portal", "err", err)
+		}
+	}
+	return nil
+}
+
+// hotspotDown stops the portal, then drops the hotspot.
+func (l *Loop) hotspotDown(ctx context.Context) error {
+	if l.Portal != nil {
+		l.Portal.Down()
+	}
+	return l.Radio.HotspotDown(ctx)
 }
 
 func (l *Loop) show(d state.Decision) {

@@ -276,6 +276,10 @@ func USBSubnet(home, usb netip.Prefix) (netip.Prefix, bool) {
 	return netip.Prefix{}, false
 }
 
+// Validate checks a network name and WPA2 passphrase (empty: an open
+// network) before anything is written or run.
+func Validate(ssid, psk string) error { return validate(ssid, psk) }
+
 func validate(ssid, psk string) error {
 	if ssid == "" || len(ssid) > maxSSID {
 		return ErrInvalid

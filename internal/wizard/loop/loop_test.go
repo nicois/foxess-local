@@ -142,6 +142,11 @@ func newRig(t *testing.T, radio *fakeRadio) *rig {
 
 func newRigAt(t *testing.T, radio *fakeRadio, dir string) *rig {
 	t.Helper()
+	return newRigWith(t, radio, dir, nil)
+}
+
+func newRigWith(t *testing.T, radio *fakeRadio, dir string, tweak func(*Loop)) *rig {
+	t.Helper()
 	r := &rig{radio: radio, led: &fakeLights{}, probe: &fakeProbe{r: healthy}, dir: dir}
 	start := time.Now()
 	r.l = &Loop{
@@ -154,6 +159,9 @@ func newRigAt(t *testing.T, radio *fakeRadio, dir string) *rig {
 		HotspotSSID:  "foxess-1a2b",
 		HotspotPSK:   "stick-password",
 		Operator:     func() bool { return false },
+	}
+	if tweak != nil {
+		tweak(r.l)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -327,6 +335,41 @@ func TestJoinClosesWindow(t *testing.T) {
 		synctest.Wait()
 		if radio.role != netmgr.RoleHome || r.l.Snapshot().Decision.State != state.Normal {
 			t.Fatalf("after a successful join: role %v state %v", radio.role, r.l.Snapshot().Decision.State)
+		}
+	})
+}
+
+type fakePortal struct {
+	mu sync.Mutex
+	up bool
+}
+
+func (p *fakePortal) Up(context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.up = true
+	return nil
+}
+func (p *fakePortal) Down() { p.mu.Lock(); defer p.mu.Unlock(); p.up = false }
+
+// TestPortalFollowsHotspot: the captive portal is up exactly while the
+// hotspot is.
+func TestPortalFollowsHotspot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		radio := &fakeRadio{}
+		dir := t.TempDir()
+		portal := &fakePortal{}
+		r := newRigWith(t, radio, dir, func(l *Loop) { l.Portal = portal })
+		defer r.stop()
+		synctest.Wait()
+		if !portal.up {
+			t.Fatal("hotspot up, portal down")
+		}
+		r.l.StartJoin("home", "home-password")
+		time.Sleep(20 * time.Second)
+		synctest.Wait()
+		if portal.up || radio.role != netmgr.RoleHome {
+			t.Fatalf("after the join: portal up %v, role %v", portal.up, radio.role)
 		}
 	})
 }

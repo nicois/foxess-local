@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>foxess-local stick</title>
+<link rel="stylesheet" href="static/css/app.css">
+<script type="module" src="static/js/app.js"></script>
+</head>
+<body>
+<header>
+  <h1 data-i18n="foxess-local stick setup">foxess-local stick setup</h1>
+  <select id="lang" aria-label="Language"></select>
+</header>
+<main>
+  <section id="login" class="card" hidden>
+    <h2 data-i18n="Sign in">Sign in</h2>
+    <p data-i18n="The stick's password is on its label.">The stick's password is on its label.</p>
+    <form id="login-form">
+      <input id="login-password" type="password" autocomplete="current-password" required data-i18n-placeholder="Password">
+      <button type="submit" data-i18n="Sign in">Sign in</button>
+    </form>
+    <p id="login-error" class="error" hidden></p>
+  </section>
+
+  <section id="status" class="card" hidden>
+    <h2 id="status-title"></h2>
+    <p id="status-body"></p>
+    <ul id="problems"></ul>
+    <p id="join-result" hidden></p>
+    <p><a id="foxess-link" hidden data-i18n="Open foxess-local">Open foxess-local</a></p>
+  </section>
+
+  <section id="networks" class="card" hidden>
+    <h2 data-i18n="Wi-Fi networks">Wi-Fi networks</h2>
+    <ul id="network-list"></ul>
+    <p id="no-networks" hidden data-i18n="No networks found. Only 2.4 GHz networks can appear.">No networks found. Only 2.4 GHz networks can appear.</p>
+    <button id="rescan" type="button" class="secondary" data-i18n="Scan again">Scan again</button>
+    <p class="note" data-i18n="Scanning drops this hotspot for about 5 seconds; your device reconnects by itself.">Scanning drops this hotspot for about 5 seconds; your device reconnects by itself.</p>
+    <form id="join-form">
+      <label><span data-i18n="Network name">Network name</span><input id="join-ssid" required maxlength="32" autocomplete="off"></label>
+      <label><span data-i18n="Password">Password</span><input id="join-password" type="password" maxlength="63" autocomplete="off"></label>
+      <p class="note" data-i18n="Leave the password empty for an open network.">Leave the password empty for an open network.</p>
+      <button type="submit" data-i18n="Connect">Connect</button>
+    </form>
+  </section>
+
+  <section id="confirm" class="card" hidden>
+    <p id="confirm-text"></p>
+    <button id="confirm-go" type="button" data-i18n="Continue">Continue</button>
+    <button id="confirm-cancel" type="button" class="secondary" data-i18n="Cancel">Cancel</button>
+  </section>
+
+  <section id="hotspot" class="card" hidden>
+    <button id="open-hotspot" type="button" class="secondary" data-i18n="Open the setup hotspot">Open the setup hotspot</button>
+  </section>
+</main>
+</body>
+</html>
