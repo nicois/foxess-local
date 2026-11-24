@@ -1150,8 +1150,11 @@ function fmtDuration(h) {
 }
 
 // flowOf: per-entity direction + phrase for the current power reading.
-// The power-flow diagram (viewBox 400×300, the box is 4:3 so node
-// percentages and SVG units agree). The inverter is drawn as its two
+// The power-flow diagram: coordinates on a 400 × 300 grid, drawn as
+// percentages of the box (fx, fy), so the box can change shape — 4:3
+// when wide, taller when narrow (CSS .flow-box) — and lines, arrows,
+// markers and the nodes' left/top percentages still meet. Every line is
+// vertical or horizontal, so an arrow's angle holds at any shape. The inverter is drawn as its two
 // sides with the conversion between them, its box anchored by its left
 // edge (CSS .a-hub) so its DC side sits on x 60: solar above and the
 // battery below meet it on vertical lines, as the grid and the home meet
@@ -1168,8 +1171,12 @@ const FLOW_LINES = [
   ["ac", 185, 150, 340, 150, 0.75], // fwd = inverter AC output
   ["home", 340, 150, 340, 250, 0.55],
   ["grid", 340, 50, 340, 150, 0.7], // fwd = import (grid → switchboard)
-  ["eps", 185, 150, 185, 258, 0.6], // fwd = backup port output
+  ["eps", 185, 150, 185, 250, 0.6], // fwd = backup port output
 ];
+
+// fx, fy: a grid coordinate as a percentage of the box's width / height.
+const fx = (x) => +(x / 4).toFixed(3) + "%";
+const fy = (y) => +(y / 3).toFixed(3) + "%";
 
 // paintFlowLine sets one connector's state and its arrow's direction.
 function paintFlowLine(k, d) {
@@ -1180,7 +1187,10 @@ function paintFlowLine(k, d) {
   if (!ar || !g) return;
   const [, x1, y1, x2, y2, t] = g;
   const deg = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI + (d === "rev" ? 180 : 0);
-  ar.setAttribute("transform", `translate(${x1 + (x2 - x1) * t} ${y1 + (y2 - y1) * t}) rotate(${deg})`);
+  // the arrow is a nested svg at a percentage position, its path rotated
+  ar.setAttribute("x", fx(x1 + (x2 - x1) * t));
+  ar.setAttribute("y", fy(y1 + (y2 - y1) * t));
+  ar.firstElementChild?.setAttribute("transform", `rotate(${deg})`);
   ar.setAttribute("class", "ar s-" + k + " " + d);
 }
 
@@ -1337,14 +1347,14 @@ function paintNow(st) {
   const hub = byId("fv-hub");
   if (hub) hub.textContent = fmtPower(p?.ac_port_w);
   // which way it converts: the arrows on the dividers either side of
-  // the symbol, and the caption with the loss
+  // the symbol (the caption is the loss alone: the direction in words
+  // crowded it — owner, 2026-11-24; the aria-label still says it)
   const inv = byId("inv");
   if (inv) inv.dataset.conv = f.conv.d;
   const hp = byId("fp-hub");
   if (hp) {
-    const lossTxt = loss == null ? "" : tr("loss {w}", { w: fmtPower(Math.max(0, loss)) });
     hp.textContent = f.conv.d === "idle" ? tr("idle")
-      : f.conv.txt + (lossTxt ? " · " + lossTxt : "");
+      : loss == null ? "—" : tr("loss {w}", { w: fmtPower(Math.max(0, loss)) });
   }
   const flow = byId("flow");
   if (flow) {
@@ -1856,17 +1866,19 @@ function paintLimits(st) {
 // Inverter page's with the limit markers — FLOW_LIMITS).
 function flowMarkup(withLimits) {
   const marks = withLimits
-    ? FLOW_LIMITS.map((l) => `<g class="lim-mark"><circle cx="${l.x}" cy="${l.y}" r="10"/><text x="${l.x}" y="${l.y}">${l.n}</text></g>`).join("")
+    ? FLOW_LIMITS.map((l) => `<svg class="lim-mark" x="${fx(l.x)}" y="${fy(l.y)}" overflow="visible"><circle r="10"/><text>${l.n}</text></svg>`).join("")
     : "";
+  // .flow is the container (its width picks the box's shape); .flow-box
+  // holds the drawing
   return `
-      <div id="flow" class="flow${S.epsSeen ? " has-eps" : ""}" role="img">
-        <svg class="flow-lines" viewBox="0 0 400 300" aria-hidden="true">
+      <div id="flow" class="flow${S.epsSeen ? " has-eps" : ""}" role="img"><div class="flow-box">
+        <svg class="flow-lines" aria-hidden="true">
           ${FLOW_LINES.map(([k, x1, y1, x2, y2]) =>
-            `<line id="fl-${k}" class="fl s-${k} idle" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`).join("")}
-          ${FLOW_LINES.map(([k]) => `<path id="ar-${k}" class="ar s-${k} idle" d="M-6,-5 L6,0 L-6,5 Z"/>`).join("")}
-          <circle class="board-dot" cx="340" cy="150" r="5"/>
+            `<line id="fl-${k}" class="fl s-${k} idle" x1="${fx(x1)}" y1="${fy(y1)}" x2="${fx(x2)}" y2="${fy(y2)}"/>`).join("")}
+          ${FLOW_LINES.map(([k]) => `<svg id="ar-${k}" class="ar s-${k} idle" overflow="visible"><path d="M-6,-5 L6,0 L-6,5 Z"/></svg>`).join("")}
+          <circle class="board-dot" cx="${fx(340)}" cy="${fy(150)}" r="5"/>
         </svg>
-        ${marks ? `<svg class="flow-marks" viewBox="0 0 400 300" aria-hidden="true">${marks}</svg>` : ""}
+        ${marks ? `<svg class="flow-marks" aria-hidden="true">${marks}</svg>` : ""}
         <span class="board-label muted">${esc(tr("switchboard"))}</span>
         ${flowNode("solar", esc(tr("Solar")), "a-solar")}
         ${flowNode("batt", esc(tr("Battery")), "a-batt")}
@@ -1888,7 +1900,7 @@ function flowMarkup(withLimits) {
         ${flowNode("home", esc(tr("Home")), "a-home")}
         ${flowNode("grid", esc(tr("Grid")), "a-grid")}
         ${flowNode("eps", esc(tr("Backup")), "a-eps")}
-      </div>`;
+      </div></div>`;
 }
 
 async function renderDashboard() {

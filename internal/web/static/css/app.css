@@ -718,17 +718,30 @@ dl.kv {
   .now-body { grid-template-columns: 1fr; }
 }
 
-/* power flow: HTML nodes over an SVG of the connections. The box is
-   4:3 and the SVG's viewBox is 400×300, so a node's left/top percentage
-   and the SVG coordinates name the same point (no distortion: arrows can
-   sit on diagonals). */
+/* power flow: HTML nodes over an SVG of the connections. Both place
+   things by percentages of the box (the SVG's lines, arrows and markers
+   too: no viewBox), so the box can change shape. .flow is the
+   container: its width picks the box's shape and the inverter's compact
+   form. */
 .flow {
-  position: relative;
-  container: flow / inline-size; /* the inverter's compact form follows the diagram's own width */
-  aspect-ratio: 4 / 3;
+  container: flow / inline-size;
   width: 100%;
   max-width: 520px;
   margin: 0 auto;
+}
+.flow-box {
+  position: relative;
+  aspect-ratio: 4 / 3;
+}
+/* narrow (a phone, the Inverter page's column): taller, so the three
+   rows stand apart — the nodes keep their size as the box shrinks */
+@container flow (max-width: 440px) {
+  .flow-box { aspect-ratio: 1 / 1; }
+}
+@container flow (max-width: 340px) {
+  .flow-box { aspect-ratio: 5 / 6; }
+}
+.flow {
   .node {
     position: absolute;
     translate: -50% -50%;
@@ -743,7 +756,7 @@ dl.kv {
 .flow .a-hub { left: 3.5%; top: 50%; translate: 0 -50%; min-width: 55%; }
 .a-grid { left: 85%; top: 16.67%; }
 .a-home { left: 85%; top: 83.33%; }
-.a-eps { left: 46.25%; top: 86%; }
+.a-eps { left: 46.25%; top: 83.33%; } /* one row with the battery and the home */
 /* a tag on the line to the home, just below the dot: the gap between
    the inverter and the switchboard is narrow on a phone */
 .board-label {

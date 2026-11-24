@@ -50,9 +50,10 @@ version; anything else bumps the patch version.
   as its two sides: solar and the battery meet its DC side (straight
   down, as the grid and the home meet the switchboard), the switchboard
   and the backup port hang off its AC side, and the conversion sits
-  between them: arrows either side of the inverter symbol and the
-  caption ("DC → AC" or "AC → DC", with the loss) show which way it
-  converts.
+  between them, with its loss: arrows either side of the inverter
+  symbol show which way it converts (DC → AC or AC → DC). On a phone
+  the diagram is taller, so its rows stand apart; each row's boxes line
+  up.
 
 ## [v0.4.1] - 2026-11-22
 
