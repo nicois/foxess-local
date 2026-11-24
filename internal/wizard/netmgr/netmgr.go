@@ -386,3 +386,27 @@ func splitTerse(line string) []string {
 	}
 	return append(fields, cur.String())
 }
+
+// imageHotspotID is the OpenStick image's own access-point profile.
+const imageHotspotID = "hotspot"
+
+// HomeKnown reports whether any home profile exists: the wizard's, or
+// before the stick is sealed, the image's client profile.
+func (n *NM) HomeKnown(ctx context.Context) (bool, error) {
+	out, err := n.Run.Run(ctx, "nmcli", "-t", "-f", "NAME,TYPE", "con", "show")
+	if err != nil {
+		return false, fmt.Errorf("netmgr: profiles: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	for line := range strings.Lines(string(out)) {
+		f := splitTerse(strings.TrimRight(line, "\n"))
+		if len(f) < 2 || f[1] != "802-11-wireless" {
+			continue
+		}
+		switch f[0] {
+		case tryID, hotspotID, imageHotspotID:
+		default:
+			return true, nil
+		}
+	}
+	return false, nil
+}

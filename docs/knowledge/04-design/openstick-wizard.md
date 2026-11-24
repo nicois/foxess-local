@@ -195,10 +195,14 @@ stick asks for it:
   five minutes (owner, 2026-11-24). Without a clock (see Facts), the
   wizard counts *short boots*. On each boot it records its uptime to
   flash at 10, 30, 60 and 120 s (fsync, then rename). A boot whose last
-  record is under 120 s is short. Three short boots in a row, whose
-  recorded uptimes plus ~30 s of boot time each add up to under five
-  minutes, open the hotspot. A boot that reaches 10 minutes of uptime
-  clears the count. This is the "I changed my Wi-Fi password" path. The
+  record is under 120 s is short. Three replugs make two short boots;
+  the boot after them opens the hotspot, provided the two short boots'
+  uptimes plus ~30 s of boot time each fit in five minutes. The
+  triggering boot is recorded as long, so one sequence triggers once,
+  and any boot that reaches 120 s breaks the chain. A boot cut short
+  before the wizard starts (~15 s after power-on) leaves no record, so
+  the page and the label say to wait for the light between replugs
+  (S5 checks this). This is the "I changed my Wi-Fi password" path. The
   button is not an option (see Facts). A laptop on the USB link reaches
   the wizard without opening the hotspot at all.
 - **Not** when foxess-local is unhealthy or the inverter is silent but

@@ -292,3 +292,22 @@ func TestEscapeValue(t *testing.T) {
 		t.Fatalf("escapeValue = %q", got)
 	}
 }
+
+func TestHomeKnown(t *testing.T) {
+	for _, c := range []struct {
+		out  string
+		want bool
+	}{
+		{"lo:loopback\nusb:802-3-ethernet\nhotspot:802-11-wireless\nlte:gsm\n", false},
+		{"usb:802-3-ethernet\nwifi-client:802-11-wireless\nhotspot:802-11-wireless\n", true}, // the image's, before seal
+		{homeID + ":802-11-wireless\n" + hotspotID + ":802-11-wireless\n", true},
+		{tryID + ":802-11-wireless\n" + hotspotID + ":802-11-wireless\n", false},
+	} {
+		r := &fakeRunner{rules: []rule{{prefix: "nmcli -t -f NAME,TYPE con show", out: c.out}}}
+		n, _ := newNM(t, r)
+		got, err := n.HomeKnown(context.Background())
+		if err != nil || got != c.want {
+			t.Errorf("%q: %v %v, want %v", c.out, got, err, c.want)
+		}
+	}
+}
