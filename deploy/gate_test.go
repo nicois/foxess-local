@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -195,6 +196,42 @@ if bash check-gate.sh; then echo "== check ok"; else echo "== check failed"; fi
 		}
 		if s := string(b); !strings.Contains(s, want) || !strings.Contains(s, "ts=") || (!tc.ok && !strings.Contains(s, "detail=off-allowlist inverter flow")) {
 			t.Errorf("%s: status file:\n%s", name, s)
+		}
+	}
+}
+
+// TestGateConfigured (D-031): `configured` is the gate units'
+// ExecCondition. With no inverter address (installer --no-inverter) it
+// exits 1 and says why, so systemd leaves the units inactive instead of
+// failed (foxess-local.service Wants the gate); with one it exits 0.
+func TestGateConfigured(t *testing.T) {
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "gate.env")
+	for body, want := range map[string]int{"INVERTER_IP=\nTPROXY_PORT=14431\n": 1, testInverterEnv: 0} {
+		if err := os.WriteFile(envFile, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("bash", "apply-gate.sh", "configured")
+		cmd.Env = append(os.Environ(), "GATE_ENV="+envFile, "INVERTER_IP=")
+		out, err := cmd.CombinedOutput()
+		code := 0
+		ee := &exec.ExitError{}
+		if errors.As(err, &ee) {
+			code = ee.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		if code != want || (want != 0 && !strings.Contains(string(out), "no inverter address yet")) {
+			t.Errorf("%q: exit %d %q, want %d", body, code, out, want)
+		}
+	}
+	for _, unit := range []string{"foxess-gate.service", "foxess-gate-early.service"} {
+		b, err := os.ReadFile(unit) //nolint:gosec // G304: this package's unit files
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), "\nExecCondition=/usr/local/lib/foxess-local/apply-gate.sh configured\n") {
+			t.Errorf("%s has no ExecCondition on the inverter address", unit)
 		}
 	}
 }

@@ -322,3 +322,72 @@ func TestInstallerUIProbeKeepsStderr(t *testing.T) {
 		t.Errorf("after a refused connect: %q", got)
 	}
 }
+
+// TestInstallerDetectMACNoAddress (D-031): with no inverter address
+// (--no-inverter) detect_mac must find nothing. `ip neigh show ""` lists
+// every neighbour, and the first one's MAC would be recorded as the
+// dongle's.
+func TestInstallerDetectMACNoAddress(t *testing.T) {
+	fn := installerPart(t, `(?s)detect_mac\(\) \{.*?\n\}`)
+	bin := t.TempDir()
+	// an ip that knows a neighbour, whatever is asked
+	if err := os.WriteFile(filepath.Join(bin, "ip"), []byte("#!/bin/sh\necho '192.0.2.1 dev eth0 lladdr 02:00:00:00:00:01 REACHABLE'\n"), 0o700); err != nil { //nolint:gosec // G306: a test helper script
+		t.Fatal(err)
+	}
+	script := "set -euo pipefail\nPATH=" + bin + ":$PATH\n" + fn + "\nm=\"$(detect_mac '')\"\necho \"mac=[$m]\"\n"
+	//nolint:gosec // G204: a fragment of this repository's installer
+	out, err := exec.Command("bash", "-c", script).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != "mac=[]" {
+		t.Fatalf("detect_mac with no address: %v %q", err, out)
+	}
+}
+
+// testInverterEnv is a gate.env with an inverter address.
+const testInverterEnv = "INVERTER_IP=192.0.2.10\n"
+
+// TestInstallerGateInverterIP (D-031): the inverter address in gate.env
+// (the last INVERTER_IP line), empty for an install without one or no
+// file — and never a failure under set -euo pipefail.
+func TestInstallerGateInverterIP(t *testing.T) {
+	fn := installerPart(t, `(?s)gate_inverter_ip\(\) \{.*?\n\}`)
+	dir := t.TempDir()
+	env := filepath.Join(dir, "gate.env")
+	for body, want := range map[string]string{
+		"":                                       "",
+		"INVERTER_IP=\nTPROXY_PORT=1\n":          "",
+		testInverterEnv:                          "192.0.2.10",
+		"INVERTER_IP=\nINVERTER_IP=192.0.2.11\n": "192.0.2.11",
+	} {
+		path := env
+		if body == "" {
+			path = filepath.Join(dir, "missing")
+		} else if err := os.WriteFile(env, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		script := "set -euo pipefail\n" + fn + "\nv=\"$(gate_inverter_ip " + path + ")\"\necho \"ip=[$v]\"\n"
+		//nolint:gosec // G204: a fragment of this repository's installer
+		out, err := exec.Command("bash", "-c", script).CombinedOutput()
+		if err != nil || strings.TrimSpace(string(out)) != "ip=["+want+"]" {
+			t.Errorf("%q: %v %q, want %q", body, err, out, want)
+		}
+	}
+}
+
+// TestInstallerSetsInverterLater (D-031): a gate.env seeded without an
+// inverter address takes one from a later install --inverter-ip.
+func TestInstallerSetsInverterLater(t *testing.T) {
+	line := installerPart(t, `sed -i "s/\^INVERTER_IP=\.\*/INVERTER_IP=\$INVERTER_IP/" /etc/foxess-local/gate\.env`)
+	env := filepath.Join(t.TempDir(), "gate.env")
+	if err := os.WriteFile(env, []byte("INVERTER_IP=\nINVERTER_MAC=\nTPROXY_PORT=14431\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := "INVERTER_IP=192.0.2.10\n" + strings.ReplaceAll(line, "/etc/foxess-local/gate.env", env)
+	//nolint:gosec // G204: a fragment of this repository's installer
+	if out, err := exec.Command("bash", "-c", script).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	got, _ := os.ReadFile(env) //nolint:gosec // G304: a test temp file
+	if string(got) != "INVERTER_IP=192.0.2.10\nINVERTER_MAC=\nTPROXY_PORT=14431\n" {
+		t.Fatalf("gate.env:\n%s", got)
+	}
+}

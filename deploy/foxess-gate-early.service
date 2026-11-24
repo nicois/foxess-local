@@ -15,6 +15,9 @@ Conflicts=shutdown.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# no inverter address yet (installer --no-inverter): skipped, inactive
+# rather than failed; nothing to gate
+ExecCondition=/usr/local/lib/foxess-local/apply-gate.sh configured
 ExecStart=/usr/local/lib/foxess-local/apply-gate.sh early
 
 [Install]

@@ -26,6 +26,35 @@ const (
 	gateRuleLoss = "rule-loss"
 )
 
+// gateEnvPath is the gate's settings (root 0644, installer-seeded).
+const gateEnvPath = "/etc/foxess-local/gate.env"
+
+// noInverter reports an install without an inverter address (installer
+// --no-inverter, D-031): gate.env exists and its last INVERTER_IP is
+// empty. A missing or unreadable file (a container, --app-only) is not.
+func noInverter(path string) bool {
+	b, err := os.ReadFile(path) //nolint:gosec // G304: a fixed path (tests pass a temp file)
+	if err != nil {
+		return false
+	}
+	found, ip := false, ""
+	for line := range strings.Lines(string(b)) {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "INVERTER_IP="); ok {
+			found, ip = true, v
+		}
+	}
+	return found && ip == ""
+}
+
+// gateIdleCheck is the gate's readiness line while there is no inverter
+// address: the installer leaves the gate off until one is set.
+func gateIdleCheck() api.Check {
+	return api.Check{
+		ID: "gate", Title: "Egress gate", Status: api.CheckPending,
+		Detail: "not active yet: it starts once the inverter's address is set",
+	}
+}
+
 // gateStatus is one check's result.
 type gateStatus struct {
 	TS     time.Time

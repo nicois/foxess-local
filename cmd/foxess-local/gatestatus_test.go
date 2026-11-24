@@ -77,3 +77,29 @@ func TestWatchGateStatus(t *testing.T) {
 		}
 	})
 }
+
+// TestNoInverter (D-031): gate.env with an empty INVERTER_IP is an
+// install without an inverter (--no-inverter); a missing file (a
+// container, --app-only) or an address is not.
+func TestNoInverter(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gate.env")
+	if noInverter(path) {
+		t.Fatal("missing gate.env counted as no inverter")
+	}
+	for body, want := range map[string]bool{
+		"# comment\nINVERTER_IP=\nINVERTER_MAC=\nTPROXY_PORT=14431\n": true,
+		"INVERTER_IP=192.0.2.10\nINVERTER_MAC=\n":                     false,
+		"INVERTER_IP=\nINVERTER_IP=192.0.2.10\n":                      false, // the last one wins, as in the scripts
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := noInverter(path); got != want {
+			t.Errorf("%q: %v, want %v", body, got, want)
+		}
+	}
+	if c := gateIdleCheck(); c.ID != "gate" || c.Status != api.CheckPending || c.Detail == "" {
+		t.Fatalf("idle gate: %+v", c)
+	}
+}

@@ -388,9 +388,15 @@ const gatewayFix = "Set the inverter's network gateway to this machine's address
 	"minutes or power-cycle the inverter. If it still does not connect, check the gate with " +
 	"`sudo /usr/local/lib/foxess-local/apply-gate.sh show` and `journalctl -u foxess-local`."
 
+// noInverterFix is the cure for an install without an inverter address.
+const noInverterFix = "On an OpenStick appliance, the setup wizard sets it. Otherwise re-run the installer " +
+	"with the inverter's address: `sudo ./installer.sh install --inverter-ip <address>`."
+
 func (s *Server) checkConnected(st State) Check {
 	c := Check{ID: ReadyInverterConnected, Title: "Inverter connected"}
 	switch {
+	case !st.Online && s.noInverter != nil && s.noInverter():
+		c.Status, c.Detail, c.Fix = checkWarn, "no inverter address is configured yet", noInverterFix
 	case st.Online:
 		c.Status, c.Detail = checkOK, "connected, with readings in the last 15 seconds"
 	case st.AsOf != nil && s.clock().Sub(*st.AsOf) < OnlineWindow:

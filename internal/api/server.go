@@ -119,6 +119,9 @@ func (i ServerInfo) capacityWh() int { return i.values().CapacityWh }
 type Server struct {
 	// readyChecks are the host's own readiness checks (WithReadyChecks).
 	readyChecks func() []Check
+	// noInverter reports an install without an inverter address
+	// (WithNoInverter).
+	noInverter func() bool
 	// routes are the registered patterns ("METHOD /path"), in order: the
 	// spec parity test checks api/openapi.yaml against them.
 	routes []string

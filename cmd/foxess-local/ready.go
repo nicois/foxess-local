@@ -96,9 +96,13 @@ func diskCheck(free, total, minFree uint64, err error) api.Check {
 // readyChecks are the host's readiness checks (api.WithReadyChecks).
 func (h *handle) readyChecks() []api.Check {
 	free, total, err := diskspace.Free(h.storeDir())
+	gate := gateStatusCheck(gateStatusPath, h.clk())
+	if noInverter(gateEnvPath) {
+		gate = gateIdleCheck()
+	}
 	return []api.Check{
 		listenerCheck(h.cfg.Server.InverterListen, listening),
 		diskCheck(free, total, minFreeBytes(h.cfg), err),
-		gateStatusCheck(gateStatusPath, h.clk()),
+		gate,
 	}
 }

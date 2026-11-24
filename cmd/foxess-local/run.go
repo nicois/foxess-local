@@ -487,7 +487,7 @@ func (h *handle) buildMux(cfg *config.Config, tok *api.TokenStore) http.Handler 
 	h.scanner = scan.New(scan.GatewayReader(h.gw, scanOrigin), h.clk)
 	h.notifier = notify.New(h.notifyTargets, h.clk, notify.WithOutbox(storeOutbox{h.st}), notify.WithJournal(api.NoticeJournal(h.st, h.bus)))
 	apiH := api.New(h.st, h.gw, h.maint, tok, h.fwd, h.bus, h.clk, api.WithInfo(info), api.WithUpdate(h.upd), api.WithScanner(h.scanner), api.WithCaptures(h.capt),
-		api.WithReadyChecks(h.readyChecks), api.WithNotifier(h.notifier), api.WithSocEstimate(&h.soc.est))
+		api.WithReadyChecks(h.readyChecks), api.WithNoInverter(func() bool { return noInverter(gateEnvPath) }), api.WithNotifier(h.notifier), api.WithSocEstimate(&h.soc.est))
 	h.apiSrv = apiH
 	// the battery forecast follows a force discharge until its expected end
 	fd := apiH.ForceDischargeNow

@@ -42,6 +42,7 @@ cat <<'PREAMBLE'
 #
 # Usage (as root, on the host that is the inverter's network gateway):
 #   installer.sh install --inverter-ip IP [--inverter-mac MAC] [--binary FILE]
+#                        [--no-inverter]
 #                        [--forward-mode off|telemetry_only|full] [--no-start]
 #                        [--gate-only | --app-only] [--fix] [--allow-downgrade]
 #   installer.sh check                  # requirements only, changes nothing
@@ -52,7 +53,10 @@ cat <<'PREAMBLE'
 #   - the binary: --binary, else foxess-local_linux_<arch> next to this
 #     script, else ./foxess-local
 #   - --inverter-ip is required on the first install (it is kept in
-#     /etc/foxess-local/gate.env afterwards)
+#     /etc/foxess-local/gate.env afterwards), unless --no-inverter: then
+#     the gate is installed but stays off, until a later
+#     install --inverter-ip IP sets the address (an OpenStick appliance's
+#     wizard does that)
 #   - idempotent; /etc/foxess-local/config.toml and gate.env are KEPT
 #   - mints the first installer token (printed once) when none exists
 #   - the first install asks what the vendor cloud may receive
@@ -87,7 +91,7 @@ CMD=install
 case "${1:-}" in
 install | check | uninstall) CMD="$1"; shift ;;
 esac
-INVERTER_IP="" INVERTER_MAC="" BIN="" ENABLE=1 PURGE="" GATE=1 APP=1 FORWARD_MODE="" FIX="" DOWNGRADE=""
+INVERTER_IP="" INVERTER_MAC="" BIN="" ENABLE=1 PURGE="" GATE=1 APP=1 FORWARD_MODE="" FIX="" DOWNGRADE="" NO_INVERTER=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--inverter-ip) INVERTER_IP="${2:-}"; shift 2 ;;
@@ -105,7 +109,8 @@ while [ $# -gt 0 ]; do
 	--allow-downgrade) DOWNGRADE=1; shift ;;
 	--gate-only) APP=""; shift ;;
 	--app-only) GATE=""; shift ;;
-	-h | --help) sed -n '2,25p' "$0"; exit 0 ;;
+	--no-inverter) NO_INVERTER=1; shift ;;
+	-h | --help) sed -n '2,30p' "$0"; exit 0 ;;
 	-*) die "unknown option $1 (see --help)" ;;
 	*) BIN="$1"; shift ;; # legacy: installer.sh FILE
 	esac
@@ -209,6 +214,13 @@ valid_ipv4() {
 		n=$((n + 1))
 	done
 	[ "$n" = 4 ]
+}
+
+# gate_inverter_ip [FILE]: the inverter address in gate.env (its last
+# INVERTER_IP line); empty when there is none yet (--no-inverter) or no
+# file. Never fails.
+gate_inverter_ip() {
+	{ sed -n 's/^INVERTER_IP=//p' "${1:-/etc/foxess-local/gate.env}" 2>/dev/null || true; } | tail -1
 }
 
 # version_older A B: A and B are release tags (vX.Y.Z) and A is the older.
@@ -359,8 +371,13 @@ if [ -n "$APP" ]; then
 		die "$BIN is $NEW_VER, older than the installed $OLD_VER (updated since?): use the newer release's files, or --allow-downgrade"
 	fi
 fi
+if [ -n "$NO_INVERTER" ]; then
+	[ -z "$INVERTER_IP" ] || die "--no-inverter and --inverter-ip: give one or the other"
+	[ -n "$GATE" ] || die "--no-inverter is about the gate: not with --app-only"
+	[ -z "$(gate_inverter_ip)" ] || die "--no-inverter: the inverter address is already set ($(gate_inverter_ip)); change it with --inverter-ip, or uninstall first"
+fi
 if [ -n "$GATE" ] && [ ! -f /etc/foxess-local/gate.env ]; then
-	[ -n "$INVERTER_IP" ] || die "--inverter-ip is required on the first install (the inverter's LAN address)"
+	[ -n "$INVERTER_IP" ] || [ -n "$NO_INVERTER" ] || die "--inverter-ip is required on the first install (the inverter's LAN address; --no-inverter installs without one)"
 fi
 if [ -n "$INVERTER_IP" ]; then
 	valid_ipv4 "$INVERTER_IP" || die "--inverter-ip: not an IPv4 address: $INVERTER_IP"
@@ -404,6 +421,8 @@ fi
 # this machine yet, and under pipefail a grep with no match would stop
 # the install.
 detect_mac() {
+	# no address: `ip neigh show ""` would list every neighbour
+	[ -n "$1" ] || return 0
 	{ ip neigh show "$1" 2>/dev/null || true; } | { grep -oE 'lladdr ([0-9a-f]{2}:){5}[0-9a-f]{2}' || true; } | head -1 | cut -d' ' -f2
 }
 
@@ -447,7 +466,7 @@ cat <<'GATEENV'
 		fi
 		# the dongle's MAC (audit S2): given, or detected once and kept
 		if [ -z "$INVERTER_MAC" ] && ! grep -q '^INVERTER_MAC=.' /etc/foxess-local/gate.env; then
-			INVERTER_MAC="$(detect_mac "$(sed -n 's/^INVERTER_IP=//p' /etc/foxess-local/gate.env | tail -1)")"
+			INVERTER_MAC="$(detect_mac "$(gate_inverter_ip)")"
 		fi
 		if [ -n "$INVERTER_MAC" ] && ! grep -q "^INVERTER_MAC=$INVERTER_MAC\$" /etc/foxess-local/gate.env; then
 			sed -i '/^INVERTER_MAC=/d' /etc/foxess-local/gate.env
@@ -467,8 +486,12 @@ INVERTER_IP=$INVERTER_IP
 INVERTER_MAC=$INVERTER_MAC
 TPROXY_PORT=14431
 __FOXESS_gate_env__
-		say "seeded /etc/foxess-local/gate.env (inverter $INVERTER_IP${INVERTER_MAC:+, MAC $INVERTER_MAC})"
-		[ -n "$INVERTER_MAC" ] || say "  the dongle's MAC was not found (it has not talked to this machine yet): re-run with --inverter-mac, or re-run after it connects"
+		if [ -z "$INVERTER_IP" ]; then
+			say "seeded /etc/foxess-local/gate.env with no inverter address: the gate stays off until install --inverter-ip IP"
+		else
+			say "seeded /etc/foxess-local/gate.env (inverter $INVERTER_IP${INVERTER_MAC:+, MAC $INVERTER_MAC})"
+		fi
+		[ -z "$INVERTER_IP" ] || [ -n "$INVERTER_MAC" ] || say "  the dongle's MAC was not found (it has not talked to this machine yet): re-run with --inverter-mac, or re-run after it connects"
 	fi
 fi
 GATEENV
@@ -529,10 +552,15 @@ $MINT"
 fi
 
 # ---- start ----
+# the gate acts on one address: without it (--no-inverter) it stays off
+GATE_ON="$GATE"
+[ -z "$GATE" ] || [ -n "$(gate_inverter_ip)" ] || GATE_ON=""
 if [ -n "$ENABLE" ]; then
-	if [ -n "$GATE" ]; then
+	if [ -n "$GATE_ON" ]; then
 		systemctl enable foxess-gate-early.service
 		systemctl enable --now foxess-gate.service foxess-gate-check.timer
+	elif [ -n "$GATE" ]; then
+		say "the gate is installed but off: no inverter address yet"
 	fi
 	if [ -n "$APP" ]; then
 		systemctl enable foxess-local.service
@@ -567,13 +595,16 @@ ui_ok() { # GET /healthz on the local listener (no curl needed)
 }
 inverter_connected() {
 	local ip
-	ip="$(sed -n 's/^INVERTER_IP=//p' /etc/foxess-local/gate.env 2>/dev/null | tail -1 || true)"
+	ip="$(gate_inverter_ip)"
 	[ -n "$ip" ] && ss -tn state established '( sport = :14431 )' 2>/dev/null | grep -q "$ip:"
 }
 if [ -n "$ENABLE" ]; then
 	echo
 	echo "Checks:"
-	if [ -n "$GATE" ]; then
+	if [ -n "$GATE" ] && [ -z "$GATE_ON" ]; then
+		echo "  [--]   gate off (no inverter address yet)"
+	fi
+	if [ -n "$GATE_ON" ]; then
 		check "gate rules loaded" hard nft list table ip foxess_gate
 		check "boot-time drop enabled" hard systemctl is-enabled -q foxess-gate-early.service
 		check "gate check timer active" hard systemctl is-active -q foxess-gate-check.timer
@@ -584,7 +615,7 @@ if [ -n "$ENABLE" ]; then
 		check "web UI answering on port 18080" hard ui_ok
 		check "installer token exists" hard test -s /var/lib/foxess-local/tokens.json
 	fi
-	if [ -n "$GATE" ]; then
+	if [ -n "$GATE_ON" ]; then
 		check "inverter connected (not yet: set its gateway to this machine)" soft inverter_connected
 	fi
 	if [ -n "$FAILED" ]; then
@@ -608,8 +639,13 @@ if [ -z "$ENABLE" ]; then
 	echo "              (or re-run without --no-start)"
 fi
 [ -n "$APP" ] && echo "  Web UI:     http://${HOST:-this-host}:18080  (sign in with the token)"
-[ -n "$GATE" ] && echo "  Inverter:   its network gateway must be this host (set in the inverter's"
-[ -n "$GATE" ] && echo "              Wi-Fi/LAN settings); it reconnects within minutes, or power-cycle it"
+if [ -n "$GATE_ON" ]; then
+	echo "  Inverter:   its network gateway must be this host (set in the inverter's"
+	echo "              Wi-Fi/LAN settings); it reconnects within minutes, or power-cycle it"
+elif [ -n "$GATE" ]; then
+	echo "  Inverter:   none yet; set it with: sudo $0 install --inverter-ip IP"
+	echo "              (an OpenStick appliance's wizard does this)"
+fi
 echo "  Logs:       journalctl -u foxess-local -u foxess-gate"
 echo "  Updates:    the web UI offers them (More → Settings → Updates); no root needed"
 echo "  Remove:     sudo $0 uninstall   (then set the inverter's gateway back to your router)"

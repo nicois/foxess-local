@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -86,5 +87,29 @@ func TestReadyzHostChecks(t *testing.T) {
 	rec = h.do(t, "GET", "/readyz", "", nil)
 	if b := decodeReady(t, rec.Code, rec.Body.Bytes()); rec.Code != http.StatusOK || b.Status != readyDegraded {
 		t.Fatalf("disk warning: %d %+v", rec.Code, b)
+	}
+}
+
+// TestReadyzNoInverter (D-031): installed without an inverter address
+// (installer --no-inverter, an OpenStick awaiting its wizard), the
+// inverter check is a warning that says so, not a failure: the service
+// is degraded, not broken. The setup checklist says the same.
+func TestReadyzNoInverter(t *testing.T) {
+	h := newHarness(t)
+	h.srv.noInverter = func() bool { return true }
+	rec := h.do(t, "GET", "/readyz", RoleReadOnly, nil)
+	b := decodeReady(t, rec.Code, rec.Body.Bytes())
+	st, detail, _ := b.check(ReadyInverterConnected)
+	if rec.Code != http.StatusOK || b.Status != readyDegraded || st != checkWarn || !strings.Contains(detail, "no inverter address") {
+		t.Fatalf("no inverter: %d %+v", rec.Code, b)
+	}
+	if c := h.srv.checkConnected(State{}); c.Status != checkWarn || c.Fix == "" {
+		t.Fatalf("setup check: %+v", c)
+	}
+	// live readings win (the address was set since)
+	h.seedTele(h.clk.get().Add(-2*time.Second), 100, 0, 100, 100, 0, 50, 2)
+	b = decodeReady(t, 0, h.do(t, "GET", "/readyz", "", nil).Body.Bytes())
+	if st, _, _ := b.check(ReadyInverterConnected); st != checkOK {
+		t.Fatalf("online: %+v", b)
 	}
 }

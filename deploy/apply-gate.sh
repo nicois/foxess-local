@@ -6,7 +6,7 @@
 # 2026-11-17 (audit S2, S3). Mechanism: nftables; the TPROXY fwmark
 # routing uses iproute2 (mark 1 / table 100).
 #
-# Usage: apply-gate.sh {early|up|down|show}
+# Usage: apply-gate.sh {early|up|down|show|configured}
 #   early loads foxess_gate_boot: a drop of everything the inverter would
 #         forward, from its IP (and MAC). Run by foxess-gate-early.service
 #         before the network comes up (it needs no route), so the
@@ -22,6 +22,9 @@
 #         if this script created them — the fwmark routing. The
 #         one-command rollback.
 #   show  dumps the live gate state (rules, counters, fwmark routing).
+#   configured  exits 0 when there is an inverter address, 1 (saying so)
+#         when there is none yet (installer --no-inverter): the units'
+#         ExecCondition, so they stay inactive rather than failed.
 #
 # Environment overrides: INVERTER_IP (no default: gate.env), INVERTER_MAC
 # (optional: gate.env), GATEWAY_IP (default: auto-detected as the source
@@ -46,6 +49,11 @@ fi
 
 GATE_NFT="${GATE_NFT:-/etc/foxess-local/gate.nft}"
 INVERTER_IP="${INVERTER_IP:-}"
+if [ "${1:-}" = configured ]; then
+    [ -z "$INVERTER_IP" ] || exit 0
+    echo "apply-gate: no inverter address yet (INVERTER_IP is empty in $GATE_ENV): the gate stays off until one is set" >&2
+    exit 1
+fi
 if [ -z "$INVERTER_IP" ]; then
     echo "apply-gate: INVERTER_IP is not set (add it to /etc/foxess-local/gate.env)" >&2
     exit 2
@@ -225,5 +233,5 @@ case "${1:-up}" in
     up) cmd_up ;;
     down) cmd_down ;;
     show) cmd_show ;;
-    *) echo "usage: apply-gate.sh {early|up|down|show}" >&2; exit 2 ;;
+    *) echo "usage: apply-gate.sh {early|up|down|show|configured}" >&2; exit 2 ;;
 esac

@@ -17,6 +17,13 @@ func WithReadyChecks(f func() []Check) ServerOption {
 	return func(s *Server) { s.readyChecks = f }
 }
 
+// WithNoInverter tells the server whether the host was installed without
+// an inverter address (installer --no-inverter, D-031): until one is
+// set, "not connected" is expected, a warning rather than a failure.
+func WithNoInverter(f func() bool) ServerOption {
+	return func(s *Server) { s.noInverter = f }
+}
+
 type readyView struct {
 	Status string  `json:"status"`
 	Checks []Check `json:"checks"`
