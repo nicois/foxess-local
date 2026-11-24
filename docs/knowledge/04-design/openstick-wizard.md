@@ -43,6 +43,11 @@ Checked on a freshly flashed UZ801 v3.0 (OpenStick Debian 12.7, kernel
   or is on the data logger's network as a client. Every flow that
   changes role drops the operator's phone.
 - **2.4 GHz only** (NetworkManager: `5GHZ: no`).
+- **The hotspot's channel is pinned to 6.** The stick runs in the WORLD
+  regulatory domain. Left unset, NetworkManager derives the channel from
+  the SSID, and on channel 12 or 13 `wpa_supplicant` fails with "Failed
+  to start AP functionality" (seen on the test stick: every try fails).
+  Channels 1, 6 and 11 are allowed everywhere.
 - **USB networking runs alongside the Wi-Fi.** The image brings up an
   RNDIS gadget, `usb0`, at `192.168.6.1/24` in NetworkManager shared
   mode (it hands the host an address). A laptop plugged into the stick

@@ -224,7 +224,7 @@ func TestHotspot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"mode=ap", "autoconnect=false", "address1=" + HotspotAddr.String() + "/24", "method=manual", "proto=rsn"} {
+	for _, want := range []string{"mode=ap", "autoconnect=false", "address1=" + HotspotAddr.String() + "/24", "method=manual", "proto=rsn", "channel=6"} {
 		if !strings.Contains(string(b), want+"\n") {
 			t.Errorf("hotspot keyfile lacks %q:\n%s", want, b)
 		}

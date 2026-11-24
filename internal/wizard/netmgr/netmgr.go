@@ -40,6 +40,9 @@ var HotspotAddr = netip.MustParseAddr("10.42.0.1")
 
 const hotspotBits = 24
 
+// hotspotChannel is the hotspot's 2.4 GHz channel (see hotspotKeyfile).
+const hotspotChannel = 6
+
 // keyfileMode keeps profiles (they hold passwords) root-only.
 const keyfileMode = 0o600
 
@@ -333,7 +336,11 @@ func hotspotKeyfile(iface, ssid, psk string) (string, error) {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "[connection]\nid=%s\nuuid=%s\ntype=wifi\ninterface-name=%s\nautoconnect=false\n\n", hotspotID, uuid, iface)
-	fmt.Fprintf(&b, "[wifi]\nmode=ap\nband=bg\nssid=%s\n\n", ssidBytes(ssid))
+	// The channel is pinned: left unset, NetworkManager picks one from
+	// the SSID, and channels 12-13 cannot start a network in the stick's
+	// WORLD regulatory domain ("Failed to start AP functionality"). 1, 6
+	// and 11 are allowed everywhere.
+	fmt.Fprintf(&b, "[wifi]\nmode=ap\nband=bg\nchannel=%d\nssid=%s\n\n", hotspotChannel, ssidBytes(ssid))
 	fmt.Fprintf(&b, "[wifi-security]\nkey-mgmt=wpa-psk\nproto=rsn\npairwise=ccmp\ngroup=ccmp\npsk=%s\n\n", escapeValue(psk))
 	fmt.Fprintf(&b, "[ipv4]\nmethod=manual\naddress1=%s/%d\n\n[ipv6]\nmethod=disabled\n", HotspotAddr, hotspotBits)
 	return b.String(), nil
