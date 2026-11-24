@@ -67,9 +67,14 @@ pushperm="$(gh api "repos/$REPO" --jq '.permissions.push // false' 2>/dev/null |
 # 1) the local assets (release.sh also refuses a local go.mod replace).
 echo "==> building $DIST/ for $VERSION"
 bash deploy/release.sh "$VERSION" "$REPO" "$DIST"
-if [ -s "$DIST/SHA256SUMS.minisig" ]; then
-	echo "    keeping the existing $DIST/SHA256SUMS.minisig"
+# a signature left from an earlier run is kept only when it signs this
+# SHA256SUMS (a re-run after signing); one for another version is reset,
+# so the signing step below asks for a new one
+if [ -s "$DIST/SHA256SUMS.minisig" ] && bash deploy/verify-release.sh "$DIST" >/dev/null 2>&1; then
+	echo "    keeping the existing $DIST/SHA256SUMS.minisig (it verifies)"
 else
+	[ ! -s "$DIST/SHA256SUMS.minisig" ] || echo "    discarding a $DIST/SHA256SUMS.minisig that does not sign this build"
+	rm -f "$DIST/SHA256SUMS.minisig"
 	# the signer is another account: an existing file it may write is all
 	# minisign needs (it truncates in place)
 	install -m 0666 /dev/null "$DIST/SHA256SUMS.minisig"
@@ -85,9 +90,11 @@ else
 	echo "==> waiting for the CI draft (workflow 'release', tag $VERSION; ${CI_TIMEOUT}s budget)"
 	deadline=$(( $(date +%s) + CI_TIMEOUT ))
 	while :; do
-		line="$(gh run list --workflow release.yml --limit 30 \
-			--template '{{range .}}{{.DatabaseID}}|{{.HeadBranch}}|{{.Status}}|{{.Conclusion}}
-{{end}}' | grep -F "|$VERSION|" | head -1 || true)"
+		# gh needs --json with --jq; a failing call (network) is retried
+		line="$(gh run list --repo "$REPO" --workflow release.yml --limit 30 \
+			--json databaseId,headBranch,status,conclusion \
+			--jq '.[] | "\(.databaseId)|\(.headBranch)|\(.status)|\(.conclusion)"' |
+			grep -F "|$VERSION|" | head -1 || true)"
 		if [ -n "$line" ]; then
 			IFS='|' read -r id _ status conclusion <<<"$line"
 			if [ "$status" = "completed" ]; then
