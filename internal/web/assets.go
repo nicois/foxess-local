@@ -46,6 +46,9 @@ func loadAsset(name string) *asset {
 	if err != nil {
 		return nil
 	}
+	if name == "static/index.html" {
+		data = tagShell(data)
+	}
 	assets[name] = prepare(data, name)
 	return assets[name]
 }
@@ -64,6 +67,7 @@ func loadHintShell(hint string) *asset {
 	if err != nil {
 		return nil
 	}
+	base = tagShell(base)
 	body := base
 	if before, after, ok := bytes.Cut(base, []byte(htmlOpen)); ok {
 		open := `<html lang="en" data-lang-hint="` + hint + `">`

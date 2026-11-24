@@ -38,6 +38,17 @@ version; anything else bumps the patch version.
   after the previous one is confirmed. The old burst could overflow the
   KH10's write pipeline, which silently drops the overflow — a schedule
   push could lose its tail while reporting success.
+- A browser no longer keeps running an older release's UI after an
+  update. Assets kept one URL across releases, and a browser may reuse a
+  cached file without asking (back/forward, a restored or discarded
+  tab), so a page could show an old dashboard from a new service. The
+  shell now names every asset under a tag of the UI's content (a new
+  release is new URLs, cached for good), and the page compares its tag
+  with the service's on load, on reconnect and when shown again, and
+  reloads when they differ.
+- The power-flow diagram's arrows sit in the middle of the visible part
+  of each line, not at a fixed point that the boxes could push off
+  centre.
 - A paced schedule push counts as one schedule write against the write
   budget again, not one per frame: since the pacing (v0.5.0-rc.2) each
   push spent 13, so one edit used up the default budget of 10 and

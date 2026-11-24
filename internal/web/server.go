@@ -50,10 +50,19 @@ func serveUI(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		writeAsset(w, r, a, cacheAssets, "Accept-Language")
+	case p == "/static/ui-tag":
+		h.Set("Cache-Control", "no-store")
+		h.Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte(uiTag() + "\n"))
 	case strings.HasPrefix(p, "/static/"):
-		name := strings.TrimPrefix(p, "/")
+		name, tag, tagged := splitTag(strings.TrimPrefix(p, "/"))
 		cc := cacheAssets
-		if strings.HasPrefix(name, "static/vendor/") {
+		switch {
+		case tagged && tag == uiTag():
+			cc = cacheVendor // content-addressed: never changes
+		case tagged:
+			cc = "no-store" // another release's page: today's file, not kept
+		case strings.HasPrefix(name, "static/vendor/"):
 			cc = cacheVendor
 		}
 		serveFile(w, r, name, cc)

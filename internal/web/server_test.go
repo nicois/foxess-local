@@ -66,7 +66,8 @@ func TestIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, ref := range []string{`src="static/vendor/htmx.min.js"`, `src="static/vendor/hx-sse.min.js"`} { // relative: a proxy prefix works
+	vendor := "static/" + tagPrefix + uiTag() + "/vendor/"
+	for _, ref := range []string{`src="` + vendor + `htmx.min.js"`, `src="` + vendor + `hx-sse.min.js"`} { // relative: a proxy prefix works
 		if !strings.Contains(string(body), ref) {
 			t.Errorf("index.html does not reference the vendored script %s", ref)
 		}

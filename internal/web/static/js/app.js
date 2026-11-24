@@ -722,7 +722,10 @@ document.body.addEventListener("htmx:sse:after:connection", () => {
   // decides whether the page reloads (checkVersion)
   const reconnect = S.feed !== "connected" && S.pageVersion;
   setFeed("connected");
-  if (reconnect) refreshMeta();
+  if (reconnect) {
+    refreshMeta();
+    checkUITag();
+  }
 });
 
 document.body.addEventListener("htmx:sse:error", (e) => {
@@ -1185,13 +1188,60 @@ function paintFlowLine(k, d) {
   const ar = byId("ar-" + k);
   const g = FLOW_LINES.find(([key]) => key === k);
   if (!ar || !g) return;
-  const [, x1, y1, x2, y2, t] = g;
+  const [, x1, y1, x2, y2, t0] = g;
+  const t = visibleMid(ar.closest(".flow-box"), x1, y1, x2, y2) ?? t0;
   const deg = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI + (d === "rev" ? 180 : 0);
   // the arrow is a nested svg at a percentage position, its path rotated
   ar.setAttribute("x", fx(x1 + (x2 - x1) * t));
   ar.setAttribute("y", fy(y1 + (y2 - y1) * t));
   ar.firstElementChild?.setAttribute("transform", `rotate(${deg})`);
   ar.setAttribute("class", "ar s-" + k + " " + d);
+}
+
+// repaintArrows re-places the arrows (in their current directions)
+// when the layout moves under them: a resize, the web font arriving.
+function repaintArrows() {
+  for (const [k] of FLOW_LINES) {
+    const cl = byId("ar-" + k)?.classList;
+    if (cl) paintFlowLine(k, cl.contains("fwd") ? "fwd" : cl.contains("rev") ? "rev" : "idle");
+  }
+}
+window.addEventListener("resize", repaintArrows);
+document.fonts?.ready.then(repaintArrows);
+
+// visibleMid is where along a line (0–1, from → to) its visible part
+// is centred: the nodes, the switchboard's dot and its label cover the
+// line's ends, by amounts that depend on the box's shape and the text,
+// so a fixed fraction lands off-centre (owner, 2026-11-25). Every line
+// is vertical or horizontal: each covering box hides one interval of
+// it. The longest uncovered stretch wins; null before layout (the
+// fallback fraction is used).
+function visibleMid(box, x1, y1, x2, y2) {
+  const b = box?.getBoundingClientRect();
+  if (!b?.width || !b.height) return null;
+  const vertical = x1 === x2;
+  // the line's start and end on its own axis, and its place on the other, px
+  const a1 = vertical ? b.top + b.height * y1 / 300 : b.left + b.width * x1 / 400;
+  const a2 = vertical ? b.top + b.height * y2 / 300 : b.left + b.width * x2 / 400;
+  const across = vertical ? b.left + b.width * x1 / 400 : b.top + b.height * y1 / 300;
+  if (a1 === a2) return null;
+  const covers = [];
+  for (const el of box.querySelectorAll(".node, .board-dot, .board-label")) {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) continue; // hidden (no backup port)
+    const [lo, hi, c0, c1] = vertical ? [r.top, r.bottom, r.left, r.right] : [r.left, r.right, r.top, r.bottom];
+    if (across < c0 || across > c1) continue;
+    const u = (lo - a1) / (a2 - a1), v = (hi - a1) / (a2 - a1);
+    const c = [Math.max(0, Math.min(u, v)), Math.min(1, Math.max(u, v))];
+    if (c[0] < c[1]) covers.push(c); // beyond the line's ends: covers none of it
+  }
+  covers.sort((p, q) => p[0] - q[0]);
+  let best = null, from = 0;
+  for (const [lo, hi] of [...covers, [1, 1]]) {
+    if (lo > from && (!best || lo - from > best[1] - best[0])) best = [from, lo];
+    from = Math.max(from, hi);
+  }
+  return best ? (best[0] + best[1]) / 2 : null;
 }
 
 // The KH's AC output (ac_port_w) and household load (load_w) both
@@ -3790,6 +3840,7 @@ window.addEventListener("hashchange", () => {
 const RETRY_S = [1, 2, 3, 5];
 
 async function init() {
+  checkUITag();
   if (!S.token) {
     // No stored token: probe public read-only access (config flag,
     // default on — spec §5.5) before falling back to the gate.
@@ -3845,7 +3896,14 @@ function checkVersion(v) {
     S.pageVersion = v;
     return;
   }
-  if (v === S.pageVersion || S.reloadPending) return;
+  if (v === S.pageVersion) return;
+  reloadIntoNew(v);
+}
+
+// reloadIntoNew reloads the page into the release the service runs —
+// after any unsaved edit is saved or discarded.
+function reloadIntoNew(v) {
+  if (S.reloadPending) return;
   S.reloadPending = true;
   if (!editing()) {
     location.reload();
@@ -3858,5 +3916,38 @@ function checkVersion(v) {
     location.reload();
   }, 2000);
 }
+
+// PAGE_TAG is the UI tag this code was loaded under (static/v-<tag>/,
+// named by the shell): a hash of the release's UI files. A browser can
+// run a cached page without asking the service (back/forward, a
+// restored or discarded tab), and the version from GET /config cannot
+// tell: it is the service's, not the page's. So the page compares its
+// tag with the service's (static/ui-tag) on load, on every reconnect
+// and when it is shown again, and reloads when they differ — at most
+// once a minute, so a proxy that keeps serving an old shell never
+// loops.
+const PAGE_TAG = /\/static\/v-([0-9a-f]+)\//.exec(import.meta.url)?.[1] ?? null;
+const RELOAD_KEY = "foxess-ui-reload";
+
+async function checkUITag() {
+  if (!PAGE_TAG || S.reloadPending) return;
+  let tag = "";
+  try {
+    const r = await fetch(new URL("static/ui-tag", document.baseURI), { cache: "no-store" });
+    if (!r.ok) return;
+    tag = (await r.text()).trim();
+  } catch { return; /* not answering: checked again on reconnect */ }
+  if (!tag || tag === PAGE_TAG) return;
+  try {
+    if (Date.now() - (Number(sessionStorage.getItem(RELOAD_KEY)) || 0) < 60_000) return;
+    sessionStorage.setItem(RELOAD_KEY, String(Date.now()));
+  } catch { /* no storage: reloadPending still allows one reload */ }
+  reloadIntoNew(S.cfg?.version ?? tr("the new release"));
+}
+
+window.addEventListener("pageshow", (e) => { if (e.persisted) checkUITag(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") checkUITag();
+});
 
 init();

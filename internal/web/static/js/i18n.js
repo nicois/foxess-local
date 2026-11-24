@@ -89,7 +89,8 @@ const langSelect = document.getElementById("lang-select");
 if (langSelect) langSelect.value = lang;
 if (lang !== "en") {
   try {
-    const r = await fetch(new URL(`static/i18n/${lang}.json`, document.baseURI));
+    // beside this module: the catalogue of the same release (its tag)
+    const r = await fetch(new URL(`../i18n/${lang}.json`, import.meta.url));
     if (r.ok) cat = await r.json();
   } catch { /* offline or blocked: English */ }
 }

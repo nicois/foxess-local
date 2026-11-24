@@ -116,7 +116,7 @@ func TestModulePreload(t *testing.T) {
 		t.Fatalf("app.js imports: found %d, want i18n.js, charts.js, socview.js at least", len(imports))
 	}
 	for _, im := range imports {
-		m := "static/js/" + im[1]
+		m := "static/" + tagPrefix + uiTag() + "/js/" + im[1]
 		if !strings.Contains(string(body), `<link rel="modulepreload" href="`+m+`">`) {
 			t.Errorf("index.html does not preload %s", m)
 		}
