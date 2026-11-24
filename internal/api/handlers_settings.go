@@ -300,6 +300,10 @@ const (
 	CheckPending = checkPending
 )
 
+// ReadyInverterConnected is the readiness check for live inverter
+// readings. The OpenStick wizard reads it (D-031).
+const ReadyInverterConnected = "inverter_connected"
+
 // Check is one line of the setup checklist or the readiness report: a
 // fix whenever it is not ok.
 type Check struct {
@@ -385,7 +389,7 @@ const gatewayFix = "Set the inverter's network gateway to this machine's address
 	"`sudo /usr/local/lib/foxess-local/apply-gate.sh show` and `journalctl -u foxess-local`."
 
 func (s *Server) checkConnected(st State) Check {
-	c := Check{ID: "inverter_connected", Title: "Inverter connected"}
+	c := Check{ID: ReadyInverterConnected, Title: "Inverter connected"}
 	switch {
 	case st.Online:
 		c.Status, c.Detail = checkOK, "connected, with readings in the last 15 seconds"
