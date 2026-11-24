@@ -62,7 +62,7 @@ func TestUpDown(t *testing.T) {
 	args := strings.Join(p.args, " ")
 	for _, want := range []string{
 		"dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--bind-interfaces",
-		"--listen-address=10.42.0.1", "--address=/#/10.42.0.1", "--no-resolv",
+		"--listen-address=10.42.0.1", "--address=/#/192.0.2.1", "--no-resolv",
 		"--dhcp-range=10.42.0.10,10.42.0.200,10m",
 		"--dhcp-leasefile=" + filepath.Join(dir, "dnsmasq.leases"),
 	} {
@@ -70,8 +70,14 @@ func TestUpDown(t *testing.T) {
 			t.Errorf("dnsmasq args lack %q: %s", want, args)
 		}
 	}
-	if !slices.Contains(l.addrs, "10.42.0.1:80") {
-		t.Errorf("no port-80 listener: %v", l.addrs)
+	// Android takes a check name that resolves to a private address for
+	// "no internet" and sends no HTTP probe (test stick, 2026-11-24): DNS
+	// answers with the hotspot's extra, non-private address, and the
+	// redirect listens on both
+	for _, want := range []string{"10.42.0.1:80", "192.0.2.1:80"} {
+		if !slices.Contains(l.addrs, want) {
+			t.Errorf("no port-80 listener on %s: %v", want, l.addrs)
+		}
 	}
 	// Up again is a no-op
 	if err := c.Up(context.Background()); err != nil || p.started != 1 {
@@ -79,7 +85,7 @@ func TestUpDown(t *testing.T) {
 	}
 	c.Down()
 	c.Down()
-	if p.stopped != 1 || l.closed != 1 {
+	if p.stopped != 1 || l.closed != 2 {
 		t.Fatalf("Down: stopped %d closed %d", p.stopped, l.closed)
 	}
 }

@@ -1,8 +1,8 @@
 // Package captive runs the hotspot's captive portal (design D-031,
 // spike S1): the wizard's own dnsmasq, bound to the hotspot address
-// only, answers every name with that address and hands out leases; a
-// port-80 listener on the same address catches the phones' captive
-// probes. Both run only while the hotspot is up.
+// only, hands out leases and answers every name with the hotspot's
+// non-private second address (netmgr.CaptiveAddr); port-80 listeners on
+// both addresses catch the phones' captive probes. Both run only while the hotspot is up.
 package captive
 
 import (
@@ -85,19 +85,25 @@ func (p *Portal) Up(ctx context.Context) error {
 	stopDNS, err := p.Procs.Start(ctx, "dnsmasq",
 		"--keep-in-foreground", "--conf-file=/dev/null", "--no-hosts", "--no-resolv",
 		"--bind-interfaces", "--except-interface=lo", "--listen-address="+a,
-		"--address=/#/"+a,
+		"--address=/#/"+netmgr.CaptiveAddr.String(), // not private: see netmgr.CaptiveAddr
 		"--dhcp-range="+poolStart+","+poolEnd+","+lease,
 		"--dhcp-option=option:router,"+a, "--dhcp-option=option:dns-server,"+a,
 		"--dhcp-leasefile="+filepath.Join(dir, "dnsmasq.leases"))
 	if err != nil {
 		return fmt.Errorf("captive: dnsmasq: %w", err)
 	}
-	stopHTTP, err := p.Listen.Serve(net.JoinHostPort(a, "80"), p.Handler)
-	if err != nil {
-		stopDNS()
-		return fmt.Errorf("captive: port 80: %w", err)
+	stops := []func(){stopDNS}
+	for _, addr := range []string{a, netmgr.CaptiveAddr.String()} {
+		stopHTTP, err := p.Listen.Serve(net.JoinHostPort(addr, "80"), p.Handler)
+		if err != nil {
+			for _, f := range stops {
+				f()
+			}
+			return fmt.Errorf("captive: port 80 on %s: %w", addr, err)
+		}
+		stops = append([]func(){stopHTTP}, stops...)
 	}
-	p.stop = []func(){stopHTTP, stopDNS}
+	p.stop = stops
 	return nil
 }
 

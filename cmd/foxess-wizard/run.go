@@ -79,7 +79,7 @@ func runCmd(args []string, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	radio := &netmgr.NM{Run: netmgr.Exec{}, Iface: iface, KeyfileDir: netmgr.KeyfileDir}
+	radio := &netmgr.NM{Run: netmgr.Exec{}, Iface: iface, KeyfileDir: netmgr.KeyfileDir, Host: id.Host}
 	l := &loop.Loop{
 		Radio:        radio,
 		Lights:       led.New(led.Root),

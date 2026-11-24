@@ -7,6 +7,7 @@ const byId = (id) => document.getElementById(id);
 const POLL_MS = 5000;
 let last = null;
 let pendingJoin = null;
+let joinSentAt = 0; // ms: when the stick accepted the join (0: none pending)
 
 const sel = byId("lang");
 for (const [code, name] of LANGS) sel.add(new Option(name, code, false, code === currentLang()));
@@ -63,9 +64,34 @@ function joinText(j) {
   }
 }
 
+// showAfterJoin replaces the page with what to do next: the hotspot is
+// about to go, and this page cannot update until the device is back on
+// a network the stick is on.
+function showAfterJoin(ssid) {
+  const host = (last?.host ?? "foxess.local").replace(/\.local$/, "");
+  const url = `http://${host}.local:18081/`;
+  byId("after-join-text").textContent = tr("The stick has left this hotspot to join {ssid}. That takes up to a minute. Then watch its light:", { ssid });
+  byId("after-join-green").textContent = tr("Solid green: it worked. Put this device back on {ssid} and open:", { ssid });
+  const a = byId("after-join-link");
+  a.href = url;
+  a.textContent = url;
+  byId("after-join-red").textContent = tr("Blinking red: it could not join. Rejoin the {hotspot} Wi-Fi network and this page will say why.", { hotspot: host });
+  byId("after-join-note").textContent = tr("If that address does not open, find {host} in your router's list of devices and open its address with :18081 at the end.", { host });
+  for (const id of ["status", "networks", "hotspot", "confirm"]) byId(id).hidden = true;
+  byId("after-join").hidden = false;
+  window.scrollTo(0, 0);
+}
+
 function render(s) {
   last = s;
   byId("login").hidden = true;
+  if (joinSentAt) {
+    // a result newer than the join this page sent: back on the hotspot
+    const fresh = s.join && s.join.age_s * 1000 <= Date.now() - joinSentAt;
+    if (!fresh) return;
+    joinSentAt = 0;
+    byId("after-join").hidden = true;
+  }
   byId("status").hidden = false;
   byId("status-title").textContent = title(s);
   byId("status-body").textContent = body(s);
@@ -126,10 +152,12 @@ byId("join-form").addEventListener("submit", (e) => {
     return;
   }
   pendingJoin = { ssid, password };
-  const url = `http://${last?.host ?? "foxess.local"}:18081`;
-  confirm(tr("The stick will now leave this hotspot and join {ssid}. If its light turns solid green, join {ssid} again on this device and open {url}. If the light blinks red, rejoin this hotspot: this page will say what went wrong.", { ssid, url }), async () => {
+  confirm(tr("The stick will leave this hotspot and join {ssid}.", { ssid }), async () => {
     const r = await post("api/join", pendingJoin);
-    if (r.status === 400) {
+    if (r.status === 202) {
+      joinSentAt = Date.now();
+      showAfterJoin(ssid);
+    } else if (r.status === 400) {
       byId("join-result").hidden = false;
       byId("join-result").className = "error";
       byId("join-result").textContent = tr("That network name or password can't be used.");

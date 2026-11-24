@@ -103,6 +103,17 @@ Checked on a freshly flashed UZ801 v3.0 (OpenStick Debian 12.7, kernel
   every shared connection the same `dnsmasq-shared.d`, so an
   `address=/#/` line there would also catch the USB link. `dnsmasq` is
   an OS program the wizard runs, like `nmcli`.
+- **Android ignores a check name that resolves to a private address**
+  (S3, a Samsung phone, Android 16, 2026-11-24). With every name
+  answered as `10.42.0.1`, the phone looked up
+  `connectivitycheck.gstatic.com` but never sent its plain-HTTP check:
+  it reported "connected without internet", showed no sign-in page,
+  and kept the browser on mobile data. The hotspot therefore carries a
+  second, non-private address, `192.0.2.1/32` (TEST-NET-1, never
+  routed), which `dnsmasq` gives for every name; the port-80 redirect
+  listens on both. RFC 8908/8910 (the captive-portal API announced in
+  DHCP) is not used: Android takes the API only over HTTPS with a
+  trusted certificate, which the stick can't have.
 - **The modem's QMI device appears ~9.5 s after boot** with
   ModemManager masked (spike S4), and the first IMEI read succeeds. An
   unsolicited CTL indication (message 0x0027) arrives before the reply,

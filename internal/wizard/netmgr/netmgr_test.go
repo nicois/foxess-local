@@ -54,7 +54,7 @@ const (
 func newNM(t *testing.T, r *fakeRunner) (*NM, string) {
 	t.Helper()
 	dir := t.TempDir()
-	return &NM{Run: r, Iface: "wlan0", KeyfileDir: dir}, dir
+	return &NM{Run: r, Iface: "wlan0", KeyfileDir: dir, Host: "foxess-1a2b"}, dir
 }
 
 func TestSplitTerse(t *testing.T) {
@@ -120,7 +120,12 @@ func TestJoinHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	kf := string(b)
-	for _, want := range []string{"id=" + tryID, "autoconnect=false", "ssid=104;111;109;101;32;110;101;116;", `psk=p@ss word\\with;odd chars`} {
+	for _, want := range []string{
+		"id=" + tryID, "autoconnect=false", "ssid=104;111;109;101;32;110;101;116;", `psk=p@ss word\\with;odd chars`,
+		// the router's device list names the stick (the page's fallback
+		// when .local does not resolve)
+		"dhcp-hostname=foxess-1a2b",
+	} {
 		if !strings.Contains(kf, want+"\n") {
 			t.Errorf("trial keyfile lacks %q:\n%s", want, kf)
 		}
@@ -224,7 +229,10 @@ func TestHotspot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"mode=ap", "autoconnect=false", "address1=" + HotspotAddr.String() + "/24", "method=manual", "proto=rsn", "channel=6"} {
+	for _, want := range []string{
+		"mode=ap", "autoconnect=false", "address1=" + HotspotAddr.String() + "/24", "method=manual", "proto=rsn", "channel=6",
+		"address2=" + CaptiveAddr.String() + "/32",
+	} {
 		if !strings.Contains(string(b), want+"\n") {
 			t.Errorf("hotspot keyfile lacks %q:\n%s", want, b)
 		}

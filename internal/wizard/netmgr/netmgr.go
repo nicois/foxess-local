@@ -40,6 +40,14 @@ var HotspotAddr = netip.MustParseAddr("10.42.0.1")
 
 const hotspotBits = 24
 
+// CaptiveAddr is the hotspot's second address, and the captive DNS
+// answer for every name. Android takes a check name that resolves to a
+// private address (10.42.0.1) for "no internet": it sends no HTTP probe,
+// shows no sign-in page, and keeps the phone's traffic on mobile data
+// (test stick, 2026-11-24). This one is not private: TEST-NET-1, which
+// is never routed, so nothing real is shadowed.
+var CaptiveAddr = netip.MustParseAddr("192.0.2.1")
+
 // hotspotChannel is the hotspot's 2.4 GHz channel (see hotspotKeyfile).
 const hotspotChannel = 6
 
@@ -89,6 +97,9 @@ type NM struct {
 	Run        Runner
 	Iface      string // wlan0
 	KeyfileDir string // KeyfileDir, or a test's temp dir
+	// Host is the name the home network's DHCP server is given, so the
+	// router's device list shows the stick by it ("" leaves the system's)
+	Host string
 }
 
 // Network is one scanned network, the strongest of its access points.
@@ -137,7 +148,7 @@ func (n *NM) JoinHome(ctx context.Context, ssid, psk string) error {
 	if err := validate(ssid, psk); err != nil {
 		return err
 	}
-	kf, err := homeKeyfile(tryID, n.Iface, ssid, psk)
+	kf, err := homeKeyfile(tryID, n.Iface, ssid, psk, n.Host)
 	if err != nil {
 		return err
 	}
@@ -314,7 +325,7 @@ func (n *NM) writeKeyfile(id, content string) (string, error) {
 	return path, nil
 }
 
-func homeKeyfile(id, iface, ssid, psk string) (string, error) {
+func homeKeyfile(id, iface, ssid, psk, host string) (string, error) {
 	uuid, err := newUUID()
 	if err != nil {
 		return "", err
@@ -325,7 +336,11 @@ func homeKeyfile(id, iface, ssid, psk string) (string, error) {
 	if psk != "" {
 		fmt.Fprintf(&b, "[wifi-security]\nkey-mgmt=wpa-psk\npsk=%s\n\n", escapeValue(psk))
 	}
-	b.WriteString("[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n")
+	b.WriteString("[ipv4]\nmethod=auto\n")
+	if host != "" {
+		fmt.Fprintf(&b, "dhcp-hostname=%s\n", host)
+	}
+	b.WriteString("\n[ipv6]\nmethod=auto\n")
 	return b.String(), nil
 }
 
@@ -342,7 +357,8 @@ func hotspotKeyfile(iface, ssid, psk string) (string, error) {
 	// and 11 are allowed everywhere.
 	fmt.Fprintf(&b, "[wifi]\nmode=ap\nband=bg\nchannel=%d\nssid=%s\n\n", hotspotChannel, ssidBytes(ssid))
 	fmt.Fprintf(&b, "[wifi-security]\nkey-mgmt=wpa-psk\nproto=rsn\npairwise=ccmp\ngroup=ccmp\npsk=%s\n\n", escapeValue(psk))
-	fmt.Fprintf(&b, "[ipv4]\nmethod=manual\naddress1=%s/%d\n\n[ipv6]\nmethod=disabled\n", HotspotAddr, hotspotBits)
+	fmt.Fprintf(&b, "[ipv4]\nmethod=manual\naddress1=%s/%d\naddress2=%s/32\n\n[ipv6]\nmethod=disabled\n",
+		HotspotAddr, hotspotBits, CaptiveAddr)
 	return b.String(), nil
 }
 
