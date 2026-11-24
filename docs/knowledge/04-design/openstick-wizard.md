@@ -113,7 +113,9 @@ Checked on a freshly flashed UZ801 v3.0 (OpenStick Debian 12.7, kernel
   routed), which `dnsmasq` gives for every name; the port-80 redirect
   listens on both. RFC 8908/8910 (the captive-portal API announced in
   DHCP) is not used: Android takes the API only over HTTPS with a
-  trusted certificate, which the stick can't have.
+  trusted certificate, which the stick can't have. Confirmed on the
+  same phone (2026-11-24): with `192.0.2.1` it showed "Sign in to
+  network", and the notification opened the wizard page.
 - **The modem's QMI device appears ~9.5 s after boot** with
   ModemManager masked (spike S4), and the first IMEI read succeeds. An
   unsolicited CTL indication (message 0x0027) arrives before the reply,
@@ -541,10 +543,9 @@ client ID" for DMS, DMS 0x0025 "get device serial numbers", TLV 0x11,
 `cdc-wdm`). It read the IMEI as root in 2–3 ms; as `user`, the open
 fails. Still open:
 
-- **S3, phones (needs the owner):** does an Android phone and an
-  iPhone open the sign-in page by itself on the hotspot, and which
-  probe URLs must answer how? Does a phone rejoin by itself after the
-  hotspot drops for a ~5 s rescan?
+- **S3, phones (needs the owner):** Android is done (above). Still
+  open: does an iPhone open the sign-in page by itself, and does a
+  phone rejoin by itself after the hotspot drops for a ~5 s rescan?
 - **S5, power cycles (needs the owner):** three unplug/replug cycles
   within five minutes; the short-boot records survive and nothing is
   corrupted.
