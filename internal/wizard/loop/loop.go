@@ -323,6 +323,12 @@ func (l *Loop) apply(ctx context.Context, d state.Decision, role netmgr.Role) bo
 			return false
 		}
 		return true
+	case d.Radio == state.RadioHotspot && l.Portal != nil:
+		// already a hotspot: left up by a previous run (a restart), or
+		// its portal failed to start. Up is a no-op while it runs.
+		if err := l.Portal.Up(ctx); err != nil {
+			l.log().Error("captive portal", "err", err)
+		}
 	case d.Radio == state.RadioHome && role == netmgr.RoleHotspot:
 		if err := l.hotspotDown(ctx); err != nil {
 			l.log().Error("hotspot down", "err", err)

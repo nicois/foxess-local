@@ -373,3 +373,27 @@ func TestPortalFollowsHotspot(t *testing.T) {
 		}
 	})
 }
+
+// TestPortalAfterRestart (test stick, 2026-11-24): the wizard restarted
+// while its hotspot was up, found the radio already a hotspot, and never
+// started the captive portal: no DHCP, no DNS, no phone could use it.
+// Whenever the hotspot is up, the portal is.
+func TestPortalAfterRestart(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		radio := &fakeRadio{role: netmgr.RoleHotspot} // left up by the last run
+		portal := &fakePortal{}
+		r := newRigWith(t, radio, t.TempDir(), func(l *Loop) { l.Portal = portal })
+		defer r.stop()
+		synctest.Wait()
+		if radio.role != netmgr.RoleHotspot || !portal.up {
+			t.Fatalf("role %v, portal up %v", radio.role, portal.up)
+		}
+		// and a portal that went down under a hotspot comes back
+		portal.Down()
+		time.Sleep(DefaultTick)
+		synctest.Wait()
+		if !portal.up {
+			t.Fatal("the portal stayed down under the hotspot")
+		}
+	})
+}
