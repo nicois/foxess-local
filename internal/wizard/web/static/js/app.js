@@ -64,13 +64,17 @@ function joinText(j) {
   }
 }
 
-// showAfterJoin replaces the page with what to do next: the hotspot is
-// about to go, and this page cannot update until the device is back on
-// a network the stick is on.
-function showAfterJoin(ssid) {
+// showAfterJoin replaces the page with what to do next. It shows before
+// the join is sent (asking), because the phone closes its sign-in window
+// the moment the hotspot goes; after it, it stays in a real browser.
+function showAfterJoin(ssid, asking) {
   const host = (last?.host ?? "foxess.local").replace(/\.local$/, "");
   const url = `http://${host}.local:18081/`;
-  byId("after-join-text").textContent = tr("The stick has left this hotspot to join {ssid}. That takes up to a minute. Then watch its light:", { ssid });
+  byId("after-join-title").textContent = asking ? tr("Before you connect") : tr("Joining your Wi-Fi network…");
+  byId("after-join-text").textContent = asking
+    ? tr("When you press Connect, the stick leaves this hotspot to join {ssid}, and this page closes. Note the address below first: it is also on the stick's label. Joining takes up to a minute. Then watch its light:", { ssid })
+    : tr("The stick has left this hotspot to join {ssid}. That takes up to a minute. Then watch its light:", { ssid });
+  byId("after-join-ask").hidden = !asking;
   byId("after-join-green").textContent = tr("Solid green: it worked. Put this device back on {ssid} and open:", { ssid });
   const a = byId("after-join-link");
   a.href = url;
@@ -85,6 +89,7 @@ function showAfterJoin(ssid) {
 function render(s) {
   last = s;
   byId("login").hidden = true;
+  if (!joinSentAt && !byId("after-join").hidden) return; // asking before a join
   if (joinSentAt) {
     // a result newer than the join this page sent: back on the hotspot
     const fresh = s.join && s.join.age_s * 1000 <= Date.now() - joinSentAt;
@@ -152,18 +157,38 @@ byId("join-form").addEventListener("submit", (e) => {
     return;
   }
   pendingJoin = { ssid, password };
-  confirm(tr("The stick will leave this hotspot and join {ssid}.", { ssid }), async () => {
-    const r = await post("api/join", pendingJoin);
-    if (r.status === 202) {
-      joinSentAt = Date.now();
-      showAfterJoin(ssid);
-    } else if (r.status === 400) {
-      byId("join-result").hidden = false;
-      byId("join-result").className = "error";
-      byId("join-result").textContent = tr("That network name or password can't be used.");
-    }
-  });
+  showAfterJoin(ssid, true);
 });
+
+byId("after-join-go").addEventListener("click", async () => {
+  byId("after-join-ask").hidden = true;
+  let r;
+  try {
+    r = await post("api/join", pendingJoin);
+  } catch {
+    r = { status: 202 }; // the hotspot went before the answer came: it was taken
+  }
+  if (r.status === 202) {
+    joinSentAt = Date.now();
+    showAfterJoin(pendingJoin.ssid, false);
+    return;
+  }
+  leaveAfterJoin();
+  if (r.status === 400) {
+    byId("join-result").hidden = false;
+    byId("join-result").className = "error";
+    byId("join-result").textContent = tr("That network name or password can't be used.");
+  }
+});
+
+byId("after-join-cancel").addEventListener("click", leaveAfterJoin);
+
+// leaveAfterJoin puts the page back as it was before Connect.
+function leaveAfterJoin() {
+  byId("after-join").hidden = true;
+  for (const id of ["status", "networks", "hotspot"]) byId(id).hidden = false;
+  if (last) render(last);
+}
 
 byId("rescan").addEventListener("click", () => post("api/rescan"));
 

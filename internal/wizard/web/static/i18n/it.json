@@ -32,7 +32,6 @@
   "The stick is on your Wi-Fi, but the inverter is not sending to it yet. In the inverter's data logger settings, set a fixed IP address with this stick ({address}) as its gateway.": "La chiavetta è sul tuo Wi-Fi, ma l'inverter non le invia ancora nulla. Nelle impostazioni del data logger dell'inverter, imposta un indirizzo IP fisso con questa chiavetta ({address}) come gateway.",
   "The stick keeps trying. If your Wi-Fi name or password changed, unplug and replug the stick three times within five minutes, waiting for the light each time, then join its hotspot.": "La chiavetta continua a provare. Se il nome o la password del tuo Wi-Fi sono cambiati, scollega e ricollega la chiavetta tre volte entro cinque minuti, aspettando ogni volta la luce, poi collegati al suo hotspot.",
   "The stick leaves your Wi-Fi for at least 5 minutes and opens its own hotspot. The inverter loses its connection meanwhile.": "La chiavetta lascia il tuo Wi-Fi per almeno 5 minuti e apre il proprio hotspot. Nel frattempo l'inverter perde la connessione.",
-  "The stick will leave this hotspot and join {ssid}.": "La chiavetta lascerà questo hotspot e si collegherà a {ssid}.",
   "The stick's password is on its label.": "La password della chiavetta è sulla sua etichetta.",
   "This hotspot is off while the stick tries your network. Watch the light: solid green means it worked; blinking red means rejoin this hotspot to see why.": "Questo hotspot è spento mentre la chiavetta prova la tua rete. Guarda la luce: verde fissa significa che ha funzionato; rossa lampeggiante significa che devi ricollegarti a questo hotspot per vedere il motivo.",
   "Too many attempts. Try again in {minutes} min.": "Troppi tentativi. Riprova tra {minutes} min.",
@@ -43,5 +42,7 @@
   "foxess-local stick setup": "Configurazione della chiavetta foxess-local",
   "signal {n}%": "segnale {n}%",
   "{ssid} is not in range.": "{ssid} non è nel raggio d'azione.",
-  "{ssid} refused the password.": "{ssid} ha rifiutato la password."
+  "{ssid} refused the password.": "{ssid} ha rifiutato la password.",
+  "Before you connect": "Prima di connetterti",
+  "When you press Connect, the stick leaves this hotspot to join {ssid}, and this page closes. Note the address below first: it is also on the stick's label. Joining takes up to a minute. Then watch its light:": "Quando premi Collega, la chiavetta lascia questo hotspot per collegarsi a {ssid} e questa pagina si chiude. Annota prima l'indirizzo qui sotto: è anche sull'etichetta della chiavetta. Il collegamento richiede fino a un minuto. Poi guarda la sua luce:"
 }

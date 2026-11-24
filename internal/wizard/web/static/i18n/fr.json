@@ -32,7 +32,6 @@
   "The stick is on your Wi-Fi, but the inverter is not sending to it yet. In the inverter's data logger settings, set a fixed IP address with this stick ({address}) as its gateway.": "La clé est sur votre Wi-Fi, mais l'onduleur ne lui envoie encore rien. Dans les réglages de l'enregistreur de données de l'onduleur, définissez une adresse IP fixe avec cette clé ({address}) comme passerelle.",
   "The stick keeps trying. If your Wi-Fi name or password changed, unplug and replug the stick three times within five minutes, waiting for the light each time, then join its hotspot.": "La clé continue d'essayer. Si le nom ou le mot de passe de votre Wi-Fi a changé, débranchez et rebranchez la clé trois fois en cinq minutes, en attendant le voyant à chaque fois, puis connectez-vous à son point d'accès.",
   "The stick leaves your Wi-Fi for at least 5 minutes and opens its own hotspot. The inverter loses its connection meanwhile.": "La clé quitte votre Wi-Fi pendant au moins 5 minutes et ouvre son propre point d'accès. L'onduleur perd sa connexion pendant ce temps.",
-  "The stick will leave this hotspot and join {ssid}.": "La clé va quitter ce point d'accès et rejoindre {ssid}.",
   "The stick's password is on its label.": "Le mot de passe de la clé figure sur son étiquette.",
   "This hotspot is off while the stick tries your network. Watch the light: solid green means it worked; blinking red means rejoin this hotspot to see why.": "Ce point d'accès est éteint pendant que la clé essaie votre réseau. Surveillez le voyant : vert fixe signifie que cela a fonctionné ; rouge clignotant signifie qu'il faut se reconnecter à ce point d'accès pour savoir pourquoi.",
   "Too many attempts. Try again in {minutes} min.": "Trop de tentatives. Réessayez dans {minutes} min.",
@@ -43,5 +42,7 @@
   "foxess-local stick setup": "Configuration de la clé foxess-local",
   "signal {n}%": "signal {n} %",
   "{ssid} is not in range.": "{ssid} est hors de portée.",
-  "{ssid} refused the password.": "{ssid} a refusé le mot de passe."
+  "{ssid} refused the password.": "{ssid} a refusé le mot de passe.",
+  "Before you connect": "Avant de vous connecter",
+  "When you press Connect, the stick leaves this hotspot to join {ssid}, and this page closes. Note the address below first: it is also on the stick's label. Joining takes up to a minute. Then watch its light:": "Lorsque vous appuyez sur « Se connecter », la clé quitte ce point d'accès pour rejoindre {ssid}, et cette page se ferme. Notez d'abord l'adresse ci-dessous : elle figure aussi sur l'étiquette de la clé. La connexion prend jusqu'à une minute. Surveillez ensuite son voyant :"
 }
