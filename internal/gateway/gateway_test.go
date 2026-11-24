@@ -521,7 +521,7 @@ func TestSubmitInFlightRejects(t *testing.T) {
 }
 
 func TestFlowLossFailsInFlight(t *testing.T) {
-	clk := &vclock{now: time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)}
+	clk := &vclock{now: fixedNow()}
 	gw, _ := newTestGW(t, clk)
 	gw.SetFlow("c1")
 
@@ -532,5 +532,62 @@ func TestFlowLossFailsInFlight(t *testing.T) {
 	gw.SetFlow("")
 	if st, ok := pendingStatus(gw, id); !ok || st != StatusFailed {
 		t.Errorf("after flow loss: status = %q (ok=%v), want failed", st, ok)
+	}
+}
+
+// TestInFlightTTLFromLastResponse: the in-flight TTL bounds the silence
+// after the device's last response, not the command's total duration —
+// a steadily echoing paced push (13 writes, 1.5 s apart = 19.5 s) must
+// not trip a 2 s TTL.
+func TestInFlightTTLFromLastResponse(t *testing.T) {
+	clk := &vclock{now: fixedNow()}
+	gw, _ := newWearGW(t, clk, WithInFlightTTL(2*time.Second))
+
+	id, err := gw.Submit(context.Background(), baseSchedule())
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	feedReadResponses(t, gw, id, currentSet())
+	for i, base := range wantReadAddr {
+		cnt := blockModeEn
+		if base != regModeEn {
+			cnt = blockSlotCnt
+		}
+		clk.advance(1500 * time.Millisecond)
+		if aerr := ack(gw, id, writeAckPDU(base, cnt)); aerr != nil {
+			t.Fatalf("steady echo %d: %v (want the paced push to hold)", i, aerr)
+		}
+		// Pending runs the lazy TTL check: the command must still be
+		// in flight, far past 2 s since start but not since the last echo
+		if i < len(wantReadAddr)-1 {
+			if st, _ := pendingStatus(gw, id); st != StatusInFlight {
+				t.Fatalf("after steady echo %d: status = %q, want in-flight", i, st)
+			}
+		}
+	}
+	if res := waitRes(t, gw, id); res.Status != StatusAcked {
+		t.Fatalf("steady paced push: %+v, want acked", res)
+	}
+}
+
+// TestInFlightTTLFailsSilentDevice: a device that stops answering the
+// paced push still trips the in-flight TTL (it runs from the last
+// response, not from the start).
+func TestInFlightTTLFailsSilentDevice(t *testing.T) {
+	clk := &vclock{now: fixedNow()}
+	gw, _ := newWearGW(t, clk, WithInFlightTTL(2*time.Second))
+
+	id, err := gw.Submit(context.Background(), baseSchedule())
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	feedReadResponses(t, gw, id, currentSet())
+	clk.advance(1500 * time.Millisecond)
+	if aerr := ack(gw, id, writeAckPDU(wantReadAddr[0], blockModeEn)); aerr != nil {
+		t.Fatalf("first echo: %v", aerr)
+	}
+	clk.advance(3 * time.Second) // > 2 s past the last response
+	if st, ok := pendingStatus(gw, id); !ok || st != StatusFailed {
+		t.Fatalf("after 3 s of silence: status = %q (ok=%v), want failed", st, ok)
 	}
 }

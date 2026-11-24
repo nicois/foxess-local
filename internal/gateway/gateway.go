@@ -48,8 +48,10 @@ const (
 // operator commands (never block one, never queue) — see Submit.
 const OriginPoll = "poller"
 
-// inFlightTTL is the default bound on how long a command may wait for
-// the inverter's response (observed responses: 27–36 ms). Past it the
+// inFlightTTL is the default bound on how long a command may go without
+// a response from the inverter (observed responses: 27–36 ms). The
+// window runs from the last device response — a steadily echoing paced
+// write phase (13 writes, ~140 ms apart) must not trip it. Past it the
 // command fails and the slot frees — an unanswered command must never
 // wedge the gateway (checked lazily on Submit/Pending/Wait, injected
 // clock). WithInFlightTTL overrides it.
@@ -302,11 +304,12 @@ func (g *Gateway) Pending() []PendingCommand {
 	return out
 }
 
-// startLocked injects the command's opening frames on the active flow.
-// schedule: the read phase (fn03); other kinds: the write frames.
+// startLocked injects the command's opening frames on the active flow
+// (schedule: the read phase, fn03; settings: the read or, without
+// WithSkipUnchanged, nothing — the write frames pace on the device's
+// echoes, one in flight at a time: injectNextWriteLocked).
 func (g *Gateway) startLocked(rt *rtCommand) error {
-	writing := false // the frames below are the command's writes (budgeted)
-	var frs []frame.Frame
+	var frs []frame.Frame // opening (read) frames only — bursted
 	switch rt.cmd.Kind {
 	case KindSchedule:
 		rt.reads = scheduleReads()
@@ -318,8 +321,7 @@ func (g *Gateway) startLocked(rt *rtCommand) error {
 		frs = []frame.Frame{modbusFrame(g.envFn, readPDU(byte(p[ParamFn]), p[ParamAddr], p[ParamCount]))}
 	case KindClock:
 		// never read first: the clock is always behind or ahead by now
-		frs, rt.writes = clockFrames(rt.cmd, g.envFn)
-		writing = true
+		rt.pendingWrites = zipWrites(clockFrames(rt.cmd, g.envFn))
 	case KindWorkMode, KindLimits, KindMeterCompensation,
 		KindCurrentLimits, KindBatteryCurrents, KindPowerLimit, KindPortLimits, KindEPSMode:
 		if g.skipUnchanged {
@@ -329,25 +331,24 @@ func (g *Gateway) startLocked(rt *rtCommand) error {
 			for _, r := range rt.reads {
 				frs = append(frs, modbusFrame(g.envFn, fn03PDU(r.addr, r.cnt)))
 			}
-			break
+		} else {
+			w, wrs, err := writeFrames(rt.cmd, nil, g.envFn)
+			if err != nil {
+				return err
+			}
+			rt.pendingWrites = zipWrites(w, wrs)
 		}
-		var err error
-		frs, rt.writes, err = writeFrames(rt.cmd, nil, g.envFn)
-		if err != nil {
-			return err
-		}
-		writing = true
 	}
 	for i := range frs {
 		if err := g.inj.InjectS2C(g.flow, frs[i].Raw); err != nil {
 			return fmt.Errorf("gateway: inject: %w", err)
 		}
-		if writing && i == 0 {
-			g.noteWriteLocked(rt.cmd.Kind) // counted once a frame reached the session
-		}
+	}
+	if err := g.injectNextWriteLocked(rt); err != nil {
+		return err
 	}
 	rt.status = StatusInFlight
-	rt.startAt = g.clock()
+	rt.lastActivity = g.clock()
 	g.rt = rt
 	return nil
 }
@@ -355,7 +356,7 @@ func (g *Gateway) startLocked(rt *rtCommand) error {
 // expireInFlightLocked fails an in-flight command that has had no
 // response within inFlightTTL and starts the next queued one.
 func (g *Gateway) expireInFlightLocked() {
-	if g.rt == nil || g.clock().Sub(g.rt.startAt) < g.flTTL {
+	if g.rt == nil || g.clock().Sub(g.rt.lastActivity) < g.flTTL {
 		return
 	}
 	g.failCommandLocked(g.rt, fmt.Sprintf("no response from the inverter within %s", g.flTTL))

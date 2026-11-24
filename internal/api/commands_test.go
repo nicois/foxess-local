@@ -469,6 +469,16 @@ func TestAuditUnchanged(t *testing.T) {
 	if got := auditSummary("x", gateway.Result{Status: gateway.StatusAcked}); got != "x" {
 		t.Fatalf("summary %q", got)
 	}
+	// a failed command's detail reaches the audit row (the failure reason
+	// otherwise lives only in the HTTP response)
+	want := "schedule push (48000 enabled, 48010 x80) — no response from the inverter within 10s"
+	if got := auditSummary("schedule push (48000 enabled, 48010 x80)",
+		gateway.Result{Status: gateway.StatusFailed, Detail: "no response from the inverter within 10s"}); got != want {
+		t.Fatalf("summary %q, want %q", got, want)
+	}
+	if got := auditSummary("x", gateway.Result{Status: gateway.StatusFailed}); got != "x" {
+		t.Fatalf("summary %q", got)
+	}
 }
 
 // TestWriteBudgetAlerts (F2): a write refused by the hourly budget is

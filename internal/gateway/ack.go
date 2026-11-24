@@ -13,15 +13,19 @@ const exceptionBit = 0x80
 
 // rtCommand is the runtime state of one submitted command.
 type rtCommand struct {
-	id      string
-	cmd     Command
-	enqAt   time.Time
-	startAt time.Time // when it went in flight (the inFlightTTL base)
-	status  Status
-	detail  string
-	reads   []readReq  // pending read-phase requests (FIFO)
-	writes  []writeReq // pending write-phase ACKs
-	current []RegisterValue
+	id           string
+	cmd          Command
+	enqAt        time.Time
+	lastActivity time.Time // last device response (the inFlightTTL base)
+	status       Status
+	detail       string
+	reads        []readReq // pending read-phase requests (FIFO)
+	// writes: injected, awaiting their ACK — at most one in flight
+	// (the write phase paces on the device's echoes).
+	writes []writeReq
+	// pendingWrites: built but not yet injected (FIFO; the head is next).
+	pendingWrites []writePhase
+	current       []RegisterValue
 	// unchanged: acked without a write (the inverter already held the
 	// values — WithSkipUnchanged)
 	unchanged bool
@@ -110,6 +114,12 @@ func (g *Gateway) ackWriteAckLocked(rt *rtCommand, p []byte) error {
 		return fmt.Errorf("%w: fn%#04x ack @%d field %#04x matches no pending write",
 			ErrEchoMismatch, fn, addr, field)
 	}
+	rt.lastActivity = g.clock()
+	// the write phase paces on the device's echoes: the next write goes
+	// out only once this one is confirmed
+	if err := g.injectNextWriteLocked(rt); err != nil {
+		return err
+	}
 	g.finishWritesLocked(rt)
 	return nil
 }
@@ -136,6 +146,7 @@ func (g *Gateway) ackReadLocked(rt *rtCommand, p []byte) error {
 		return fmt.Errorf("%w: read response bc=%d does not match pending read @%d x%d",
 			ErrEchoMismatch, bc, req.addr, req.cnt)
 	}
+	rt.lastActivity = g.clock()
 	rt.reads = rt.reads[1:]
 	for i := range req.cnt {
 		v := int(p[3+2*i])<<byteShift | int(p[4+2*i])
@@ -168,14 +179,43 @@ func (g *Gateway) startWritePhaseLocked(rt *rtCommand) error {
 			return nil
 		}
 	}
-	rt.writes = wrs
+	rt.pendingWrites = zipWrites(frs, wrs)
+	return g.injectNextWriteLocked(rt)
+}
+
+// zipWrites pairs each write frame with its writeReq (index-aligned, as
+// writeFrames builds them).
+func zipWrites(frs []frame.Frame, wrs []writeReq) []writePhase {
+	out := make([]writePhase, 0, len(frs))
 	for i := range frs {
-		if ierr := g.inj.InjectS2C(g.flow, frs[i].Raw); ierr != nil {
-			return fmt.Errorf("gateway: inject write phase: %w", ierr)
-		}
-		if i == 0 {
-			g.noteWriteLocked(rt.cmd.Kind) // counted once a frame reached the session
-		}
+		out = append(out, writePhase{fr: frs[i], wr: wrs[i]})
+	}
+	return out
+}
+
+// writePhase is one write frame paired with the ACK that must match it.
+type writePhase struct {
+	fr frame.Frame
+	wr writeReq
+}
+
+// injectNextWriteLocked feeds the next built write frame to the session
+// and records it as awaiting its ACK. The write phase paces on the
+// device's echoes — one write in flight at a time: the KH10's serial
+// write pipeline silently drops burst overflow (profile §5; the
+// 2026-11-23 schedule push lost its last two blocks).
+func (g *Gateway) injectNextWriteLocked(rt *rtCommand) error {
+	if len(rt.pendingWrites) == 0 {
+		return nil
+	}
+	ph := rt.pendingWrites[0]
+	if err := g.inj.InjectS2C(g.flow, ph.fr.Raw); err != nil {
+		return fmt.Errorf("gateway: inject write phase: %w", err)
+	}
+	rt.pendingWrites = rt.pendingWrites[1:]
+	rt.writes = append(rt.writes, ph.wr)
+	if len(rt.writes) == 1 {
+		g.noteWriteLocked(rt.cmd.Kind) // counted once a frame reached the session
 	}
 	return nil
 }

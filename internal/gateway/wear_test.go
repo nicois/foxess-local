@@ -146,8 +146,11 @@ func TestSkipUnchangedSchedule(t *testing.T) {
 		}
 	}
 	feedReadResponses(t, gw, id, changed)
-	if n := len(inj.injected()) - 13; n != 13+13 {
-		t.Fatalf("after a difference: %d frames, want 13 reads + 13 writes", n)
+	// the first write goes out on the read-phase completion; the rest
+	// pace on the device's echoes (one write in flight at a time):
+	// 13 reads (push 1) + 13 reads + 1 write
+	if n := len(inj.injected()); n != 27 {
+		t.Fatalf("after a difference: %d frames, want 27", n)
 	}
 }
 

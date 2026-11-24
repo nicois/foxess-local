@@ -261,10 +261,15 @@ func (s *Server) commandWorker(ctx context.Context, tk Token, cmd gateway.Comman
 }
 
 // auditSummary marks a command the inverter already held: acknowledged
-// without a write (the gateway's read-before-write found the values).
+// without a write (the gateway's read-before-write found the values) —
+// and carries a failed command's detail into the audit row (the failure
+// reason otherwise lives only in the HTTP response).
 func auditSummary(summary string, res gateway.Result) string {
 	if res.Status == gateway.StatusAcked && res.Unchanged {
 		return summary + " — unchanged, not written"
+	}
+	if (res.Status == gateway.StatusFailed || res.Status == gateway.StatusExpired) && res.Detail != "" {
+		return summary + " — " + res.Detail
 	}
 	return summary
 }

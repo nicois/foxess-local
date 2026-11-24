@@ -664,12 +664,13 @@ func s2cFn10(t *testing.T, addr, cnt int, vals []uint16) []byte {
 }
 
 // Scenario: TCP coalescing — a schedule push whose 13 read responses
-// arrive in ONE client write and whose 13 write ACKs arrive in another
-// single write (the inverter coalesces on a LAN hop; the reassembler
-// returns every complete frame in a chunk). Every echo must be acked in
-// stream order: a missed echo wedges the in-flight slot, and the
-// read-modify-write push must carry the read values (the preserved
-// registers round-trip through the pushed blocks).
+// arrive in ONE client write (the inverter coalesces on a LAN hop; the
+// reassembler returns every complete frame in a chunk). The write phase
+// paces on the device's echoes: one write in flight at a time, so the
+// inverter answers each write before the next one is sent. Every echo
+// must be acked in stream order: a missed echo wedges the in-flight
+// slot, and the read-modify-write push must carry the read values (the
+// preserved registers round-trip through the pushed blocks).
 func TestSchedulePushCoalescedEchoes(t *testing.T) {
 	r := newRig(t, fullPosture())
 	var err error
@@ -738,17 +739,28 @@ func TestSchedulePushCoalescedEchoes(t *testing.T) {
 		// mirrors' +4/+5/+6 forced to 100:10 / 10 / 0).
 		mode := make([]uint16, 10)
 		mode[0] = 1
-		wantWrites := append(s2cFn10(t, 48000, 10, mode), s2cFn10(t, 48010, 80, unusedTable(vals48010, true))...)
-		wantWrites = append(wantWrites, s2cFn10(t, 48090, 80, unusedTable(vals48090, false))...)
-		for _, b := range bases[3:] {
-			wantWrites = append(wantWrites, s2cFn10(t, b, 80, unusedTable(make([]uint16, 80), false))...)
+		wantWriteFrames := [][]byte{
+			s2cFn10(t, 48000, 10, mode),
+			s2cFn10(t, 48010, 80, unusedTable(vals48010, true)),
+			s2cFn10(t, 48090, 80, unusedTable(vals48090, false)),
 		}
-		require.Equal(t, wantWrites, readExact(t, fl.client, len(wantWrites)))
+		for _, b := range bases[3:] {
+			wantWriteFrames = append(wantWriteFrames, s2cFn10(t, b, 80, unusedTable(make([]uint16, 80), false)))
+		}
+		require.Len(t, wantWriteFrames, 13)
 
-		// ALL 13 write ACKs coalesced into ONE client write.
-		acks := schedWriteAcks(t)
-		_, err = fl.client.Write(acks)
-		require.NoError(t, err)
+		// The writes go out one at a time: the inverter answers write N
+		// before write N+1 is injected, so the coalesced write-ACK chunk
+		// of the old burst behaviour can no longer happen.
+		for i, want := range wantWriteFrames {
+			require.Equal(t, want, readExact(t, fl.client, len(want)), "write %d", i)
+			cnt := 10
+			if i > 0 {
+				cnt = 80
+			}
+			_, err = fl.client.Write(schedWriteAck(t, schedBases()[i], cnt))
+			require.NoError(t, err)
+		}
 
 		spinUntil(t, func() bool { return len(r.gw.Pending()) == 0 })
 
@@ -789,20 +801,6 @@ func schedReadReqs(t *testing.T) []byte {
 		reqs = append(reqs, s2cFn03(t, b, cnt)...)
 	}
 	return reqs
-}
-
-// schedWriteAcks builds the 13 inverter-originated fn10 write-ACK echoes.
-func schedWriteAcks(t *testing.T) []byte {
-	t.Helper()
-	var acks []byte
-	for i, b := range schedBases() {
-		cnt := 10
-		if i > 0 {
-			cnt = 80
-		}
-		acks = append(acks, schedWriteAck(t, b, cnt)...)
-	}
-	return acks
 }
 
 // requireAuditClasses asserts the injected s2c audit rows are the

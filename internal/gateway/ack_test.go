@@ -148,7 +148,10 @@ func TestAckWorkMode(t *testing.T) {
 	}
 }
 
-func TestAckLimitsPerWriteDone(t *testing.T) {
+// TestLimitsSecondWriteWaitsForFirstEcho: with two write fields the
+// second write goes out only after the first one's echo (the device
+// echoes in order — it answers writes sequentially).
+func TestLimitsSecondWriteWaitsForFirstEcho(t *testing.T) {
 	clk := &vclock{now: fixedNow()}
 	gw, inj := newTestGW(t, clk)
 	gw.SetFlow("c1")
@@ -158,18 +161,21 @@ func TestAckLimitsPerWriteDone(t *testing.T) {
 		t.Fatalf("submit: %v", err)
 	}
 	calls := inj.injected()
-	if len(calls) != 2 {
-		t.Fatalf("injected %d frames, want 2", len(calls))
+	if len(calls) != 1 {
+		t.Fatalf("injected %d frames, want 1 (the first write only)", len(calls))
 	}
-	// acks may arrive in any order; the command completes only after both
-	if aerr := ack(gw, id, writeAckPDU(41023, 2)); aerr != nil {
-		t.Fatalf("ack export: %v", aerr)
+	// import first; the export write goes out only after import's echo
+	if aerr := ack(gw, id, writeAckPDU(41021, 2)); aerr != nil {
+		t.Fatalf("ack import: %v", aerr)
+	}
+	if n := len(inj.injected()); n != 2 {
+		t.Fatalf("after import ack: injected %d frames, want 2 (export now in flight)", n)
 	}
 	if st, _ := pendingStatus(gw, id); st != StatusInFlight {
 		t.Fatalf("after one ack: status = %q, want in-flight", st)
 	}
-	if aerr := ack(gw, id, writeAckPDU(41021, 2)); aerr != nil {
-		t.Fatalf("ack import: %v", aerr)
+	if aerr := ack(gw, id, writeAckPDU(41023, 2)); aerr != nil {
+		t.Fatalf("ack export: %v", aerr)
 	}
 	if _, ok := pendingStatus(gw, id); ok {
 		t.Errorf("after both acks: command still pending, want acked/removed")
@@ -192,10 +198,15 @@ func TestAckScheduleFullCycle(t *testing.T) {
 
 	// feed the 13 read responses in request order
 	feedReadResponses(t, gw, id, currentSet())
-	// all reads done -> the 13 write frames go out
+	// all reads done -> the first write goes out (the rest pace on echoes)
+	calls = inj.injected()
+	if len(calls) != 14 {
+		t.Fatalf("after last read: injected %d frames, want 14 (13+1)", len(calls))
+	}
+	feedWriteAcks(t, gw, id)
 	calls = inj.injected()
 	if len(calls) != 26 {
-		t.Fatalf("after last read: injected %d frames, want 26 (13+13)", len(calls))
+		t.Fatalf("after all acks: injected %d frames, want 26 (13+13)", len(calls))
 	}
 	var wraws [][]byte
 	for _, c := range calls[13:] {
@@ -210,7 +221,46 @@ func TestAckScheduleFullCycle(t *testing.T) {
 			t.Fatalf("missing write block at %d", base)
 		}
 	}
-	feedWriteAcks(t, gw, id)
+	if _, ok := pendingStatus(gw, id); ok {
+		t.Errorf("after all acks: command still pending, want acked/removed")
+	}
+}
+
+// TestWritePhasePaced: the write phase injects one frame, then the next
+// only after the previous write's echo — the KH10's serial write pipeline
+// silently drops burst overflow (profile §5; the 2026-11-23 schedule push
+// lost its last two blocks).
+func TestWritePhasePaced(t *testing.T) {
+	clk := &vclock{now: fixedNow()}
+	gw, inj := newTestGW(t, clk)
+	gw.SetFlow("c1")
+
+	id, err := gw.Submit(context.Background(), baseSchedule())
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if n := len(inj.injected()); n != 13 {
+		t.Fatalf("read phase: injected %d frames, want 13 reads", n)
+	}
+	feedReadResponses(t, gw, id, currentSet())
+	// the read phase is done: the first write is in, the other twelve wait
+	if n := len(inj.injected()); n != 14 {
+		t.Fatalf("after the read phase: injected %d frames, want 14 (13 reads + first write)", n)
+	}
+	const total = 26 // 13 reads + 13 writes
+	for i, base := range wantReadAddr {
+		cnt := blockModeEn
+		if base != regModeEn {
+			cnt = blockSlotCnt
+		}
+		if aerr := ack(gw, id, writeAckPDU(base, cnt)); aerr != nil {
+			t.Fatalf("ack %d: %v", i, aerr)
+		}
+		want := min(15+i, total)
+		if n := len(inj.injected()); n != want {
+			t.Fatalf("after ack %d: injected %d frames, want %d (one more write in flight)", i, n, want)
+		}
+	}
 	if _, ok := pendingStatus(gw, id); ok {
 		t.Errorf("after all acks: command still pending, want acked/removed")
 	}

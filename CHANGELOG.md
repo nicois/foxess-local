@@ -33,6 +33,16 @@ version; anything else bumps the patch version.
 - The Inverter page's "Running now" panel now updates live when the
   schedule changes — an override set, ended or expired, a schedule
   edit — not only when the running mode changes at a minute boundary.
+- Multi-write commands (notably the schedule push) are paced on the
+  inverter's echoes: one write in flight at a time, the next sent only
+  after the previous one is confirmed. The old burst could overflow the
+  KH10's write pipeline, which silently drops the overflow — a schedule
+  push could lose its tail while reporting success.
+- The in-flight timeout runs from the inverter's last response rather
+  than from command start, so a steady paced push is not timed out
+  mid-flight; a silent inverter still fails the command.
+- Failed and expired commands record the gateway's failure detail in
+  the command audit row, not only in the HTTP response.
 
 ## [v0.4.1] - 2026-11-22
 
