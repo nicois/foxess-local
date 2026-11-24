@@ -1151,21 +1151,23 @@ function fmtDuration(h) {
 
 // flowOf: per-entity direction + phrase for the current power reading.
 // The power-flow diagram (viewBox 400×300, the box is 4:3 so node
-// percentages and SVG units agree): DC sources into the inverter, its AC
-// output into the switchboard, which feeds the home and meets the grid
-// (grid, switchboard and home on one vertical line, the switchboard's
-// label in the wide gap from the inverter: clear at phone width);
-// the EPS (backup) port hangs off the inverter itself. The top row is
-// outside the house (solar, grid), the bottom row inside (battery,
-// backup, home). [key, from x,y,
-// to x,y, arrow position along the line]; "fwd" flows from → to.
+// percentages and SVG units agree). The inverter is drawn as its two
+// sides with the conversion between them: solar and the battery meet on
+// its DC side (left, x 140); its AC side (right, x 240) feeds the
+// switchboard and the EPS (backup) port (that branch leaves at x 228:
+// clear of Home on a phone). The switchboard feeds the home
+// and meets the grid (grid, switchboard and home on one vertical line,
+// its label a tag on the line to the home: clear at phone width). The
+// top row is outside the house (solar, grid), the bottom row inside
+// (battery, backup, home). [key, from x,y, to x,y, arrow position along
+// the line]; "fwd" flows from → to.
 const FLOW_LINES = [
-  ["solar", 60, 50, 160, 150, 0.42],
-  ["batt", 160, 150, 60, 250, 0.6], // fwd = charging (inverter → battery)
-  ["ac", 160, 150, 340, 150, 0.8], // fwd = inverter AC output
-  ["home", 340, 150, 340, 250, 0.3],
+  ["solar", 60, 50, 140, 150, 0.4],
+  ["batt", 140, 150, 60, 250, 0.62], // fwd = charging (inverter → battery)
+  ["ac", 240, 150, 340, 150, 0.75], // fwd = inverter AC output
+  ["home", 340, 150, 340, 250, 0.55],
   ["grid", 340, 50, 340, 150, 0.7], // fwd = import (grid → switchboard)
-  ["eps", 160, 150, 190, 258, 0.5], // fwd = backup port output
+  ["eps", 228, 150, 228, 258, 0.6], // fwd = backup port output
 ];
 
 // paintFlowLine sets one connector's state and its arrow's direction.
@@ -1188,11 +1190,20 @@ function paintFlowLine(k, d) {
 // splits them: the switchboard gets AC output − backup, the main-board
 // circuits are load − backup.
 
+// inverterDC: the inverter's DC side, net — solar less battery charging
+// (+ = into the conversion, − = AC in, charging from the grid); null when
+// a term is missing.
+function inverterDC(p) {
+  if (p?.pv_w == null || p?.battery_w == null) return null;
+  return p.pv_w - p.battery_w;
+}
+
 // inverterLoss: DC in minus AC out (solar − battery charging − AC
 // output, which includes the backup port); null when a term is missing.
 function inverterLoss(p) {
-  if (p?.pv_w == null || p?.battery_w == null || p?.ac_port_w == null) return null;
-  return p.pv_w - p.battery_w - p.ac_port_w;
+  const dc = inverterDC(p);
+  if (dc == null || p?.ac_port_w == null) return null;
+  return dc - p.ac_port_w;
 }
 
 // splitEPS: the grid-port output (to the switchboard) and the main-board
@@ -1314,9 +1325,11 @@ function paintNow(st) {
     hp0.title = tr("main-board circuits, of {total} for the whole household (backup circuits included)", { total: fmtPower(p.load_w) });
   }
   for (const [k] of FLOW_LINES) paintFlowLine(k, f[k].d);
-  // the inverter: its AC output (in when charging from the grid) and its
-  // conversion loss
+  // the inverter: its DC side, its AC output (in when charging from the
+  // grid) and its conversion loss
   const loss = inverterLoss(p);
+  const dcv = byId("fv-dc");
+  if (dcv) dcv.textContent = fmtPower(inverterDC(p));
   const hub = byId("fv-hub");
   if (hub) hub.textContent = fmtPower(p?.ac_port_w);
   const hp = byId("fp-hub");
@@ -1334,6 +1347,7 @@ function paintNow(st) {
     flow.setAttribute("aria-label",
       tr("Solar {w} {state}", { w: fmtPower(p?.pv_w), state: f.solar.txt }) + "; " +
       tr("battery {w} {state}", { w: fmtPower(p?.battery_w), state: f.batt.txt }) + "; " +
+      tr("inverter DC side {w}", { w: fmtPower(inverterDC(p)) }) + ", " +
       tr("inverter AC {state} {w}", { state: f.ac.txt, w: fmtPower(p?.ac_port_w) }) +
       (loss == null ? "" : ", " + tr("loss {w}", { w: fmtPower(Math.max(0, loss)) })) + "; " +
       (S.epsSeen
@@ -1756,10 +1770,10 @@ function flowNode(k, label, area) {
 const FLOW_LIMITS = [
   // each sits on the stretch of its line no node covers at phone width
   { n: 1, x: 362, y: 118, key: "grid" },   // the grid connection (CT)
-  { n: 2, x: 250, y: 132, key: "port" },   // the inverter's grid port
-  { n: 3, x: 92, y: 186, key: "batt" },    // the battery (beside its line: the nodes cover most of it on a phone)
-  { n: 4, x: 160, y: 94, key: "inv" },     // the inverter's output rating
-  { n: 5, x: 218, y: 199, key: "eps" },    // the backup (EPS) port
+  { n: 2, x: 318, y: 132, key: "port" },   // the inverter's grid port
+  { n: 3, x: 80, y: 192, key: "batt" },    // the battery (beside its line: the nodes cover most of it on a phone)
+  { n: 4, x: 262, y: 96, key: "inv" },     // the inverter's output rating (above its AC side)
+  { n: 5, x: 246, y: 206, key: "eps" },    // the backup (EPS) port
 ];
 
 const fmtKW = (w) => (w == null ? "—" : (w / 1000).toFixed(w % 1000 === 0 ? 0 : 1) + " kW");
@@ -1846,14 +1860,24 @@ function flowMarkup(withLimits) {
             `<line id="fl-${k}" class="fl s-${k} idle" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`).join("")}
           ${FLOW_LINES.map(([k]) => `<path id="ar-${k}" class="ar s-${k} idle" d="M-6,-5 L6,0 L-6,5 Z"/>`).join("")}
           <circle class="board-dot" cx="340" cy="150" r="5"/>
-          ${marks}
         </svg>
+        ${marks ? `<svg class="flow-marks" viewBox="0 0 400 300" aria-hidden="true">${marks}</svg>` : ""}
         <span class="board-label muted">${esc(tr("switchboard"))}</span>
         ${flowNode("solar", esc(tr("Solar")), "a-solar")}
         ${flowNode("batt", esc(tr("Battery")), "a-batt")}
-        <div class="node inv a-hub">
-          <div class="node-label">${esc(tr("Inverter"))}</div>
-          <div id="fv-hub" class="node-value">—</div>
+        <div class="node inv a-hub" title="${esc(tr("Inverter"))}">
+          <div class="inv-dc">
+            <div class="node-label">${esc(tr("DC"))}</div>
+            <div id="fv-dc" class="node-value">—</div>
+          </div>
+          <div class="inv-conv">
+            <div class="node-label inv-name">${esc(tr("Inverter"))}</div>
+            <svg class="inv-sym" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M2 22 22 2M5.5 7h6M5.5 10h6M12.5 16.5q1.75-2.5 3.5 0t3.5 0"/></svg>
+          </div>
+          <div class="inv-ac">
+            <div class="node-label">${esc(tr("AC"))}</div>
+            <div id="fv-hub" class="node-value">—</div>
+          </div>
           <div id="fp-hub" class="node-phrase muted">—</div>
         </div>
         ${flowNode("home", esc(tr("Home")), "a-home")}

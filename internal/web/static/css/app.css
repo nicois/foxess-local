@@ -724,6 +724,7 @@ dl.kv {
    sit on diagonals). */
 .flow {
   position: relative;
+  container: flow / inline-size; /* the inverter's compact form follows the diagram's own width */
   aspect-ratio: 4 / 3;
   width: 100%;
   max-width: 520px;
@@ -736,27 +737,30 @@ dl.kv {
 }
 .a-solar { left: 15%; top: 16.67%; }
 .a-batt { left: 15%; top: 83.33%; }
-.a-hub { left: 40%; top: 50%; }
+.a-hub { left: 47.5%; top: 50%; }
 .a-grid { left: 85%; top: 16.67%; }
 .a-home { left: 85%; top: 83.33%; }
-.a-eps { left: 47.5%; top: 86%; }
+.a-eps { left: 57%; top: 86%; }
+/* a tag on the line to the home, just below the dot: the gap between
+   the inverter and the switchboard is narrow on a phone */
 .board-label {
   position: absolute;
+  z-index: 1;
   left: 85%;
   top: 50%;
-  translate: calc(-100% - 0.3rem) 0.4rem; /* below-left of the dot: clear of the lines */
+  translate: -50% 0.55rem;
+  padding: 0 0.25rem;
+  background: var(--panel);
   font-size: 0.7rem;
+  line-height: 1.3;
   white-space: nowrap;
-}
-@media (max-width: 720px) {
-  .board-label .wide { display: none; } /* "board": the phone's gap is narrow */
 }
 /* the backup (EPS) branch: only once the port has supplied power */
 .flow:not(.has-eps) {
   .a-eps, #fl-eps, #ar-eps { display: none; }
 }
 
-.flow-lines {
+.flow-lines, .flow-marks {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -764,6 +768,8 @@ dl.kv {
   z-index: 0;
   overflow: visible;
 }
+/* the limit markers sit above the nodes: never hidden by one */
+.flow-marks { z-index: 2; pointer-events: none; }
 /* connectors: solid in the entity color while power flows, a neutral
    hairline when idle; direction is a static arrow (no animation — moving
    content without a pause control fails WCAG 2.2.2) */
@@ -842,11 +848,48 @@ dl.kv {
   white-space: nowrap;
 }
 .node-phrase { font-size: 0.8rem; white-space: nowrap; }
-/* the inverter: a converter, not a source or a load (dashed) */
-.inv { border-style: dashed; }
+/* the inverter: a converter, not a source or a load (dashed). Its DC
+   side (solar, battery) on the left, its AC side (switchboard, backup)
+   on the right, the conversion between them. */
+.inv {
+  border-style: dashed;
+  display: grid;
+  grid-template-columns: auto auto auto;
+  align-items: end;
+  column-gap: 0.5rem;
+  #fp-hub { grid-column: 1 / -1; }
+}
+.flow .node.inv { max-width: none; } /* wider than the other nodes: two sides */
+.inv-conv {
+  display: grid;
+  justify-items: center;
+  align-self: stretch;
+  align-content: end;
+  gap: 0.15rem;
+  padding: 0 0.5rem;
+  border-inline: 1px dashed var(--line);
+}
+.inv-sym {
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-bottom: 0.1rem;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
 @container (max-width: 420px) {
   .node { padding: 0.35rem 0.4rem; }
   .node-value { font-size: 1.05rem; }
+}
+/* a narrow diagram (a phone, the Inverter page's column): the symbol
+   alone names the inverter, so it stays clear of the switchboard and
+   the limit markers */
+@container flow (max-width: 440px) {
+  .inv { column-gap: 0.3rem; padding: 0.35rem 0.4rem; }
+  .inv .node-value { font-size: 1.05rem; }
+  .inv-conv { padding: 0 0.3rem; }
+  .inv-name { display: none; }
 }
 
 /* battery: the view's one hero figure + a same-ramp meter */

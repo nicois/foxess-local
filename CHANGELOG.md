@@ -44,6 +44,13 @@ version; anything else bumps the patch version.
 - Failed and expired commands record the gateway's failure detail in
   the command audit row, not only in the HTTP response.
 
+### Changed
+
+- The power-flow diagram (Home and the Inverter page) draws the inverter
+  as its two sides: solar and the battery meet on its DC side, the
+  switchboard and the backup port hang off its AC side, and the
+  conversion (with its loss) sits between them.
+
 ## [v0.4.1] - 2026-11-22
 
 ### Changed
