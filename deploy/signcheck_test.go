@@ -3,6 +3,7 @@ package deploy
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,21 +11,33 @@ import (
 	"testing"
 )
 
+// wizardBin is the OpenStick wizard's release binary (D-031).
+const wizardBin = "foxess-wizard_linux_arm64"
+
 // fakeDist builds a release directory whose binaries carry version (as
 // release.sh's -X main.version stamp leaves it, among other bytes) and
 // a SHA256SUMS over them.
 func fakeDist(t *testing.T, version string) string {
+	t.Helper()
+	return fakeDistWith(t, version, nil)
+}
+
+// fakeDistWith is fakeDist with some files' contents replaced (the
+// SHA256SUMS still matches them).
+func fakeDistWith(t *testing.T, version string, over map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
 	files := map[string]string{
 		"foxess-local_linux_amd64": "\x7fELF…go1.27…v1.11.1…" + version + "…github.com/nicois/foxess-local",
 		"foxess-local_linux_arm64": "\x7fELF…" + version + "…",
 		"foxess-local_linux_armv7": "\x7fELF…" + version,
+		wizardBin:                  "\x7fELF…" + version + "…",
 		"installer.sh":             "#!/bin/sh\n",
 		"provision-openstick.sh":   "#!/bin/sh\n",
 	}
+	maps.Copy(files, over)
 	var sums strings.Builder
-	for _, name := range []string{"foxess-local_linux_amd64", "foxess-local_linux_arm64", "foxess-local_linux_armv7", "installer.sh", "provision-openstick.sh"} {
+	for _, name := range []string{"foxess-local_linux_amd64", "foxess-local_linux_arm64", "foxess-local_linux_armv7", wizardBin, "installer.sh", "provision-openstick.sh"} {
 		write(t, filepath.Join(dir, name), files[name])
 		h := sha256.Sum256([]byte(files[name]))
 		sums.WriteString(hex.EncodeToString(h[:]) + "  " + name + "\n")
@@ -82,5 +95,15 @@ func TestSignCheck(t *testing.T) {
 	}
 	if out, err := runSignCheck(t, "v0.4.1-rc.1", gone); err == nil || !strings.Contains(out, "SHA256SUMS") {
 		t.Errorf("missing binary: err %v, output %q", err, out)
+	}
+}
+
+// TestSignCheckWizard: the OpenStick wizard (D-031) is a release binary
+// too, so a stale one is refused like a stale foxess-local.
+func TestSignCheckWizard(t *testing.T) {
+	dist := fakeDistWith(t, "v0.4.1-rc.1", map[string]string{wizardBin: "\x7fELF…v0.4.1-rc.0…"})
+	out, err := runSignCheck(t, "v0.4.1-rc.1", dist)
+	if err == nil || !strings.Contains(out, wizardBin+" does not carry v0.4.1-rc.1") {
+		t.Fatalf("stale wizard: err %v, output %q", err, out)
 	}
 }

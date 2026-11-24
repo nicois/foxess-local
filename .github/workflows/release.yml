@@ -51,4 +51,4 @@ jobs:
           pre=""
           case "${GITHUB_REF_NAME}" in *-*) pre=--prerelease ;; esac
           gh release create "${GITHUB_REF_NAME}" --draft $pre --title "${GITHUB_REF_NAME}" \
-            --notes-file notes.md dist/foxess-local_linux_* dist/installer.sh dist/provision-openstick.sh dist/SHA256SUMS
+            --notes-file notes.md dist/foxess-local_linux_* dist/foxess-wizard_linux_* dist/installer.sh dist/provision-openstick.sh dist/SHA256SUMS

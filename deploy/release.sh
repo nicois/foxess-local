@@ -48,8 +48,12 @@ for arch in ${ARCHES:-amd64 arm64 armv7}; do
 		go build -trimpath -buildvcs=false -ldflags "$ldflags" \
 		-o "$DIST/foxess-local_linux_$arch" ./cmd/foxess-local
 done
+# the OpenStick setup wizard (D-031): the stick is arm64 only
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+	go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=$VERSION" \
+	-o "$DIST/foxess-wizard_linux_arm64" ./cmd/foxess-wizard
 bash deploy/gen-installer.sh >"$DIST/installer.sh"
 cp deploy/provision-openstick.sh "$DIST/provision-openstick.sh"
 chmod +x "$DIST/installer.sh" "$DIST/provision-openstick.sh"
-(cd "$DIST" && sha256sum foxess-local_linux_* installer.sh provision-openstick.sh >SHA256SUMS)
+(cd "$DIST" && sha256sum foxess-local_linux_* foxess-wizard_linux_* installer.sh provision-openstick.sh >SHA256SUMS)
 echo "release: $DIST/ ready ($VERSION for $REPO) — next: make sign, then make verify-release"

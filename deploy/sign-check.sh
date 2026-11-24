@@ -25,7 +25,7 @@ if ! (cd "$DIST" && sha256sum --check --quiet --strict SHA256SUMS) >&2; then
 	echo "sign-check: $DIST/SHA256SUMS does not match the files in $DIST: run make release again" >&2
 	exit 2
 fi
-bins=$(awk '$2 ~ /^foxess-local_linux_/ {print $2}' "$DIST/SHA256SUMS")
+bins=$(awk '$2 ~ /^foxess-(local|wizard)_linux_/ {print $2}' "$DIST/SHA256SUMS")
 if [ -z "$bins" ]; then
 	echo "sign-check: $DIST/SHA256SUMS lists no foxess-local binaries" >&2
 	exit 2
