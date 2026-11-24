@@ -317,3 +317,23 @@ func checkFreshBudget(t *testing.T, v map[CommandKind]BudgetState) {
 		t.Fatal("reads are not budgeted")
 	}
 }
+
+// TestScheduleBudgetCountsOnePush (2026-11-24): a schedule push is 13
+// paced write frames but one schedule write — one installer edit spent
+// the whole budget of 10 and locked the override out for an hour.
+func TestScheduleBudgetCountsOnePush(t *testing.T) {
+	clk := &vclock{now: fixedNow()}
+	gw, _ := newWearGW(t, clk, WithWriteBudget(10, time.Hour))
+	id, err := gw.Submit(context.Background(), baseSchedule())
+	if err != nil {
+		t.Fatal(err)
+	}
+	feedReadResponses(t, gw, id, currentSet())
+	feedWriteAcks(t, gw, id)
+	if res := waitRes(t, gw, id); res.Status != StatusAcked {
+		t.Fatalf("push: %+v", res)
+	}
+	if b := gw.Budget()[KindSchedule]; b.Remaining != 9 {
+		t.Fatalf("one push left %d of 10, want 9", b.Remaining)
+	}
+}

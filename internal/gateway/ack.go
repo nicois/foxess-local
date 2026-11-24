@@ -29,6 +29,9 @@ type rtCommand struct {
 	// unchanged: acked without a write (the inverter already held the
 	// values — WithSkipUnchanged)
 	unchanged bool
+	// counted: the write phase is on the budget (once per command, not
+	// per paced frame)
+	counted bool
 	// done closes exactly once when the command reaches a terminal state
 	// (Wait wakes on it; the status is re-read under the lock after wake).
 	done chan struct{}
@@ -214,7 +217,8 @@ func (g *Gateway) injectNextWriteLocked(rt *rtCommand) error {
 	}
 	rt.pendingWrites = rt.pendingWrites[1:]
 	rt.writes = append(rt.writes, ph.wr)
-	if len(rt.writes) == 1 {
+	if !rt.counted {
+		rt.counted = true
 		g.noteWriteLocked(rt.cmd.Kind) // counted once a frame reached the session
 	}
 	return nil

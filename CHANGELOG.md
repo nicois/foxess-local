@@ -38,6 +38,10 @@ version; anything else bumps the patch version.
   after the previous one is confirmed. The old burst could overflow the
   KH10's write pipeline, which silently drops the overflow — a schedule
   push could lose its tail while reporting success.
+- A paced schedule push counts as one schedule write against the write
+  budget again, not one per frame: since the pacing (v0.5.0-rc.2) each
+  push spent 13, so one edit used up the default budget of 10 and
+  refused every schedule write and override for the next hour.
 - The in-flight timeout runs from the inverter's last response rather
   than from command start, so a steady paced push is not timed out
   mid-flight; a silent inverter still fails the command.
