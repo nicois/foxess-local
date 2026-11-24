@@ -1,6 +1,12 @@
 [Unit]
 Description=Foxess gate rule-loss check
+# after the gate: the installer starts both at once, and a timer past
+# its boot delay fires at once — checking a gate still loading reported
+# rule loss
+After=foxess-gate.service
 
 [Service]
 Type=oneshot
+# no inverter address yet (installer --no-inverter): nothing to check
+ExecCondition=/usr/local/lib/foxess-local/apply-gate.sh configured
 ExecStart=/usr/local/lib/foxess-local/check-gate.sh

@@ -235,3 +235,21 @@ func TestGateConfigured(t *testing.T) {
 		}
 	}
 }
+
+// TestGateCheckOrdered (test stick, 2026-11-24): the installer starts
+// the gate and the check timer together, and on a machine up for more
+// than 5 minutes the timer fires at once. The check then ran before the
+// gate had loaded, reported rule loss (an alert, and the app's
+// notification) and re-applied it. It must wait for the gate, and like
+// the gate it does nothing without an inverter address.
+func TestGateCheckOrdered(t *testing.T) {
+	b, err := os.ReadFile("foxess-gate-check.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"\nAfter=foxess-gate.service\n", "\nExecCondition=/usr/local/lib/foxess-local/apply-gate.sh configured\n"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("foxess-gate-check.service lacks %q:\n%s", strings.TrimSpace(want), b)
+		}
+	}
+}
