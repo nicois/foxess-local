@@ -163,15 +163,20 @@ func NewBus() *Bus {
 
 // PublishSnapshot publishes one live-value snapshot: to the live
 // subscribers, and as the latest for the next connection — not into the
-// replay ring, and with no id.
+// replay ring. Its id is each subscriber's own last discrete event (0
+// before any; owner, 2026-11-25): a client that has seen only snapshots
+// still resumes from its place, and a client whose queue dropped an
+// event is never moved past it.
 func (b *Bus) PublishSnapshot(e SnapshotEvent) Event {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	ev := Event{Kind: EventSnapshot, Data: e}
 	b.latest = &ev
 	for _, s := range b.subs {
+		sev := ev
+		sev.ID = s.lastID
 		select {
-		case s.ch <- ev:
+		case s.ch <- sev:
 		default: // superseded by the next one: not a gap
 		}
 	}
@@ -281,9 +286,14 @@ func (b *Bus) Connect(replayFrom int64, wantReplay bool) (*Subscription, []Event
 	if wantReplay {
 		replay, resync, resyncID = b.replayWindowLocked(replayFrom)
 	}
+	// the replay (or the resync) brings the client up to the newest
+	// event: its snapshots carry that id from here
+	sub.lastID = b.nextID
 	// every connection ends its replay with the current values
 	if b.latest != nil {
-		replay = append(replay, *b.latest)
+		ev := *b.latest
+		ev.ID = sub.lastID
+		replay = append(replay, ev)
 	}
 	return &Subscription{b: b, sub: sub}, replay, resync, resyncID
 }

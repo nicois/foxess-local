@@ -219,7 +219,8 @@ critical ones.
   state), `connection` (online / offline) and `system` (alerts, mode
   and window changes). It resumes from `Last-Event-ID`: the missed
   `config`, `connection` and `system` events, then the latest snapshot
-  (snapshots are not replayed, and carry no `id`).
+  (snapshots are not replayed; each carries the id of the last
+  discrete event sent, so a resume works from any event).
 - `GET /api/v1/history?range=24h` gives bucketed series and energy
   totals; `GET /api/v1/power/average?window=5m` a trailing mean.
 - `GET /readyz` (no token) answers 503 while something is wrong, and

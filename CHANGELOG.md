@@ -46,6 +46,13 @@ version; anything else bumps the patch version.
   release is new URLs, cached for good), and the page compares its tag
   with the service's on load, on reconnect and when shown again, and
   reloads when they differ.
+- "Running now" (and every other live change) no longer goes stale in
+  a tab that was in the background. The browser pauses the live feed
+  while a tab is hidden and resumes it from the last event id it saw;
+  snapshots carried no id, so a page that had seen only snapshots
+  resumed with none, and the change published meanwhile (a schedule
+  window starting) was lost. Each snapshot now carries the id of the
+  last change sent to that client.
 - The power-flow diagram's arrows sit in the middle of the visible part
   of each line, not at a fixed point that the boxes could push off
   centre.

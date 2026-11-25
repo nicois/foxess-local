@@ -248,7 +248,8 @@ func TestSSESnapshotsNotReplayed(t *testing.T) {
 		}
 	}
 	c.close()
-	if fmt.Sprint(got) != "[system/1 config/2 system/3 snapshot/0]" {
+	// the latest snapshot carries the newest event's id: the resume point
+	if fmt.Sprint(got) != "[system/1 config/2 system/3 snapshot/3]" {
 		t.Fatalf("replay: got %v, want the discrete events then the latest snapshot", got)
 	}
 
@@ -257,8 +258,8 @@ func TestSSESnapshotsNotReplayed(t *testing.T) {
 	if ev := c.next(); ev.kind != EventSystem || ev.id != 3 {
 		t.Fatalf("resume from 2: got %s/%d, want system/3", ev.kind, ev.id)
 	}
-	if ev := c.next(); ev.kind != EventSnapshot || ev.id != 0 {
-		t.Fatalf("resume from 2: got %s/%d, want the latest snapshot", ev.kind, ev.id)
+	if ev := c.next(); ev.kind != EventSnapshot || ev.id != 3 {
+		t.Fatalf("resume from 2: got %s/%d, want the latest snapshot (id 3)", ev.kind, ev.id)
 	}
 	c.close()
 
@@ -274,22 +275,58 @@ func TestSSESnapshotsNotReplayed(t *testing.T) {
 	}
 }
 
-// TestSSESnapshotHasNoID: a snapshot goes out without an id: line, so a
-// client's Last-Event-ID stays on the last discrete event (EventSource
-// and hx-sse keep the previous id when a message has none) and a
-// resume never skips one.
-func TestSSESnapshotHasNoID(t *testing.T) {
+// TestSSESnapshotCarriesLastID (owner, 2026-11-25): a snapshot carries,
+// as its id, the last discrete event this client was sent (0 before
+// any) — never one past it. A page that has only seen snapshots since it
+// connected (the usual case between schedule changes) still resumes
+// from its place: without an id, the SSE extension's background pause
+// reconnected with no Last-Event-ID, and a window's start published
+// while the tab was hidden was lost ("Running now" stayed stale).
+func TestSSESnapshotCarriesLastID(t *testing.T) {
 	h := newHarness(t)
+	auth := map[string]string{headerAuth: "Bearer " + h.tokens[RoleReadOnly]}
+	h.bus.PublishSnapshot(SnapshotEvent{SocPct: 41})
+	c := h.connectSSE(t, auth)
+	if ev := c.next(); ev.kind != EventSnapshot || ev.id != 0 {
+		t.Fatalf("connect, no events yet: %s/%d, want snapshot/0", ev.kind, ev.id)
+	}
+	c.close()
 	h.bus.PublishSystem(SystemEvent{Type: SystemAlert, Detail: "e1"})
-	c := h.connectSSE(t, map[string]string{headerAuth: "Bearer " + h.tokens[RoleReadOnly]})
+	c = h.connectSSE(t, auth) // a fresh page: no Last-Event-ID
 	defer c.close()
+	if ev := c.next(); ev.kind != EventSnapshot || ev.id != 1 {
+		t.Fatalf("connect after e1: %s/%d, want snapshot/1", ev.kind, ev.id)
+	}
 	h.bus.PublishSnapshot(SnapshotEvent{SocPct: 42})
-	_ = c.next()
-	c.rw.mu.Lock()
-	raw := string(c.rw.raw)
-	c.rw.mu.Unlock()
-	if !strings.Contains(raw, "event: snapshot\n") || strings.Contains(raw, "id: 0") || strings.Contains(raw, "id: 2") {
-		t.Fatalf("stream: %q, want a snapshot with no id line", raw)
+	if ev := c.next(); ev.kind != EventSnapshot || ev.id != 1 {
+		t.Fatalf("live snapshot: %s/%d, want snapshot/1", ev.kind, ev.id)
+	}
+	h.bus.PublishSystem(SystemEvent{Type: SystemAlert, Detail: "e2"})
+	if ev := c.next(); ev.kind != EventSystem || ev.id != 2 {
+		t.Fatalf("live e2: %s/%d, want system/2", ev.kind, ev.id)
+	}
+	h.bus.PublishSnapshot(SnapshotEvent{SocPct: 43})
+	if ev := c.next(); ev.id != 2 {
+		t.Fatalf("snapshot after e2: id %d, want 2", ev.id)
+	}
+}
+
+// TestSSEResumeAfterSnapshotsOnly: a page that saw only snapshots,
+// paused while an event was published, resumes from the snapshot's id
+// and is sent the event it missed.
+func TestSSEResumeAfterSnapshotsOnly(t *testing.T) {
+	h := newHarness(t)
+	auth := map[string]string{headerAuth: "Bearer " + h.tokens[RoleReadOnly]}
+	h.bus.PublishSystem(SystemEvent{Type: SystemAlert, Detail: "e1"})
+	h.bus.PublishSnapshot(SnapshotEvent{SocPct: 41})
+	c := h.connectSSE(t, auth)
+	last := c.next().id
+	c.close() // the tab goes to the background
+	h.bus.PublishConfig(ConfigEvent{Changed: []string{SectionActiveMode}})
+	c = h.connectSSE(t, mergeHeader(auth, map[string]string{headerLastEventID: fmt.Sprint(last)}))
+	defer c.close()
+	if ev := c.next(); ev.kind != EventConfig {
+		t.Fatalf("resumed from %d: got %s, want the missed config event", last, ev.kind)
 	}
 }
 
@@ -348,7 +385,8 @@ func TestSSEResyncFreshServer(t *testing.T) {
 }
 
 // TestSSELive: a fresh connection (no Last-Event-ID) is live-only; a
-// publish after the connect arrives.
+// publish after the connect arrives, with the id of the newest event
+// before it (its resume point).
 func TestSSELive(t *testing.T) {
 	h := newHarness(t)
 	h.bus.PublishSystem(SystemEvent{Type: SystemAlert, Detail: "before"})
@@ -356,8 +394,8 @@ func TestSSELive(t *testing.T) {
 	defer c.close()
 	h.bus.PublishSnapshot(SnapshotEvent{TS: testBase, SocPct: 42, BatteryState: "idle"})
 	ev := c.next()
-	if ev.kind != "snapshot" || ev.id != 0 || !contains(ev.data, `"soc_pct":42`) {
-		t.Fatalf("live: got kind=%q id=%d data=%s, want a snapshot without an id", ev.kind, ev.id, ev.data)
+	if ev.kind != "snapshot" || ev.id != 1 || !contains(ev.data, `"soc_pct":42`) {
+		t.Fatalf("live: got kind=%q id=%d data=%s, want a snapshot with id 1", ev.kind, ev.id, ev.data)
 	}
 	// behind nginx (the TLS route): the stream must not be buffered
 	if got := c.rw.header.Get("X-Accel-Buffering"); got != "no" {

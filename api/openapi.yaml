@@ -1708,7 +1708,7 @@ paths:
 
         | event | payload |
         |---|---|
-        | `snapshot` | `SnapshotEvent` — the live values, every reading (~5 s); no `id` |
+        | `snapshot` | `SnapshotEvent` — the live values, every reading (~5 s); `id` = your last discrete event |
         | `config` | `ConfigEvent` — any confirmed register change (ours or a cloud push) |
         | `connection` | `ConnectionEvent` — inverter liveness up/down (session down, or data-silent >15 s — server-computed) |
         | `system` | `SystemEvent` — forward-mode change, maintenance window transitions, alerts |
@@ -1719,8 +1719,9 @@ paths:
         `Last-Event-ID` for replay. The replay window is the last 1024
         discrete events (`config`, `connection`, `system`). Snapshots are
         not replayed — each only says what the values are now, and the
-        next supersedes it — and carry no `id`, so the client's
-        Last-Event-ID stays on the last discrete event. Every connection
+        next supersedes it. A snapshot's `id` is the last discrete event
+        sent to this connection (0 before any), so even a client that
+        has seen only snapshots resumes from its place. Every connection
         (fresh or resumed) sends the latest snapshot after its replay, so
         the current values arrive at once. A client that falls behind
         drops snapshots silently; `gap` reports dropped discrete events
