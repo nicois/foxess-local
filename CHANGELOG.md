@@ -20,6 +20,8 @@ version; anything else bumps the patch version.
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-11-25
+
 ### Added
 
 - A schedule override's start and end are notified (webhook / ntfy, at
