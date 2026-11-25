@@ -121,12 +121,34 @@ without a cap: a standard token could page the owner at priority 5.
 `internal/store::TestNotices`, `TestOutboxSurvivesReopen`;
 `internal/api::TestNoticePost`, `TestNoticeRefusals`.
 
+### D-031: An automation's own data goes to the owner's metrics stack, not into foxess-local
+**Context** (owner, 2026-11-26): graph the price an automation acts on
+beside the battery. A sidecar API that stores its series in
+foxess-local, kept and shown like the inverter's, was weighed and
+dropped: the inverter's series are fixed columns (one migration each),
+retention is per inverter session, the 15-minute rollup assumes 5 s
+samples, a third standard-token write path would land on fragile
+storage, and a sidecar's titles cannot be translated.
+**Decision** (owner, 2026-11-26): a sidecar exports its own metrics
+over OTLP/HTTP to the owner's collector (otelcol → Mimir / Prometheus →
+Grafana). foxess-local is not involved. The example does it with the
+standard library (`otlp.go`): off unless an endpoint is set (`-otlp` or
+the standard `OTEL_EXPORTER_OTLP_*` variables), one push per tick, a
+failed push only logged.
+**Rejected**: `PUT /series/{name}/points` with namespaced, capped series
+and their own rollup: a second store inside foxess-local for one
+example's data; the OTel SDK: a much larger binary and RSS on an
+OpenStick, for one small request every 5 minutes.
+**Traces**: `examples/aemo-spike::TestOTLPFromEnv`,
+`TestTickExportsMetrics`, `TestTickExportsErrors`.
+
 ## The worked example: `examples/aemo-spike`
 
 A force discharge on NEM price spikes (AEMO's NEMWeb DispatchIS reports,
 the `DISPATCH,PRICE` table's `RRP`): some plans reward exporting while
 the wholesale price is high. Its only network sources are NEMWeb and
-the foxess-local API. Policy (`Policy.Decide`) is a pure
+the foxess-local API, plus an OTLP collector when metrics are on
+(D-031). Policy (`Policy.Decide`) is a pure
 function with a table test; the loop holds a 30-minute lease, renewed
 under 10 minutes left, with ends rounded to 5 minutes. Standard library
 only; ~7 MB static, ~14 MB peak RSS for one decision; a systemd unit
@@ -134,4 +156,4 @@ with `DynamicUser`, `MemoryMax=48M`. It is not shipped: an example to
 copy.
 **Traces**: `examples/aemo-spike::TestParseDispatchCSV` (a real report's
 rows, public data), `TestNEMWebLatest`, `TestDecide`,
-`TestTickStartsAndNotifies`, `TestNextTick`.
+`TestTickStartsAndNotifies`, `TestNextTick`; metrics: D-031.

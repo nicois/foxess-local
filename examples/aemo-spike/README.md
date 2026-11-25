@@ -80,6 +80,7 @@ Why a lease:
 | `-power` | 5000 | the window's power, W |
 | `-min-hold` | 10m | once started, run at least this long |
 | `-lease` / `-renew-before` | 30m / 10m | the lease |
+| `-otlp` | off | push metrics to this OTLP/HTTP endpoint (see below) |
 
 Some plans reward exporting while the wholesale price is high. That
 reward is why discharging on a price spike pays. Choose the thresholds
@@ -88,6 +89,60 @@ for your plan.
 Grid export can be capped by your connection agreement, for example
 5 kW above your own use. If your inverter's export limit is set to that
 cap, it applies whatever `-power` says.
+
+## Metrics (optional)
+
+To graph the price beside your battery, point the sidecar at an
+OpenTelemetry collector. foxess-local is not involved. After each
+decision the sidecar pushes one small OTLP/HTTP (JSON) request: every
+5 minutes, with no SDK and no listening port. Metrics are off unless
+an endpoint is set. A failed push is logged and changes nothing else.
+
+It reads the standard variables (put them in `/etc/aemo-spike/env`):
+
+| Variable | Meaning |
+|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | the collector, e.g. `http://otelcol:4318` (`/v1/metrics` is added) |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | the full URL instead; `-otlp` overrides both |
+| `OTEL_EXPORTER_OTLP_HEADERS` | `k=v,k=v`, values URL-encoded, e.g. `X-Scope-OrgID=home` |
+| `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | the resource (`service.name` defaults to `-name`) |
+
+The metrics, with the names Prometheus and Mimir give them:
+
+| OTLP name | Prometheus | What |
+|---|---|---|
+| `aemo.dispatch.price` {region} | `aemo_dispatch_price_AUD_per_MWh` | the dispatch price, stamped with its interval's end |
+| `aemo_spike.battery.soc` | `aemo_spike_battery_soc_percent` | the SoC read from foxess-local |
+| `aemo_spike.override.active` / `.held` | `aemo_spike_override_active` / `_held` | 1 while any override is active / while this sidecar holds it |
+| `aemo_spike.threshold` {kind=start\|stop} | `aemo_spike_threshold_AUD_per_MWh` | `-start-above` and `-stop-below`, to draw as lines |
+| `aemo_spike.decisions` {action} | `aemo_spike_decisions_total` | decisions (hold, start, stop), a counter |
+| `aemo_spike.errors` {source} | `aemo_spike_errors_total` | failed steps (foxess, nemweb, override), a counter |
+
+A value the tick did not see (no price, foxess-local unreachable) is
+left out, not sent as 0. Points arrive every 5 minutes, and the price
+lands ~40 s after its timestamp. Prometheus's default 5-minute lookback
+therefore leaves gaps, so graph with
+`last_over_time(aemo_dispatch_price_AUD_per_MWh[10m])`. Alert on
+`increase(aemo_spike_errors_total[30m]) > 0`, or on the price going
+absent.
+
+A minimal collector pipeline:
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+exporters:
+  prometheusremotewrite:
+    endpoint: http://mimir:9009/api/v1/push
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      exporters: [prometheusremotewrite]
+```
 
 ## Adapting it
 

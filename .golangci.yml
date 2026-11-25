@@ -72,6 +72,11 @@ linters:
       - path: internal/mcp/
         linters:
           - tagliatelle
+      # examples/aemo-spike's metrics speak OTLP/HTTP JSON, whose names
+      # are camelCase (resourceMetrics, timeUnixNano).
+      - path: examples/aemo-spike/otlp(_test)?\.go
+        linters:
+          - tagliatelle
       # tools/synthdb and tools/loadgen model the device's rates, frame
       # sizes and the UI's request mix: illustrative numbers, not tunables.
       - path: tools/(synthdb|loadgen)/

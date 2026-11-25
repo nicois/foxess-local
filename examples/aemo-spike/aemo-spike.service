@@ -12,6 +12,8 @@ Wants=network-online.target
 
 [Service]
 EnvironmentFile=/etc/aemo-spike/env
+# optional metrics (README "Metrics"): add to /etc/aemo-spike/env, e.g.
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
 # keep the Go runtime small on an OpenStick
 Environment=GOMEMLIMIT=24MiB GOGC=50
 ExecStart=/usr/local/bin/aemo-spike -region VIC1 -start-above 300 -stop-below 200 -start-soc 40 -cutoff-soc 30

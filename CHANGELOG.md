@@ -20,6 +20,14 @@ version; anything else bumps the patch version.
 
 ## [Unreleased]
 
+### Added
+
+- `examples/aemo-spike` can push its metrics (the dispatch price, the
+  SoC it saw, its override and decisions, failures) to an OpenTelemetry
+  collector over OTLP/HTTP, for Grafana via Mimir or Prometheus. It is
+  off unless `OTEL_EXPORTER_OTLP_ENDPOINT` or `-otlp` is set.
+  foxess-local is not involved.
+
 ## [v0.5.0] - 2026-11-25
 
 ### Added

@@ -33,6 +33,7 @@ const (
 	defOffset      = 40 * time.Second
 	priceMaxAge    = 15 * time.Minute
 	httpTimeout    = 30 * time.Second
+	otlpTimeout    = 10 * time.Second
 	exitUsage      = 2
 	minCutoffSoc   = 10 // the inverter's range for a force window's SoC
 	maxCutoffSoc   = 100
@@ -46,6 +47,7 @@ type config struct {
 	offset               time.Duration
 	dryRun, once         bool
 	policy               Policy
+	otlp                 otlpConfig
 }
 
 func parseFlags(args []string) (config, error) {
@@ -66,10 +68,15 @@ func parseFlags(args []string) (config, error) {
 	fs.DurationVar(&c.offset, "offset", defOffset, "how long after each 5-minute boundary to look (AEMO publishes ~20 s after)")
 	fs.BoolVar(&c.dryRun, "dry-run", false, "decide and log, change nothing")
 	fs.BoolVar(&c.once, "once", false, "one decision, then exit")
+	otlpEndpoint := fs.String("otlp", "", "push metrics to this OTLP/HTTP endpoint (…/v1/metrics); default from OTEL_EXPORTER_OTLP_[METRICS_]ENDPOINT, none = off")
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}
 	c.policy.PriceMaxAge = priceMaxAge
+	c.otlp = otlpFromEnv(os.Getenv, c.name)
+	if *otlpEndpoint != "" {
+		c.otlp.Endpoint = *otlpEndpoint
+	}
 	switch {
 	case c.policy.CutoffSoc < minCutoffSoc || c.policy.CutoffSoc > maxCutoffSoc:
 		return c, errors.New("-cutoff-soc must be in 10..100")
@@ -105,6 +112,10 @@ func main() {
 		api: &Client{Base: cfg.foxess, Token: token, Client: hc},
 		src: &NEMWeb{Base: cfg.nemweb, Client: hc},
 	}
+	if cfg.otlp.Endpoint != "" {
+		s.metrics = newMetrics(cfg.otlp, &http.Client{Timeout: otlpTimeout}, time.Now())
+		slog.Info("metrics", "otlp", cfg.otlp.Endpoint)
+	}
 	for {
 		s.tick(ctx, time.Now())
 		if cfg.once {
@@ -132,15 +143,19 @@ func nextTick(now time.Time, offset time.Duration) time.Duration {
 
 // sidecar is the loop's state.
 type sidecar struct {
-	cfg config
-	api *Client
-	src PriceSource
+	cfg     config
+	api     *Client
+	src     PriceSource
+	metrics *Metrics // nil = no metrics
 }
 
-// tick makes one decision and acts on it.
+// tick makes one decision and acts on it, then pushes what it saw.
 func (s *sidecar) tick(ctx context.Context, now time.Time) {
+	obs := observation{now: now, socPct: -1}
+	defer s.export(ctx, &obs)
 	st, err := s.api.State(ctx)
 	if err != nil {
+		obs.errs = append(obs.errs, errFoxess)
 		slog.Warn("foxess-local unreachable; nothing changed", "err", err)
 		return
 	}
@@ -148,24 +163,41 @@ func (s *sidecar) tick(ctx context.Context, now time.Time) {
 	if st.Online && st.Battery.SocPct != nil {
 		in.SocPct = *st.Battery.SocPct
 	}
+	obs.socPct, obs.known = in.SocPct, true
 	if o := st.Override; o != nil && o.Active {
+		obs.overrideActive = true
 		if o.Holder != s.cfg.name {
 			slog.Info("the override is held by another token; left alone", "holder", o.Holder, "until", o.Until)
 			return
 		}
+		obs.held = true
 		in.Active, in.Since, in.Until = true, o.Since, o.Until
 	}
 	if p, err := s.src.Latest(ctx, s.cfg.region); err != nil {
+		obs.errs = append(obs.errs, errNEMWeb)
 		slog.Warn("no price", "err", err)
 	} else {
-		in.Price = &p
+		in.Price, obs.price = &p, &p
 	}
 	d := s.cfg.policy.Decide(in)
-	slog.Info("decision", "action", actionName[d.Action], "reason", d.Reason, "soc", in.SocPct, "price", priceText(in.Price))
+	obs.action = actionName[d.Action]
+	slog.Info("decision", "action", obs.action, "reason", d.Reason, "soc", in.SocPct, "price", priceText(in.Price))
 	if s.cfg.dryRun || d.Action == Hold {
 		return
 	}
-	s.act(ctx, d, in)
+	s.act(ctx, d, in, &obs)
+}
+
+// export pushes obs when metrics are on; a failure is only logged.
+func (s *sidecar) export(ctx context.Context, obs *observation) {
+	if s.metrics == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), otlpTimeout)
+	defer cancel()
+	if err := s.metrics.Export(ctx, *obs, s.cfg.policy); err != nil {
+		slog.Warn("metrics not pushed", "err", err)
+	}
 }
 
 var actionName = map[Action]string{Hold: "hold", Start: "start", Stop: "stop"}
@@ -178,15 +210,17 @@ func priceText(p *Price) string {
 }
 
 // act applies a Start or Stop; a start (or a refusal) tells the owner why.
-func (s *sidecar) act(ctx context.Context, d Decision, in Inputs) {
+func (s *sidecar) act(ctx context.Context, d Decision, in Inputs, obs *observation) {
 	switch d.Action {
 	case Start:
 		o, err := s.api.SetOverride(ctx, d.Until, s.cfg.policy.CutoffSoc, s.cfg.powerW)
 		if err != nil {
+			obs.errs = append(obs.errs, errOverride)
 			slog.Warn("override refused", "err", err)
 			s.notice(ctx, "override-refused", "warning", "Force discharge not started", d.Reason+": "+err.Error())
 			return
 		}
+		obs.overrideActive, obs.held = true, true
 		slog.Info("override", "until", o.Until, "renewal", in.Active)
 		// foxess-local notifies the override's start and end itself (the
 		// power, window and cut-off); this adds only what it cannot know.
@@ -195,9 +229,11 @@ func (s *sidecar) act(ctx context.Context, d Decision, in Inputs) {
 		}
 	case Stop:
 		if err := s.api.ClearOverride(ctx); err != nil {
+			obs.errs = append(obs.errs, errOverride)
 			slog.Warn("clear refused; the override lapses at its end", "err", err)
 			return
 		}
+		obs.overrideActive, obs.held = false, false
 		slog.Info("override cleared", "reason", d.Reason) // foxess-local notifies the end
 	case Hold:
 	}

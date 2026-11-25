@@ -320,7 +320,7 @@ func TestTickStartsAndNotifies(t *testing.T) {
 	defer srv.Close()
 	now := time.Now()
 	s := &sidecar{
-		cfg: config{name: "aemo-spike", region: vic1, powerW: 5000, policy: testPolicy},
+		cfg: config{name: sidecarName, region: vic1, powerW: 5000, policy: testPolicy},
 		api: &Client{Base: srv.URL, Token: "tok", Client: srv.Client()},
 		src: fixedPrice{Price{Region: vic1, RRP: 2000, At: now}},
 	}
@@ -334,7 +334,7 @@ func TestTickStartsAndNotifies(t *testing.T) {
 		t.Fatalf("start notice: %v", notices)
 	}
 	s.tick(context.Background(), now)
-	if calls, _ := fake.take("aemo-spike"); calls != "GET /api/v1/state" {
+	if calls, _ := fake.take(sidecarName); calls != "GET /api/v1/state" {
 		t.Fatalf("another holder: %v", calls)
 	}
 	s.src = fixedPrice{Price{Region: vic1, RRP: 50, At: now}}
