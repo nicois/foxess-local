@@ -256,3 +256,16 @@ func TestFirmwareTaskEvent(t *testing.T) {
 		t.Errorf("blocked %q / passed %q", blocked.Detail, passed.Detail)
 	}
 }
+
+// TestScheduleOverrideNotices (owner, 2026-11-25): an override's start
+// and end are notified at info (ntfy's default priority, 3 of 5), with
+// the event's detail as the message.
+func TestScheduleOverrideNotices(t *testing.T) {
+	var c connWatch
+	for _, typ := range []string{api.SystemScheduleOverrideStarted, api.SystemScheduleOverrideEnded} {
+		n, ok := c.noticeFor(api.Event{Kind: api.EventSystem, Data: api.SystemEvent{Type: typ, Detail: "d"}})
+		if !ok || n.Severity != notify.Info || n.Event != typ || n.Message != "d" || n.Title == "" {
+			t.Fatalf("%s notice: %+v %v", typ, n, ok)
+		}
+	}
+}

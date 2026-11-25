@@ -441,7 +441,7 @@ func (s *Server) applyOverride(ctx context.Context, tk Token, cur *schedOverride
 	}
 	if !renewal {
 		s.bus.PublishSystem(SystemEvent{Type: SystemScheduleOverrideStarted, Detail: fmt.Sprintf(
-			"%s started a %s until %s (inverter time), cut-off %d %%", tk.Name, req.Mode, g.End, g.FdSocPct)})
+			"%s started a %s at %d W until %s (inverter time), cut-off %d %%", tk.Name, req.Mode, g.FdPwrW, g.End, g.FdSocPct)})
 	}
 	return next, commandResponse{status: http.StatusOK}
 }

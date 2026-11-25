@@ -256,41 +256,67 @@ type fixedPrice struct{ p Price }
 
 func (f fixedPrice) Latest(context.Context, string) (Price, error) { return f.p, nil }
 
-// TestTickStartsAndNotifies: on a spike the tick puts the override with
-// the cut-off and power, then sends one notice; an override held by
-// another token is left alone.
-func TestTickStartsAndNotifies(t *testing.T) {
-	var (
-		mu     sync.Mutex
-		calls  []string
-		holder = ""
-	)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		if r.Header.Get("Authorization") != "Bearer tok" {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
+// fakeFoxess is a foxess-local stand-in: it records each call and the
+// notices, and reports an override held by holder ("" = none).
+type fakeFoxess struct {
+	t       *testing.T
+	mu      sync.Mutex
+	calls   []string
+	notices []map[string]any
+	holder  string
+}
+
+func (f *fakeFoxess) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if r.Header.Get("Authorization") != "Bearer tok" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	var body map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	f.calls = append(f.calls, r.Method+" "+r.URL.Path)
+	switch r.URL.Path {
+	case "/api/v1/state":
+		ov := map[string]any{keyActive: false}
+		if f.holder != "" {
+			ov = map[string]any{keyActive: true, "holder": f.holder, "until": time.Now().Add(time.Hour), "since": time.Now().Add(-time.Hour)}
 		}
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		calls = append(calls, r.Method+" "+r.URL.Path)
-		switch r.URL.Path {
-		case "/api/v1/state":
-			ov := map[string]any{keyActive: false}
-			if holder != "" {
-				ov = map[string]any{keyActive: true, "holder": holder, "until": time.Now().Add(time.Hour)}
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"online": true, "battery": map[string]any{"soc_pct": 80}, "schedule_override": ov})
-		case "/api/v1/schedule/override":
+		if err := json.NewEncoder(w).Encode(map[string]any{"online": true, "battery": map[string]any{"soc_pct": 80}, "schedule_override": ov}); err != nil {
+			f.t.Error(err)
+		}
+	case "/api/v1/schedule/override":
+		if r.Method == http.MethodPut {
 			if body["fd_soc_pct"] != 30.0 || body["fd_pwr_w"] != 5000.0 || body["mode"] != "force-discharge" {
-				t.Errorf("override body %v", body)
+				f.t.Errorf("override body %v", body)
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{keyActive: true, "until": body["until"]})
-		case "/api/v1/notices":
-			w.WriteHeader(http.StatusAccepted)
+			if err := json.NewEncoder(w).Encode(map[string]any{keyActive: true, "until": body["until"]}); err != nil {
+				f.t.Error(err)
+			}
 		}
-	}))
+	case "/api/v1/notices":
+		f.notices = append(f.notices, body)
+		w.WriteHeader(http.StatusAccepted)
+	}
+}
+
+// take returns the calls and notices so far and resets them, with the
+// next holder.
+func (f *fakeFoxess) take(holder string) (string, []map[string]any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	calls, notices := strings.Join(f.calls, ", "), f.notices
+	f.calls, f.notices, f.holder = nil, nil, holder
+	return calls, notices
+}
+
+// TestTickStartsAndNotifies: on a spike the tick puts the override with
+// the cut-off and power, then sends one short notice with the price
+// (foxess-local notifies the override itself: owner, 2026-11-25); an
+// override held by another token is left alone; a stop sends no notice.
+func TestTickStartsAndNotifies(t *testing.T) {
+	fake := &fakeFoxess{t: t}
+	srv := httptest.NewServer(fake)
 	defer srv.Close()
 	now := time.Now()
 	s := &sidecar{
@@ -299,18 +325,22 @@ func TestTickStartsAndNotifies(t *testing.T) {
 		src: fixedPrice{Price{Region: vic1, RRP: 2000, At: now}},
 	}
 	s.tick(context.Background(), now)
-	mu.Lock()
-	got := strings.Join(calls, ", ")
-	calls, holder = nil, "someone-else"
-	mu.Unlock()
-	if got != "GET /api/v1/state, PUT /api/v1/schedule/override, POST /api/v1/notices" {
-		t.Fatalf("calls: %s", got)
+	calls, notices := fake.take("someone-else")
+	if calls != "GET /api/v1/state, PUT /api/v1/schedule/override, POST /api/v1/notices" {
+		t.Fatalf("calls: %s", calls)
+	}
+	if len(notices) != 1 || notices[0]["event"] != "price-spike" || notices[0]["title"] != "Price spike" ||
+		notices[0]["message"] != "VIC1 at $2000/MWh." {
+		t.Fatalf("start notice: %v", notices)
 	}
 	s.tick(context.Background(), now)
-	mu.Lock()
-	defer mu.Unlock()
-	if strings.Join(calls, ", ") != "GET /api/v1/state" {
+	if calls, _ := fake.take("aemo-spike"); calls != "GET /api/v1/state" {
 		t.Fatalf("another holder: %v", calls)
+	}
+	s.src = fixedPrice{Price{Region: vic1, RRP: 50, At: now}}
+	s.tick(context.Background(), now)
+	if calls, notices := fake.take(""); calls != "GET /api/v1/state, DELETE /api/v1/schedule/override" || len(notices) != 0 {
+		t.Fatalf("stop: %s, notices %v", calls, notices)
 	}
 }
 

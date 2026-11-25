@@ -66,8 +66,13 @@ power. foxess-local places and clears the window:
   (the example: 30-minute leases, renewed when under 10 minutes remain).
 - The audit names the holder; `GET /state` carries `schedule_override`;
   the system events `schedule-override-started` / `-ended` reach the UI
-  (not notified: the sidecar notifies, D-030). "Running now" names the
-  holder and the end, with "End override now".
+  and are notified at `info` (ntfy priority 3): the holder, mode, power,
+  window and cut-off; the end gives why (expired, ended by …). A renewal
+  is not news. (Owner, 2026-11-25; until then only the sidecar notified,
+  D-030. The example now sends only what foxess-local cannot know: a
+  short "Price spike" notice with the price at the start, and a refusal;
+  no notice at the end.)
+  "Running now" names the holder and the end, with "End override now".
 **Rejected**:
 - a sidecar editing `PUT /schedule` itself: the races and the daily
   recurrence above, re-solved by every sidecar;
@@ -78,7 +83,8 @@ power. foxess-local places and clears the window:
 **Traces**: `internal/api::TestPlanOverride`, `TestScheduleOverrideStart`,
 `TestScheduleOverrideRenew`, `TestScheduleOverrideDelete`,
 `TestScheduleOverrideExpiry`, `TestScheduleOverrideOwnerChanged`,
-`TestScheduleOverrideRefusals`, `TestRunOverridesExpiry` (synctest).
+`TestScheduleOverrideRefusals`, `TestRunOverridesExpiry` (synctest);
+`cmd/foxess-local::TestScheduleOverrideNotices`.
 
 ### D-030: Notices from automations, and a kept list of every notice
 **Context** (owner, 2026-11-21): a sidecar should tell the owner what it

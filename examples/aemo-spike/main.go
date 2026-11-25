@@ -177,7 +177,7 @@ func priceText(p *Price) string {
 	return fmt.Sprintf("%s $%.2f/MWh for %s", p.Region, p.RRP, p.At.Local().Format("15:04"))
 }
 
-// act applies a Start or Stop and tells the owner.
+// act applies a Start or Stop; a start (or a refusal) tells the owner why.
 func (s *sidecar) act(ctx context.Context, d Decision, in Inputs) {
 	switch d.Action {
 	case Start:
@@ -188,16 +188,17 @@ func (s *sidecar) act(ctx context.Context, d Decision, in Inputs) {
 			return
 		}
 		slog.Info("override", "until", o.Until, "renewal", in.Active)
+		// foxess-local notifies the override's start and end itself (the
+		// power, window and cut-off); this adds only what it cannot know.
 		if !in.Active {
-			s.notice(ctx, "discharge-started", "info", "Force discharge started",
-				fmt.Sprintf("%s; SoC %d %%, stops at %d %%; until %s unless renewed.", d.Reason, in.SocPct, s.cfg.policy.CutoffSoc, o.Until.Local().Format("15:04")))
+			s.notice(ctx, "price-spike", "info", "Price spike", d.Reason+".")
 		}
 	case Stop:
 		if err := s.api.ClearOverride(ctx); err != nil {
 			slog.Warn("clear refused; the override lapses at its end", "err", err)
 			return
 		}
-		s.notice(ctx, "discharge-ended", "info", "Force discharge ended", d.Reason+".")
+		slog.Info("override cleared", "reason", d.Reason) // foxess-local notifies the end
 	case Hold:
 	}
 }

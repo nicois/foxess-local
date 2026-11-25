@@ -27,26 +27,29 @@ const (
 )
 
 // systemNotices maps the system events that are notified to their
-// severity and title (any other type is not). Every one is at least a
+// severity and title (any other type is not). Most are at least a
 // warning (ntfy priority high): the owner asked for these to stand
-// out; only "back online" and the test notice are info (ntfy default).
+// out. Info (ntfy default, 3 of 5): back online, grid back, the test
+// notice, and a schedule override's start and end (owner, 2026-11-25).
 var systemNotices = map[string]struct {
 	sev   notify.Severity
 	title string
 }{
-	api.SystemAlert:              {notify.Warning, "foxess-local alert"},
-	api.SystemGridLost:           {notify.Critical, "Grid down: the inverter is on backup"},
-	api.SystemGridRestored:       {notify.Info, "Grid back"},
-	api.SystemUncleanRestart:     {notify.Warning, "foxess-local restarted after an unexpected stop"},
-	api.SystemBatteryLow:         {notify.Warning, "Battery low"},
-	api.SystemBatteryForecastLow: {notify.Warning, "Battery running low"},
-	api.SystemGateRuleLoss:       {notify.Critical, "Gate rule loss: the inverter was unfiltered"},
-	api.SystemUpgradeRolledBack:  {notify.Critical, "Upgrade rolled back"},
-	api.SystemMaintenanceOpened:  {notify.Warning, "Maintenance window opened: the cloud may write to the inverter"},
-	api.SystemMaintenanceClosed:  {notify.Warning, "Maintenance window closed"},
-	api.SystemMaintenanceExpired: {notify.Warning, "Maintenance window expired"},
-	api.SystemForwardModeChanged: {notify.Warning, "Cloud forwarding changed"},
-	api.SystemFirmwareTask:       {notify.Warning, "The cloud requested a firmware update"},
+	api.SystemAlert:                   {notify.Warning, "foxess-local alert"},
+	api.SystemGridLost:                {notify.Critical, "Grid down: the inverter is on backup"},
+	api.SystemGridRestored:            {notify.Info, "Grid back"},
+	api.SystemUncleanRestart:          {notify.Warning, "foxess-local restarted after an unexpected stop"},
+	api.SystemBatteryLow:              {notify.Warning, "Battery low"},
+	api.SystemBatteryForecastLow:      {notify.Warning, "Battery running low"},
+	api.SystemGateRuleLoss:            {notify.Critical, "Gate rule loss: the inverter was unfiltered"},
+	api.SystemUpgradeRolledBack:       {notify.Critical, "Upgrade rolled back"},
+	api.SystemMaintenanceOpened:       {notify.Warning, "Maintenance window opened: the cloud may write to the inverter"},
+	api.SystemMaintenanceClosed:       {notify.Warning, "Maintenance window closed"},
+	api.SystemMaintenanceExpired:      {notify.Warning, "Maintenance window expired"},
+	api.SystemForwardModeChanged:      {notify.Warning, "Cloud forwarding changed"},
+	api.SystemFirmwareTask:            {notify.Warning, "The cloud requested a firmware update"},
+	api.SystemScheduleOverrideStarted: {notify.Info, "Schedule override started"},
+	api.SystemScheduleOverrideEnded:   {notify.Info, "Schedule override ended"},
 }
 
 // firmwareTaskEvent describes a cloud firmware upgrade task: the

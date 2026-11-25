@@ -21,7 +21,7 @@ A sidecar decides *when* to act. foxess-local decides *how*.
 | reads the price and the SoC | owns the schedule table |
 | decides start / renew / stop (`decide.go`) | puts the force window in a free group without moving yours |
 | holds a **lease** — `PUT /api/v1/schedule/override` with `until` 30 min ahead, renewed while it wants it | clears the window when the lease ends, on `DELETE`, or after a restart |
-| sends notices — `POST /api/v1/notices` | delivers them to your webhook / ntfy and lists them under Activity → Notices |
+| sends a notice with the price when it starts, and one when it is refused — `POST /api/v1/notices` | notifies the override's start (power, window, cut-off) and end itself; delivers the sidecar's notices to your webhook / ntfy and lists them all under Activity → Notices |
 
 **Keep schedule group 1 disabled.** The inverter runs the first enabled
 group (by number) whose window covers the time, and foxess-local treats

@@ -22,6 +22,13 @@ version; anything else bumps the patch version.
 
 ### Added
 
+- A schedule override's start and end are notified (webhook / ntfy, at
+  info: ntfy's default priority), naming the holder, the mode, the
+  power, the window and the cut-off SoC, and for the end, why it ended.
+  The `examples/aemo-spike` automation no longer sends its own
+  start/end notices: only a short "Price spike" one with the price when
+  it starts a discharge (and a refusal, as before).
+
 - The UI language can be chosen from the header: a globe icon shows the
   current language, the switcher changes it — on every page and for
   every visitor, including the tokenless dashboard (the System → Site
