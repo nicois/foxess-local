@@ -98,9 +98,22 @@ func TestFullModeHoldsFirmwareSized(t *testing.T) {
 	held, err := r.st.AuditFrames(decDropped, capture.DirS2C)
 	require.NoError(t, err)
 	require.Len(t, held, 3, "the three firmware frames are held")
+	reasons := map[string]bool{}
 	for i, row := range held {
 		require.Contains(t, row.Reason, "mode:full hold:", "row %d", i)
 		require.Contains(t, row.Reason, "maintenance window", "row %d", i)
+		reasons[row.Reason] = true
+	}
+	// Each distinct drop reason is also an audit event, once per
+	// connection: the frame rows go with the raw window, the event
+	// outlives it (issue #1: a report taken after 72 h showed nothing).
+	drops, err := r.st.QueryAudit(time.Time{}, auditCloudDrop)
+	require.NoError(t, err)
+	require.Len(t, drops, len(reasons), "one event per distinct reason")
+	for _, ev := range drops {
+		_, reason, ok := strings.Cut(ev.Detail, ": ")
+		require.True(t, ok, "detail %q", ev.Detail)
+		require.True(t, reasons[reason], "detail %q", ev.Detail)
 	}
 	fwd, err := r.st.AuditFrames(decForwarded, capture.DirS2C)
 	require.NoError(t, err)
@@ -897,4 +910,26 @@ func TestCaptureSeesRawChunks(t *testing.T) {
 	defer mu.Unlock()
 	require.Equal(t, keepaliveFrame(t), c2s)
 	require.Equal(t, fw, s2c, "the held firmware chunk is captured verbatim")
+}
+
+// TestCloudDropAuditBounded: each distinct drop reason is audited once
+// per connection, up to maxDropReasons, then one note says the rest are
+// in the frame log only; a new connection starts afresh.
+func TestCloudDropAuditBounded(t *testing.T) {
+	r := newRig(t, fullPosture())
+	now := time.Now()
+	a, b := &flow{}, &flow{}
+	for range 2 {
+		for i := range maxDropReasons + 5 {
+			r.svc.noteDrop("c1", a, fullPosture(), fmt.Sprintf("reason %d", i), now)
+		}
+	}
+	r.svc.noteDrop("c2", b, fullPosture(), "reason 0", now)
+	r.st.Flush()
+	evts, err := r.st.QueryAudit(time.Time{}, auditCloudDrop)
+	require.NoError(t, err)
+	require.Len(t, evts, maxDropReasons+2)
+	require.Equal(t, "c1: reason 0", evts[0].Detail)
+	require.Contains(t, evts[maxDropReasons].Detail, "frame log only")
+	require.Equal(t, "c2: reason 0", evts[maxDropReasons+1].Detail)
 }

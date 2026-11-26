@@ -19,6 +19,7 @@
 import { tr, locale, setLang } from "./i18n.js";
 import { smallMultiples } from "./charts.js";
 import { socView } from "./socview.js";
+import { bundlePeriods, reportPeriods } from "./periods.js";
 
 // API is the API's path, relative to the page: the UI also works behind
 // a reverse proxy under a path prefix (/foxess/ → /foxess/api/v1). A
@@ -3205,15 +3206,34 @@ async function renderStorage() {
   </section>`;
 }
 
+// The diagnostics periods (hours) and their labels; periods.js decides
+// which a retention allows.
+const PERIOD_CHOICES = [6, 24, 72, 168];
+const BUNDLE_PERIOD_LABELS = { 6: tr("last 6 hours"), 24: tr("last 24 hours"), 72: tr("last 3 days"), 168: tr("last 7 days") };
+const REPORT_PERIOD_LABELS = { 6: tr("the last 6 hours"), 24: tr("the last 24 hours"), 72: tr("the last 3 days"), 168: tr("the last week") };
+
+// periodOptions renders [hours, label] pairs; 24 h is preselected, or the
+// longest when 24 h is not offered.
+function periodOptions(pairs) {
+  const pick = pairs.some(([h]) => h === 24) ? 24 : pairs.at(-1)?.[0];
+  return pairs.map(([h, label]) => `<option value="${h}" ${h === pick ? "selected" : ""}>${esc(label)}</option>`).join("");
+}
+
+// retentionNote: how far back the bundle's messages reach (frames are
+// kept retention.raw_hours after their connection closed; S.cfg).
+function retentionNote() {
+  const h = S.cfg?.raw_hours;
+  return h ? `<p class="muted small">${esc(tr("Messages between the inverter and the cloud are kept for {hours} hours after each connection ends: an older period has its events but not its messages. Report a problem soon after it happens.", { hours: h }))}</p>` : "";
+}
+
 // diagnosticsPanel: the de-identified diagnostic bundle (installer).
 function diagnosticsPanel() {
   return `<article class="panel">
       <h3>${esc(tr("Diagnostics"))}</h3>
       <p class="small">${esc(tr("Download a diagnostic bundle to help support your inverter model: recent messages and register readings, with serial numbers and dates removed. You can inspect it before sharing; nothing is uploaded."))}</p>
       <div class="fields two inline">
-        <label>${esc(tr("Period"))}<select id="bundle-hours">
-          <option value="6">${esc(tr("last 6 hours"))}</option><option value="24" selected>${esc(tr("last 24 hours"))}</option><option value="72">${esc(tr("last 3 days"))}</option><option value="168">${esc(tr("last 7 days"))}</option>
-        </select></label>
+        <label>${esc(tr("Period"))}<select id="bundle-hours">${periodOptions(bundlePeriods(PERIOD_CHOICES, S.cfg?.raw_hours)
+          .map((h) => [h, BUNDLE_PERIOD_LABELS[h] ?? tr("last {hours} hours", { hours: h })]))}</select></label>
         <button type="button" class="cmd" data-action="bundle-download">${esc(tr("Download bundle"))}</button>
       </div>
       <p class="muted small">${esc(tr("Installer role. Reporting a problem? Report a problem, on this page, adds your description and the app's checks to the same file."))}</p>
@@ -3464,6 +3484,7 @@ async function saveBlob(resp, fallback) {
 
 async function renderReport() {
   if (!(await loadState())) return null;
+  await loadCfg();
   const id = S.state.identity ?? {};
   return `
   ${pageHead(tr("Help"))}
@@ -3474,12 +3495,14 @@ async function renderReport() {
     <form id="report-form" data-cmd="report">
       <label>${esc(tr("What went wrong?"))}<textarea id="report-desc" name="description" rows="6" maxlength="4000"
         placeholder="${esc(tr("What you saw, when it started, and what you expected instead."))}"></textarea></label>
-      <label>${esc(tr("History to include"))}<select id="report-hours">
-        ${[["6", tr("the last 6 hours")], ["24", tr("the last 24 hours")], ["72", tr("the last 3 days")], ["168", tr("the last week")]].map(([v, t]) =>
-          `<option value="${v}" ${v === "24" ? "selected" : ""}>${esc(t)}</option>`).join("")}
-      </select></label>
+      <label>${esc(tr("History to include"))}<select id="report-hours">${periodOptions(reportPeriods(PERIOD_CHOICES, S.cfg?.raw_hours)
+        .map(({ hours, beyond }) => {
+          const label = REPORT_PERIOD_LABELS[hours] ?? tr("the last {hours} hours", { hours });
+          return [hours, beyond ? tr("{period} (messages only from the last {hours} hours)", { period: label, hours: S.cfg?.raw_hours ?? 72 }) : label];
+        }))}</select></label>
       <button type="button" class="cmd" data-action="report-download">${esc(tr("Download report"))}</button>
     </form>
+    ${retentionNote()}
     <p class="muted small">${esc(tr("The file contains your description, the app's version, settings and checks, recent errors, and the raw messages between the inverter and the cloud. Serial numbers are replaced, dates are shifted, and token names are left out — you can open it (a .tar.gz) and read everything before sharing. Nothing is sent anywhere by this page. Installer role."))}</p>
     <div id="report-next" hidden></div>
   </article>

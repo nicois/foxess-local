@@ -39,6 +39,10 @@ func TestBundleExport(t *testing.T) {
 	if bytes.Contains(raw.Bytes(), []byte("TESTSN000000001")) {
 		t.Fatal("SN in the bundle")
 	}
+	// the manifest states the frame retention (the server's raw_hours)
+	if !bytes.Contains(raw.Bytes(), []byte(`"frames_kept_hours": 72`)) {
+		t.Error("manifest without frames_kept_hours")
+	}
 	h.st.Flush()
 	if ev, err := h.st.QueryAudit(testBase.Add(-24*time.Hour), "bundle-export"); err != nil || len(ev) != 1 {
 		t.Fatalf("audit: %v %v", ev, err)

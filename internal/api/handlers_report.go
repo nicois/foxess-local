@@ -22,7 +22,7 @@ const (
 // reportEventKinds are the audit kinds a problem report includes: what
 // went wrong or changed (not the routine frame traffic).
 var reportEventKinds = []string{
-	"ack-error", "inject-error", "serve", "reconnect", "flow-open", "flow-close", "tls",
+	"ack-error", "inject-error", "serve", "reconnect", "flow-open", "flow-close", "tls", "cloud-drop",
 	auditKindCommand, auditKindMaintenance, auditKindUpdate, "setting", auditKindWriteOverride,
 }
 

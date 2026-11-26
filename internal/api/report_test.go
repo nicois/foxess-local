@@ -51,6 +51,8 @@ func TestProblemReport(t *testing.T) {
 	withSettings(t, h)
 	h.seedTele(testBase, 1000, -50, 900, 950, 0, 90, 2)
 	h.seedFrame(testBase, dirC2S, "snap01", decisionForwarded, snap01Fixture("1.73", "1.03", "1.71", "0.00"), nil)
+	// a cloud frame full held: the event that outlives its frame row
+	h.st.RecordAudit(testBase, "cloud-drop", "1794820938317-1: mode:full hold:kind=other")
 
 	if rr := h.do(t, httpPost, pathReport, RoleExpert, map[string]any{fieldDescr: "x"}); rr.Code != http.StatusForbidden {
 		t.Fatalf("expert: %d", rr.Code)
@@ -70,6 +72,9 @@ func TestProblemReport(t *testing.T) {
 	}
 	if err := json.Unmarshal(files["report.json"], &rep); err != nil {
 		t.Fatalf("report.json: %v (files %v)", err, files)
+	}
+	if !strings.Contains(string(files["report.json"]), "mode:full hold:kind=other") {
+		t.Error("the cloud-drop event is not in the report")
 	}
 	if rep.Description != "The dashboard freezes at night." {
 		t.Errorf("description %q", rep.Description)

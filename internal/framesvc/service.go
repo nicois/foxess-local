@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"sync"
 	"sync/atomic"
@@ -275,6 +276,9 @@ type flow struct {
 	// closeReason, once set (Reconnect), ends the connection at its next
 	// chunk in either direction
 	closeReason atomic.Pointer[string]
+	// drops are the s2c drop reasons already audited on this flow
+	// (noteDrop)
+	drops map[string]bool
 }
 
 // ---------- hooks.Hook ----------
@@ -818,6 +822,7 @@ func (s *Service) onDataS2C(connID string, fl *flow, data []byte) hooks.Result {
 			if dropReason == "" {
 				dropReason = v.Reason
 			}
+			s.noteDrop(connID, fl, posture, v.Reason, now)
 		}
 		s.st.RecordFrame(rec)
 		s.observeFirmwareTask(connID, kind, f.Payload, rec.Decision)
@@ -826,6 +831,45 @@ func (s *Service) onDataS2C(connID string, fl *flow, data []byte) hooks.Result {
 		return hooks.Result{Data: []byte{}, Reason: dropReason}
 	}
 	return hooks.Result{Data: out}
+}
+
+// auditCloudDrop is the audit kind of a dropped (or held) s2c frame.
+const auditCloudDrop = "cloud-drop"
+
+// maxDropReasons bounds the distinct drop reasons audited per
+// connection (a fn06 reason names its value, so the set is open).
+const maxDropReasons = 32
+
+// noteDrop audits and logs the first s2c frame dropped for each reason
+// on a connection. The frame rows carry every drop, but they go with
+// the raw window (retention.raw_hours) and never reach the journal; the
+// event outlives the frames and joins the problem report, the log line
+// is what an owner tailing journalctl sees (issue #1). In full mode a
+// drop is a hold — a frame kind the cloud is not known to send — and
+// warns; telemetry_only's denials are the posture working, and inform.
+func (s *Service) noteDrop(connID string, fl *flow, posture policy.Posture, reason string, now time.Time) {
+	fl.mu.Lock()
+	if fl.drops == nil {
+		fl.drops = map[string]bool{}
+	}
+	seen, n := fl.drops[reason], len(fl.drops)
+	if !seen && n <= maxDropReasons {
+		fl.drops[reason] = true
+	}
+	fl.mu.Unlock()
+	switch {
+	case seen || n > maxDropReasons:
+		return
+	case n == maxDropReasons:
+		reason = fmt.Sprintf("%d drop reasons recorded; later ones on this connection are in the frame log only", maxDropReasons)
+	}
+	s.st.RecordAudit(now, auditCloudDrop, connID+": "+reason)
+	log := slog.Info
+	if posture.Mode == policy.ModeFull && !posture.Window {
+		log = slog.Warn
+	}
+	log("framesvc: cloud frame not delivered to the inverter (first of its kind on this connection)",
+		"conn", connID, "reason", reason)
 }
 
 // observeFirmwareTask reports a cloud firmware upgrade task and what

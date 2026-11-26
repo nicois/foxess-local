@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -23,9 +24,10 @@ import (
 )
 
 const (
-	invSN  = "TESTINVSN000001"
-	logSN  = "TESTLOGSN000002"
-	batSN1 = "TESTBATSN000003"
+	testConn = "1794820938317-1"
+	invSN    = "TESTINVSN000001"
+	logSN    = "TESTLOGSN000002"
+	batSN1   = "TESTBATSN000003"
 )
 
 func snap01() []byte {
@@ -52,8 +54,8 @@ func fixture() Input {
 	keep := append([]byte("K12104"), []byte(invSN)...)
 	fr := func(i int, class frame.Kind, p []byte) store.FrameRecord {
 		return store.FrameRecord{
-			ConnID: "1794820938317-1", Seq: i, Dir: capture.DirC2S,
-			TS: t0.Add(time.Duration(i) * time.Minute), Class: class, Plen: len(p), Payload: p, Decision: "forwarded",
+			ConnID: testConn, Seq: i, Dir: capture.DirC2S,
+			TS: t0.Add(time.Duration(i) * time.Minute), Class: class, Plen: len(p), Payload: p, Decision: store.DecisionForwarded,
 		}
 	}
 	return Input{
@@ -270,5 +272,117 @@ func TestBundleScan(t *testing.T) {
 	}
 	if l2.Error == "" || l2.Hex != "" {
 		t.Fatalf("line 2: %+v", l2)
+	}
+}
+
+// envClock encodes t as a frame envelope clock (device[1:4] = unix>>8,
+// fn = unix & 0xff: profile §3, the cloud's bootstrap responses).
+func envClock(lead byte, t time.Time) ([4]byte, byte) {
+	b := binary.BigEndian.AppendUint32(nil, uint32(t.Unix())) //nolint:gosec // G115: a 2026 timestamp fits.
+	return [4]byte{lead, b[0], b[1], b[2]}, b[3]
+}
+
+// TestBundleEnvelopeClockShifted: a frame whose envelope carries a clock
+// near its own timestamp (the cloud stamps its bootstrap responses with
+// unix time) is shifted with the dates — the real date must not be
+// recoverable from the header. An envelope that is not a nearby clock
+// (the logger's millisecond uptime) is kept as it is.
+func TestBundleEnvelopeClockShifted(t *testing.T) {
+	in := fixture()
+	ts := time.Date(2026, 11, 16, 9, 59, 11, 0, time.UTC)
+	stamp := ts.Add(-11 * time.Second) // stamped by the cloud, arrived later
+	dev, fn := envClock(0xaa, stamp)
+	in.Frames = append(in.Frames, store.FrameRecord{
+		ConnID: testConn, Seq: 9, Dir: capture.DirS2C, TS: ts, Class: frame.KindBootstrapResp,
+		Dev: dev, Fn: fn, Plen: 5, Payload: []byte{1, 1, 1, 0, 0}, Decision: store.DecisionForwarded,
+	})
+	uptime := [4]byte{0x2a, 0x01, 0x54, 0x07}
+	in.Frames = append(in.Frames, store.FrameRecord{
+		ConnID: testConn, Seq: 10, Dir: capture.DirC2S, TS: ts, Class: frame.KindRegister,
+		Dev: uptime, Fn: 0xf2, Plen: 1, Payload: []byte{0}, Decision: store.DecisionForwarded,
+	})
+	var buf bytes.Buffer
+	if _, err := Build(&buf, in); err != nil {
+		t.Fatal(err)
+	}
+	var lines []frameLine
+	for l := range strings.SplitSeq(strings.TrimSpace(string(untar(t, buf.Bytes())["frames.jsonl"])), "\n") {
+		var fl frameLine
+		if err := json.Unmarshal([]byte(l), &fl); err != nil {
+			t.Fatal(err)
+		}
+		lines = append(lines, fl)
+	}
+	shifted := lines[len(lines)-2]
+	wantDev, wantFn := envClock(0xaa, epoch.Add(stamp.Sub(time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC))))
+	if shifted.Dev != hex.EncodeToString(wantDev[:]) || shifted.Fn != wantFn {
+		t.Errorf("envelope clock: dev %s fn %d, want %x fn %d", shifted.Dev, shifted.Fn, wantDev, wantFn)
+	}
+	if kept := lines[len(lines)-1]; kept.Dev != "2a015407" || kept.Fn != 0xf2 {
+		t.Errorf("uptime envelope changed: dev %s fn %d", kept.Dev, kept.Fn)
+	}
+}
+
+// TestBundleReportNetworkDetails: the frame service's event details keep
+// their network error text ("reset by peer" is not a token name), LAN
+// addresses become stable placeholders (the same address, the same
+// placeholder), and public addresses (the cloud's) are kept.
+func TestBundleReportNetworkDetails(t *testing.T) {
+	in := fixture()
+	in.Report = &Report{Description: "the gateway is 192.168.0.51", Facts: map[string]any{}}
+	in.Events = []store.AuditEvent{
+		{TS: in.Now.Add(-3 * time.Minute), Kind: "flow-close", Detail: "1794820938317-1: write tcp 192.168.0.51:38080->8.209.116.72:14431: write: broken pipe"},
+		{TS: in.Now.Add(-2 * time.Minute), Kind: "flow-close", Detail: "1794820938317-2: read tcp 8.209.116.72:14431->192.168.0.83:62173: read: connection reset by peer"},
+		{TS: in.Now.Add(-1 * time.Minute), Kind: "setting", Detail: "site.time_zone = UTC by phone"},
+	}
+	var buf bytes.Buffer
+	if _, err := Build(&buf, in); err != nil {
+		t.Fatal(err)
+	}
+	var rep struct {
+		Description string `json:"description"`
+		Events      []struct {
+			Detail string `json:"detail"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(untar(t, buf.Bytes())["report.json"], &rep); err != nil {
+		t.Fatal(err)
+	}
+	raw := rep.Description
+	for _, e := range rep.Events {
+		raw += "\n" + e.Detail
+	}
+	for _, leak := range []string{"192.168.0.51", "192.168.0.83", "phone"} {
+		if strings.Contains(raw, leak) {
+			t.Errorf("%q survived: %s", leak, raw)
+		}
+	}
+	for _, keep := range []string{
+		"write tcp lan-1:38080->8.209.116.72:14431: write: broken pipe",
+		"read tcp 8.209.116.72:14431->lan-2:62173: read: connection reset by peer",
+		"the gateway is lan-1",
+		"site.time_zone = UTC by a token",
+	} {
+		if !strings.Contains(raw, keep) {
+			t.Errorf("want %q in %s", keep, raw)
+		}
+	}
+}
+
+// TestBundleRetentionNoted: the manifest says how long frames are kept,
+// so a reader knows an empty stretch may be retention, not silence.
+func TestBundleRetentionNoted(t *testing.T) {
+	in := fixture()
+	in.RawHours = 72
+	var buf bytes.Buffer
+	m, err := Build(&buf, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.FramesKeptHours != 72 {
+		t.Errorf("frames_kept_hours = %d", m.FramesKeptHours)
+	}
+	if !strings.Contains(strings.Join(m.Notes, " "), "72 h after their connection closed") {
+		t.Errorf("notes: %q", m.Notes)
 	}
 }

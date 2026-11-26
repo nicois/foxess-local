@@ -27,6 +27,33 @@ version; anything else bumps the patch version.
   collector over OTLP/HTTP, for Grafana via Mimir or Prometheus. It is
   off unless `OTEL_EXPORTER_OTLP_ENDPOINT` or `-otlp` is set.
   foxess-local is not involved.
+- A cloud message that is not delivered to the inverter (held in `full`,
+  denied in `telemetry_only`) is now logged to the journal and recorded
+  as a `cloud-drop` event, once per reason per connection. The event
+  outlives the raw message log and is included in problem reports.
+  In `full`, a hold logs at warning level.
+- The diagnostic bundle's manifest states how long messages are kept
+  (`frames_kept_hours`), and the Help page says to report a problem
+  within that time.
+
+### Changed
+
+- The Help page's period choices follow the message retention
+  (`retention.raw_hours`, 72 h by default). The diagnostic bundle no
+  longer offers a period longer than the messages are kept. A problem
+  report still offers the last week, because its events reach that far,
+  and the label says its messages stop at the retention.
+
+### Fixed
+
+- The diagnostic bundle no longer gives the real date away: the clock
+  in a message's header (the cloud's handshake replies carry one) is
+  shifted with the dates.
+- Problem reports replace LAN addresses in event details and in the
+  description with placeholders (`lan-1`, …). Public addresses such as
+  the cloud's are kept.
+- Problem reports keep network errors intact: "connection reset by
+  peer" no longer reads "connection reset by a token".
 
 ## [v0.5.0] - 2026-11-25
 

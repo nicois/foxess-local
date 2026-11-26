@@ -49,3 +49,16 @@ func TestSocView(t *testing.T) {
 		t.Fatalf("socview tests:\n%s", out)
 	}
 }
+
+// TestPeriods runs the diagnostics period tests (testdata/periods.test.mjs)
+// under node's test runner.
+func TestPeriods(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed: the period choice tests do not run here")
+	}
+	//nolint:gosec // G204: node on this package's own test file
+	if out, err := exec.Command(node, "--test", "testdata/periods.test.mjs").CombinedOutput(); err != nil {
+		t.Fatalf("periods tests:\n%s", out)
+	}
+}

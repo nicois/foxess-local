@@ -7,7 +7,8 @@
 // SN, datalogger SN, battery module SNs) is replaced in every payload by
 // a same-length pseudonym (offsets survive); RTC read responses have
 // their date zeroed; connection IDs are renumbered; dates are shifted to
-// 2000-01-01 keeping the time of day. Then the whole archive is scanned
+// 2000-01-01 keeping the time of day, frame envelope clocks with them;
+// LAN addresses in the report's text become placeholders. Then the whole archive is scanned
 // for each identifier in ASCII and hex: any hit aborts the export.
 package bundle
 
@@ -15,11 +16,13 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"regexp"
 	"sort"
 	"strings"
@@ -48,6 +51,9 @@ type Input struct {
 	Events []store.AuditEvent
 	// Scan is the last read-only device scan (register-scan.jsonl).
 	Scan []devscan.Result
+	// RawHours is the frame retention (retention.raw_hours): frames are
+	// kept this long after their connection closed (0: not stated).
+	RawHours int
 }
 
 // scanLine is one register-scan.jsonl record: the block and its register
@@ -129,7 +135,35 @@ type reportEvent struct {
 var (
 	connIDPattern = regexp.MustCompile(`\b\d{13}-\d+\b`)
 	byTokenSuffix = regexp.MustCompile(` by [^ ]+$`)
+	ipv4Pattern   = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 )
+
+// networkKinds are the frame service's audit kinds: their details end in
+// network error text ("connection reset by peer"), never a token name.
+var networkKinds = map[string]bool{
+	"flow-open": true, "flow-close": true, "serve": true, "tls": true, "reconnect": true,
+	"ack-error": true, "inject-error": true, "cloud-drop": true,
+}
+
+// lanNames replaces LAN addresses (private, loopback, link-local IPv4)
+// with stable placeholders (lan-1, lan-2… by first appearance); public
+// addresses, such as the cloud's, are kept.
+type lanNames map[netip.Addr]string
+
+func (l lanNames) redact(s string) string {
+	return ipv4Pattern.ReplaceAllStringFunc(s, func(m string) string {
+		a, err := netip.ParseAddr(m)
+		if err != nil || (!a.IsPrivate() && !a.IsLoopback() && !a.IsLinkLocalUnicast()) {
+			return m
+		}
+		n, ok := l[a]
+		if !ok {
+			n = fmt.Sprintf("lan-%d", len(l)+1)
+			l[a] = n
+		}
+		return n
+	})
+}
 
 // reportJSON builds report.json: identifiers pseudonymised everywhere
 // (the description included), connection IDs renumbered with the frame
@@ -139,6 +173,7 @@ func reportJSON(in Input, ids []string, conns map[string]string) ([]byte, error)
 		Report
 		Events []reportEvent `json:"events"`
 	}{Report: *in.Report, Events: []reportEvent{}}
+	lan := lanNames{}
 	for _, e := range in.Events {
 		d := connIDPattern.ReplaceAllStringFunc(e.Detail, func(id string) string {
 			if c, ok := conns[id]; ok {
@@ -148,12 +183,16 @@ func reportJSON(in Input, ids []string, conns map[string]string) ([]byte, error)
 			conns[id] = c
 			return c
 		})
-		d = byTokenSuffix.ReplaceAllString(d, " by a token")
+		if !networkKinds[e.Kind] {
+			d = byTokenSuffix.ReplaceAllString(d, " by a token")
+		}
+		d = lan.redact(d)
 		out.Events = append(out.Events, reportEvent{
 			BeforeS: int(in.Now.Sub(e.TS).Round(time.Second) / time.Second),
 			Kind:    e.Kind, Detail: d,
 		})
 	}
+	out.Description = lan.redact(out.Description)
 	b, err := json.MarshalIndent(out, "", " ")
 	if err != nil {
 		return nil, err
@@ -163,13 +202,16 @@ func reportJSON(in Input, ids []string, conns map[string]string) ([]byte, error)
 
 // Manifest describes the bundle (manifest.json).
 type Manifest struct {
-	Format     int            `json:"format"`
-	AppVersion string         `json:"app_version"`
-	Created    time.Time      `json:"created"` // shifted like every timestamp
-	Frames     int            `json:"frames"`
-	Identity   manifestDevice `json:"identity"`
-	Redacted   Redaction      `json:"redacted"`
-	Notes      []string       `json:"notes"`
+	Format     int       `json:"format"`
+	AppVersion string    `json:"app_version"`
+	Created    time.Time `json:"created"` // shifted like every timestamp
+	Frames     int       `json:"frames"`
+	// FramesKeptHours is the frame retention: no frame of a connection
+	// that closed longer ago than this is in the bundle.
+	FramesKeptHours int            `json:"frames_kept_hours,omitempty"`
+	Identity        manifestDevice `json:"identity"`
+	Redacted        Redaction      `json:"redacted"`
+	Notes           []string       `json:"notes"`
 }
 
 type manifestDevice struct {
@@ -228,6 +270,11 @@ func Build(w io.Writer, in Input) (Manifest, error) {
 			"Payloads are the frame payloads (no framing / CRC); 32-bit values are as on the wire.",
 		},
 	}
+	if in.RawHours > 0 {
+		m.FramesKeptHours = in.RawHours
+		m.Notes = append(m.Notes, fmt.Sprintf("Frames are kept for %d h after their connection closed (retention.raw_hours): "+
+			"an older connection has no frames here, though its events may be listed.", in.RawHours))
+	}
 	m.Redacted.Identifiers = len(ids)
 
 	conns := map[string]string{}
@@ -244,9 +291,10 @@ func Build(w io.Writer, in Input) (Manifest, error) {
 			c = fmt.Sprintf("conn-%d", len(conns)+1)
 			conns[f.ConnID] = c
 		}
+		dev, fn := shiftEnvelopeClock(f, shift)
 		if err := enc.Encode(frameLine{
 			T: f.TS.Add(-shift), Conn: c, Seq: f.Seq, Dir: f.Dir.String(), Class: f.Class,
-			Fn: f.Fn, Dev: hex.EncodeToString(f.Dev[:]), Decision: f.Decision,
+			Fn: fn, Dev: hex.EncodeToString(dev[:]), Decision: f.Decision,
 			Payload: hex.EncodeToString(p),
 		}); err != nil {
 			return Manifest{}, err
@@ -367,6 +415,26 @@ func zeroRTC(p []byte) []byte {
 		p[i] = 0
 	}
 	return p
+}
+
+// envelopeClockSpan is how near a frame's timestamp an envelope value
+// must be to count as a clock: the cloud stamps UTC, the inverter its
+// local time (up to ±14 h), so a day covers both.
+const envelopeClockSpan = 24 * time.Hour
+
+// shiftEnvelopeClock moves a frame envelope's clock with the dates. The
+// envelope's device[1:4] + fn are a sender's 32-bit seconds counter on
+// the cloud's bootstrap responses (profile §3) and on the inverter's own
+// session frames: left alone they give the real date back. Only a value
+// within envelopeClockSpan of the frame's timestamp is treated as a
+// clock (the logger's millisecond uptime is not one).
+func shiftEnvelopeClock(f store.FrameRecord, shift time.Duration) ([4]byte, byte) {
+	u := int64(f.Dev[1])<<24 | int64(f.Dev[2])<<16 | int64(f.Dev[3])<<8 | int64(f.Fn)
+	if d := time.Duration(f.TS.Unix()-u) * time.Second; d > envelopeClockSpan || d < -envelopeClockSpan {
+		return f.Dev, f.Fn
+	}
+	b := binary.BigEndian.AppendUint32(nil, uint32(u-int64(shift/time.Second))) //nolint:gosec // G115: a shifted date (2000) fits 32 bits.
+	return [4]byte{f.Dev[0], b[0], b[1], b[2]}, b[3]
 }
 
 // dayShift moves the earliest frame's date to the epoch, whole days only.

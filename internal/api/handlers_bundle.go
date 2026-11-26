@@ -61,7 +61,7 @@ func (s *Server) bundleInput(hours int) (bundle.Input, error) {
 	if err != nil {
 		return bundle.Input{}, err
 	}
-	return bundle.Input{Snapshot: snap, Frames: frames, Registers: regs, Version: s.info.Version, Now: now}, nil
+	return bundle.Input{Snapshot: snap, Frames: frames, Registers: regs, Version: s.info.Version, Now: now, RawHours: s.info.RawHours}, nil
 }
 
 // sendBundle builds the archive, audits the export and streams it, named
