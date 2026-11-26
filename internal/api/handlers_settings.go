@@ -33,7 +33,7 @@ var settingsOrder = []string{
 	settings.KeyWriteDelay,
 	settings.KeySocThreshold, settings.KeySocHorizon, settings.KeySocPValue, settings.KeySocWindow,
 	settings.KeyUpdateInterval, settings.KeyUpdatePrerelease, settings.KeyUpdateAutoApply,
-	settings.KeySiteTimeZone,
+	settings.KeySiteTimeZone, settings.KeyMeter2Label,
 }
 
 func init() { settingsOrder = append(settingsOrder, quirks.Keys()...) }
@@ -113,6 +113,7 @@ func (s *Server) settingsBody(a SettingsAdmin, tk Token) settingsView {
 		settings.KeyUpdatePrerelease: v.UpdatePrerelease,
 		settings.KeyUpdateAutoApply:  v.UpdateAutoApply,
 		settings.KeySiteTimeZone:     nil,
+		settings.KeyMeter2Label:      v.Meter2Label,
 	}
 	if v.SiteZone != nil {
 		vals[settings.KeySiteTimeZone] = v.SiteZone.String()
@@ -236,14 +237,7 @@ func settingValue(key string, raw json.RawMessage) (string, error) {
 	}
 	switch key {
 	case settings.KeyNotifyWebhook, settings.KeyNotifyNtfy:
-		var u string
-		if err := json.Unmarshal(raw, &u); err != nil {
-			return "", fmt.Errorf("must be a URL, \"\" (off) or null")
-		}
-		if err := settings.ValidateURL(u); err != nil {
-			return "", err
-		}
-		return u, nil
+		return urlValue(raw)
 	case settings.KeyCapacityWh:
 		var n int
 		if err := json.Unmarshal(raw, &n); err != nil || n < 1 || n > settings.MaxCapacityWh {
@@ -263,6 +257,8 @@ func settingValue(key string, raw json.RawMessage) (string, error) {
 		return v, nil
 	case settings.KeySiteTimeZone:
 		return zoneValue(raw)
+	case settings.KeyMeter2Label:
+		return labelValue(raw)
 	default: // the booleans
 		var b bool
 		if err := json.Unmarshal(raw, &b); err != nil {
@@ -270,6 +266,31 @@ func settingValue(key string, raw json.RawMessage) (string, error) {
 		}
 		return strconv.FormatBool(b), nil
 	}
+}
+
+// urlValue is a notification URL value ("" = off).
+func urlValue(raw json.RawMessage) (string, error) {
+	var u string
+	if err := json.Unmarshal(raw, &u); err != nil {
+		return "", fmt.Errorf("must be a URL, \"\" (off) or null")
+	}
+	if err := settings.ValidateURL(u); err != nil {
+		return "", err
+	}
+	return u, nil
+}
+
+// labelValue is a site.meter2_label value: a preset or the installer's
+// own words.
+func labelValue(raw json.RawMessage) (string, error) {
+	var l string
+	if err := json.Unmarshal(raw, &l); err != nil {
+		return "", errors.New("must be ac_solar, generator or a label of up to 32 characters, or null")
+	}
+	if err := settings.Check(settings.KeyMeter2Label, l); err != nil {
+		return "", err
+	}
+	return l, nil
 }
 
 // zoneValue is a site.time_zone value: an IANA zone name.

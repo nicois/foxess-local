@@ -102,7 +102,7 @@ func TestWrongMapsRejected(t *testing.T) {
 	// rejection must be a real failure, not missing data.
 	m, _ := fmdata.Load().Map("H1_LAN-HOLDING")
 	for _, c := range LiveChecks(FromMap(m, r.get), nil) {
-		if c.Name == "power_balance" && c.Status != StatusFail {
+		if c.Name == CheckPowerBalance && c.Status != StatusFail {
 			t.Fatalf("H1_LAN on the KH10 probe: power_balance %s, want fail (the discriminating check)", c.Status)
 		}
 	}

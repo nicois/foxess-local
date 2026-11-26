@@ -771,10 +771,22 @@ dl.kv {
   line-height: 1.3;
   white-space: nowrap;
 }
+/* the second CT's source (meter 2): on the top row above the AC side */
+.flow .a-m2 { left: 46.25%; top: 16.67%; max-width: 38%; } /* room for "AC-coupled solar" on a phone */
 /* the backup (EPS) branch: only once the port has supplied power */
 .flow:not(.has-eps) {
   .a-eps, #fl-eps, #ar-eps { display: none; }
 }
+/* a source the site lacks is not drawn (issue #2): DC solar, meter 2
+   (whose elbow legs never carry an arrow) */
+.flow:not(.has-pv) {
+  .a-solar, #fl-solar, #ar-solar { display: none; }
+}
+.flow:not(.has-m2) {
+  /* the AC line is one line then: one arrow */
+  .a-m2, #fl-m2, #ar-m2, #fl-m2a, #fl-m2b, #ar-acb { display: none; }
+}
+#ar-m2a, #ar-m2b { display: none; }
 
 .flow-lines, .flow-marks {
   position: absolute;
@@ -837,6 +849,10 @@ dl.kv {
 }
 .s-ac { --c: var(--muted); }
 .s-eps { --c: var(--c-home); }
+.s-acb { --c: var(--muted); } /* the AC line after meter 2's junction */
+/* meter 2's line: solar's colour for AC-coupled solar, else neutral */
+.s-m2, .s-m2a, .s-m2b { --c: var(--c-grid); }
+.flow:has(.a-m2.s-solar) :is(.s-m2, .s-m2a, .s-m2b) { --c: var(--c-solar); }
 
 .node {
   position: relative;

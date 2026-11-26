@@ -40,6 +40,9 @@ type Tele struct {
 	// Eps is the EPS (backup / UPS) port output, W — from the register
 	// poll (KHRealtime); the 150 B frame has no such field (0).
 	Eps int32
+	// Meter2 is the second CT (meter 2), W, − = power into the site —
+	// from the register poll; nil for the 150 B frame (it carries none).
+	Meter2 *int32
 	// Temps are the register poll's temperatures and BMS charge limit;
 	// nil for the 150 B frame (it carries none).
 	Temps *Temps

@@ -64,6 +64,13 @@ rest:
         unit_of_measurement: W
         device_class: power
         state_class: measurement
+      - name: FoxESS AC-coupled solar  # the second CT (meter 2), if fitted
+        value_template: >-
+          {{ -value_json.power.meter2_w if value_json.power.meter2_w is not none else none }}
+        availability: "{{ value_json.present.meter2 }}"
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
       - name: FoxESS battery power     # + charging, − discharging
         value_template: "{{ value_json.power.battery_w }}"
         unit_of_measurement: W

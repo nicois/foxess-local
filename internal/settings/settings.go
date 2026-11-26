@@ -42,6 +42,9 @@ const (
 	KeyUpdateAutoApply  = "update.auto_apply"
 
 	KeySiteTimeZone = "site.time_zone"
+	KeyMeter2Label  = "site.meter2_label"
+	Meter2ACSolar   = config.Meter2ACSolar
+	Meter2Generator = config.Meter2Generator
 
 	keySetupCompleted = "setup.completed_at"
 	dbPrefix          = "ui."     // database keys: ui.<key>
@@ -120,6 +123,9 @@ type Values struct {
 	// SiteZone is the site's time zone (the inverter clock's and
 	// schedule's); nil until chosen.
 	SiteZone *time.Location
+	// Meter2Label is what the second CT measures (config.Meter2ACSolar,
+	// config.Meter2Generator, or the installer's own words).
+	Meter2Label string
 	// Quirks are the known inverter quirks, on or off, by id.
 	Quirks map[string]bool
 }
@@ -183,6 +189,7 @@ func New(st Store, cfg *config.Config, clock func() time.Time) (*Settings, error
 			KeyUpdatePrerelease: strconv.FormatBool(cfg.Update.Prerelease),
 			KeyUpdateAutoApply:  strconv.FormatBool(cfg.Update.AutoApply),
 			KeySiteTimeZone:     cfg.Site.TimeZone,
+			KeyMeter2Label:      cfg.Site.Meter2Label,
 		},
 		src: map[string]Source{},
 		ui:  map[string]string{},
@@ -373,6 +380,10 @@ func (s *Settings) recomputeLocked() {
 	if z := get(KeySiteTimeZone); z != "" {
 		s.val.SiteZone, _ = siteclock.Zone(z)
 	}
+	s.val.Meter2Label = get(KeyMeter2Label)
+	if s.val.Meter2Label == "" {
+		s.val.Meter2Label = Meter2ACSolar
+	}
 }
 
 // validateForwardMode checks a forward mode name.
@@ -388,6 +399,21 @@ func validateForwardMode(key, value string) error {
 func validateBool(key, value string) error {
 	if _, err := strconv.ParseBool(value); err != nil {
 		return fmt.Errorf("settings: %s must be true or false, got %q", key, value)
+	}
+	return nil
+}
+
+// validateSite checks a site setting: the time zone or the meter-2
+// label.
+func validateSite(key, value string) error {
+	if key == KeyMeter2Label {
+		if err := config.CheckMeter2Label(value); err != nil {
+			return fmt.Errorf("settings: %s %w", key, err)
+		}
+		return nil
+	}
+	if _, err := siteclock.Zone(value); err != nil {
+		return fmt.Errorf("settings: %s: %w", key, err)
 	}
 	return nil
 }
@@ -409,10 +435,8 @@ func validate(key, value string) error {
 		if err := ValidateURL(value); err != nil {
 			return fmt.Errorf("settings: %s %w", key, err)
 		}
-	case KeySiteTimeZone:
-		if _, err := siteclock.Zone(value); err != nil {
-			return fmt.Errorf("settings: %s: %w", key, err)
-		}
+	case KeySiteTimeZone, KeyMeter2Label:
+		return validateSite(key, value)
 	case KeyForwardMode:
 		return validateForwardMode(key, value)
 	default:

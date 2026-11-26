@@ -3,6 +3,7 @@ package settings
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -232,4 +233,35 @@ func TestSiteTimeZone(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Europe/London", s2.Get().SiteZone.String())
 	assert.Equal(t, SourceFile, s2.Sources()[KeySiteTimeZone])
+}
+
+// TestMeter2Label (owner, 2026-11-27; issue #2): what the second CT
+// (meter 2) measures is an installer's fact about the site — AC-coupled
+// solar by default, a generator, or the installer's own words. From the
+// config file ([site] meter2_label) or the UI.
+func TestMeter2Label(t *testing.T) {
+	st, cfg := setup(t, "")
+	s, err := New(st, cfg, clock)
+	require.NoError(t, err)
+	assert.Equal(t, Meter2ACSolar, s.Get().Meter2Label, "AC-coupled solar by default")
+	assert.Equal(t, SourceDefault, s.Sources()[KeyMeter2Label])
+	assert.False(t, Expert(KeyMeter2Label), "an installer choice")
+	for _, bad := range []string{"", "   ", "tab\there", "line\nbreak", strings.Repeat("x", 33)} {
+		require.Error(t, s.Set(KeyMeter2Label, bad, "installer"), "%q", bad)
+	}
+	for _, ok := range []string{Meter2Generator, "Shed solar", "Wärmepumpe", strings.Repeat("é", 32)} {
+		require.NoError(t, s.Set(KeyMeter2Label, ok, "installer"), "%q", ok)
+		assert.Equal(t, ok, s.Get().Meter2Label)
+	}
+
+	st2, cfg2 := setup(t, "[site]\nmeter2_label = \"generator\"\n")
+	s2, err := New(st2, cfg2, clock)
+	require.NoError(t, err)
+	assert.Equal(t, Meter2Generator, s2.Get().Meter2Label)
+	assert.Equal(t, SourceFile, s2.Sources()[KeyMeter2Label])
+
+	p := filepath.Join(t.TempDir(), "c.toml")
+	require.NoError(t, os.WriteFile(p, []byte("[site]\nmeter2_label = \" \"\n"), 0o600))
+	_, err = config.Load(p)
+	assert.Error(t, err, "a blank label in the file")
 }

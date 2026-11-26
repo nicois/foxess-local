@@ -1138,6 +1138,12 @@ paths:
         is refused with `409 zone_mismatch` (nothing stored) unless it
         carries `?confirm=zone` — then `POST /clock/set` sets the
         inverter's clock to it.
+
+        `site.meter2_label` (installer): what the second CT (meter 2)
+        measures — `ac_solar` (AC-coupled solar, the default),
+        `generator`, or the installer's own words (1–32 printable
+        characters). It names the meter-2 reading on the pages
+        (`State.meter2_label`).
       x-required-role: expert
       parameters:
         - name: confirm
@@ -1166,6 +1172,7 @@ paths:
                 update.prerelease: { type: [boolean, 'null'] }
                 update.auto_apply: { type: [boolean, 'null'] }
                 site.time_zone: { type: [string, 'null'], description: "An IANA zone name (Area/City)." }
+                site.meter2_label: { type: [string, 'null'], minLength: 1, maxLength: 32, description: "ac_solar, generator, or the installer's own words." }
                 quirks.eps_dropouts: { type: [boolean, 'null'], description: "Expert. See GET /quirks." }
               additionalProperties: false
       responses:
@@ -2044,7 +2051,7 @@ components:
       enum: [read-only, standard, expert, installer]
     State:
       type: object
-      required: [ts, online, power, battery, work_mode, meter_compensation_w, limits, schedule, forward_mode, identity, energy, write_budget]
+      required: [ts, online, power, battery, work_mode, meter_compensation_w, limits, schedule, forward_mode, identity, energy, write_budget, present, meter2_label]
       properties:
         ts:
           type: string
@@ -2057,6 +2064,27 @@ components:
             - $ref: '#/components/schemas/ScheduleOverride'
             - type: 'null'
           description: The active schedule override (`PUT /schedule/override`); null when none.
+        present:
+          type: object
+          required: [pv, meter2]
+          description: >-
+            Which optional power sources the site has at all, so a page can
+            leave out one it lacks. A source once present stays present.
+          properties:
+            pv:
+              type: boolean
+              description: >-
+                DC solar: the inverter's lifetime PV total is above zero (or
+                not read yet) and the PV strings have generated (≥ 30 W) in
+                a live reading or the stored history.
+            meter2:
+              type: boolean
+              description: The second CT has measured ≥ 30 W in a live reading or the stored history.
+        meter2_label:
+          type: string
+          description: >-
+            What the second CT measures (setting `site.meter2_label`):
+            `ac_solar`, `generator`, or the installer's own words.
         write_budget:
           type: object
           description: >-
@@ -2370,6 +2398,15 @@ components:
             in both ac_port_w and load_w (KH, verified 2026-11-17): the
             switchboard gets ac_port_w − eps_w, the main-board circuits
             draw load_w − eps_w.
+        meter2_w:
+          type: [integer, 'null']
+          format: int32
+          description: >-
+            The second CT (meter 2; the cloud's "Gen Load"), negative =
+            power into the site (AC-coupled solar or a generator,
+            State.meter2_label). load_w already counts it: load_w ≈
+            ac_port_w + grid_w − meter2_w (KH, issue #2). Null when the
+            reading has none (the cloud-era 150 B frame).
     Battery:
       type: object
       required: [soc_pct, state]
@@ -3110,6 +3147,10 @@ components:
           type: array
           description: The EPS (backup) port's output, W, mean per step — the part of haus the backup circuits drew (haus includes it). Null where unknown (a step stored before 2026-11-19 whose raw samples are no longer kept).
           items: { type: [integer, 'null'] }
+        meter2:
+          type: array
+          description: The second CT (meter 2), W, mean per step, negative = into the site. Null where no sample carried it (before 2026-11-27, and the cloud-era 150 B frame).
+          items: { type: [integer, 'null'] }
         totals:
           type: object
           required: [sol_wh, haus_wh, grid_import_wh, grid_export_wh, batt_charged_wh, batt_discharged_wh, stored_delta_wh]
@@ -3121,6 +3162,7 @@ components:
             batt_charged_wh: { type: integer }
             batt_discharged_wh: { type: integer }
             stored_delta_wh: { type: [integer, 'null'], description: 'SoC first→last × capacity_wh; null while the capacity is not set.' }
+            meter2_gen_wh: { type: [integer, 'null'], description: 'The energy the second CT brought into the site (its negative side); null when no step carried it.' }
     Event:
       type: object
       description: One server-sent event. `event` selects the `data` payload (see `x-event-map`).

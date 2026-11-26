@@ -67,7 +67,7 @@ func (v *view) setTele(ts time.Time, t frame.Tele) {
 	}
 	v.tele = State{
 		TeleTS: ts, Sol: t.Sol, Grid: t.Grid, Haus: t.Haus, Acport: t.Acport,
-		Batt: t.Batt, Eps: t.Eps, Soc: int(t.Soc), ChargeState: int(t.ChargeState),
+		Batt: t.Batt, Eps: t.Eps, Meter2: t.Meter2, Soc: int(t.Soc), ChargeState: int(t.ChargeState),
 		IDGrid: t.IDGrid, IDAc: t.IDAcport, HausDup: t.HausDup, Temps: t.Temps, InvState: t.InvState,
 	}
 }

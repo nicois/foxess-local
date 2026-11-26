@@ -27,6 +27,17 @@ version; anything else bumps the patch version.
   collector over OTLP/HTTP, for Grafana via Mimir or Prometheus. It is
   off unless `OTEL_EXPORTER_OTLP_ENDPOINT` or `-otlp` is set.
   foxess-local is not involved.
+- AC-coupled solar on a second CT (issue #2). The KH's meter-2 reading
+  (31051:31052, the cloud's "Gen Load") is `power.meter2_w` in the API
+  (negative = into the site), a `meter2` series and `meter2_gen_wh`
+  total in `/history`, and a `meter2` flow in `/metrics`. The dashboard
+  draws it above the inverter's AC side, joining the line to the
+  switchboard. History shows it as its own chart. Name what it measures
+  under System → Site (`site.meter2_label`: AC-coupled solar,
+  generator, or your own words).
+- `/state` says which optional sources the site has (`present.pv`,
+  `present.meter2`). The dashboard and history leave out DC solar on a
+  site without PV strings, and meter 2 on a site without a second CT.
 - A cloud message that is not delivered to the inverter (held in `full`,
   denied in `telemetry_only`) is now logged to the journal and recorded
   as a `cloud-drop` event, once per reason per connection. The event
@@ -46,6 +57,9 @@ version; anything else bumps the patch version.
 
 ### Fixed
 
+- The device check's power balance counts the second CT. On a site
+  with AC-coupled solar it failed while that solar generated, and the
+  live values dropped to unknown.
 - The diagnostic bundle no longer gives the real date away: the clock
   in a message's header (the cloud's handshake replies carry one) is
   shifted with the dates.

@@ -190,6 +190,7 @@ func (s *Store) RecordTelemetry(connID string, ts time.Time, tele frame.Tele) {
 	}
 	s.lastPoll.Store(ts.UnixNano())
 	s.view.setTele(ts, tele)
+	s.notePresent(tele)
 	s.enqueue(teleItem{connID: connID, ts: ts, tele: tele})
 }
 
@@ -438,7 +439,10 @@ func applyRegs(tx *sql.Tx, it regItem) error {
 }
 
 func applyTele(tx *sql.Tx, connID string, ts time.Time, tele frame.Tele) error {
-	var tb, ti, ta, bc, cmin, cmax any // NULL without temperatures (the 150 B frame)
+	var tb, ti, ta, bc, cmin, cmax, m2 any // NULL without temperatures / meter 2 (the 150 B frame)
+	if tele.Meter2 != nil {
+		m2 = *tele.Meter2
+	}
 	if t := tele.Temps; t != nil {
 		tb, ti, ta, bc = t.BattDeciC, t.InvDeciC, t.AmbDeciC, t.BMSChargeDeciA
 		if t.CellMinDeciC != nil {
@@ -449,11 +453,11 @@ func applyTele(tx *sql.Tx, connID string, ts time.Time, tele frame.Tele) error {
 		INSERT INTO telemetry
 			(conn_id, ts, sol, grid, haus, acport, batt, soc, charge_state,
 			 idnt_grid, idnt_ac, haus_dup, eps, t_batt, t_inv, t_amb, bms_chg,
-			 t_cell_min, t_cell_max)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 t_cell_min, t_cell_max, meter2)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		connID, encTS(ts), tele.Sol, tele.Grid, tele.Haus, tele.Acport,
 		tele.Batt, int(tele.Soc), int(tele.ChargeState), tele.IDGrid,
-		tele.IDAcport, tele.HausDup, tele.Eps, tb, ti, ta, bc, cmin, cmax)
+		tele.IDAcport, tele.HausDup, tele.Eps, tb, ti, ta, bc, cmin, cmax, m2)
 	return err
 }
 

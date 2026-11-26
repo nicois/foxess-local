@@ -63,7 +63,7 @@ func main() {
 	freeFirst := flag.Bool("free-group1", false, "seed the schedule with group 1 off and the windows one slot down (the override convention, D-029)")
 	stateDir := flag.String("dir", "", "keep the token store (and a seeded database) in this directory instead of a temporary one: a restart keeps the browser's token valid (pass -db DIR/devui.db then)")
 	flag.Parse()
-	epsW = int32(*eps) //nolint:gosec // G115: a small wattage flag
+	simulate(*eps, *meter2Flag, *noPVFlag)
 
 	dir := devDir(*stateDir)
 	st := openStore(*dbPath, dir, *model, uint16(*master), *freeFirst) //nolint:gosec // G115: flag is a register value
@@ -193,18 +193,27 @@ func socAt(t time.Time) float64 {
 // tele is a plausible operating point at time t (a sunny day).
 // It models the KH's measured balance (2026-11-17): a ~3 % conversion
 // loss; the EPS (backup) port load (-eps) is part of both the AC output
-// and the household load; home = AC output + grid.
+// and the household load; home = AC output + grid − meter 2 (the second
+// CT, −meter2 = AC-coupled solar into the switchboard, issue #2).
 func tele(t time.Time) frame.Tele {
 	h := float64(t.Hour()) + float64(t.Minute())/60
 	sun := math.Max(0, math.Sin((h-6)/13*math.Pi))
-	pv := int32(9000 * sun)
+	pv := int32(float64(pvPeak) * sun)
+	m2 := -int32(float64(meter2Peak) * sun)
 	load := int32(600+400*math.Sin(h/3)) + epsW
-	batt := (pv - load) / 2
+	batt := (pv - m2 - load) / 2
 	ac := int32(float64(pv-batt) * 0.97)
-	grid := load - ac
+	if pv == 0 {
+		ac = -batt // charging from the AC side
+	}
+	grid := load - ac + m2
 	soc := socAt(t)
+	var meter2 *int32
+	if meter2Peak > 0 {
+		meter2 = &m2
+	}
 	return frame.Tele{
-		Sol: pv, Grid: grid, Haus: load, Acport: ac, Batt: batt, Eps: epsW, Soc: byte(soc),
+		Sol: pv, Grid: grid, Haus: load, Acport: ac, Batt: batt, Eps: epsW, Meter2: meter2, Soc: byte(soc),
 		Temps: &frame.Temps{
 			BattDeciC: int(220 + 60*sun), InvDeciC: int(280 + 150*sun), AmbDeciC: int(180 + 90*sun),
 			BMSChargeDeciA: int(500 - 3*soc), // the limit tapers as the battery fills
@@ -258,6 +267,26 @@ func seedFirmwareTask(st *store.Store, seq int, now time.Time) {
 // epsW is the simulated EPS (backup) port load (-eps).
 var epsW int32
 
+// The simulated site's optional sources (issue #2).
+var (
+	meter2Flag = flag.Int("meter2", 0, "simulated AC-coupled solar on the second CT (meter 2) at noon, W (0 = no second CT)")
+	noPVFlag   = flag.Bool("no-pv", false, "no DC solar (an AC-coupled-only site: the PV strings read 0)")
+)
+
+// simulate sets the simulated site from the flags.
+func simulate(eps, meter2 int, noPV bool) {
+	epsW = int32(eps)          //nolint:gosec // G115: a small wattage flag
+	meter2Peak = int32(meter2) //nolint:gosec // G115: a small wattage flag
+	pvPeak = 9000
+	if noPV {
+		pvPeak = 0
+	}
+}
+
+// meter2Peak is the simulated second CT's noon generation (-meter2), and
+// pvPeak the DC solar's (0 with -no-pv).
+var meter2Peak, pvPeak int32
+
 // live appends a telemetry row every 5 s (the poller's cadence) and
 // publishes the snapshot event the UI's live view runs on (the app's
 // seedClock records the inverter's clock reading Melbourne wall time (no
@@ -297,6 +326,7 @@ func live(st *store.Store, bus *api.Bus, est *socest.Estimator, capWh func() int
 			Power: api.Power{
 				PVW: int(tl.Sol), GridW: int(tl.Grid), LoadW: int(tl.Haus),
 				AcPortW: int(tl.Acport), BatteryW: int(tl.Batt), EpsW: int(tl.Eps),
+				Meter2W: meter2W(tl.Meter2),
 			},
 			SocPct: int(tl.Soc), SocEstimatePct: e, BatteryState: state,
 		})
@@ -408,4 +438,13 @@ func seedSchedule(st *store.Store, now time.Time, freeFirst bool) {
 		copy(blk, p)
 		st.RecordRegisters(now, 57000+50*k, blk)
 	}
+}
+
+// meter2W is a sample's second-CT reading as the API's value.
+func meter2W(m *int32) *int {
+	if m == nil {
+		return nil
+	}
+	v := int(*m)
+	return &v
 }

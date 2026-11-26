@@ -36,8 +36,12 @@ type Agg struct {
 	// household load (HausAvg includes it) that the backup circuits drew.
 	// Not Valid for a bucket stored before buckets kept it (schema v12)
 	// whose raw samples are gone.
-	Eps     sql.NullInt64
-	SocLast int // SoC % of the newest sample in the window
+	Eps sql.NullInt64
+	// Meter2 is the second CT (W, − = into the site), averaged, and
+	// Meter2GenWh the energy it brought in (the − side); not Valid where
+	// no sample carried it (schema v15).
+	Meter2, Meter2GenWh sql.NullInt64
+	SocLast             int // SoC % of the newest sample in the window
 	// SocEst is the SoC estimate (0.01 %, D-028) of the newest sample in
 	// the window that has one; not Valid when none has.
 	SocEst sql.NullInt64
@@ -63,7 +67,8 @@ SELECT COUNT(*),
   CAST(AVG(t_batt) AS INTEGER), CAST(AVG(t_inv) AS INTEGER), CAST(AVG(t_amb) AS INTEGER),
   CAST(AVG(bms_chg) AS INTEGER),
   CAST(AVG(t_cell_min) AS INTEGER), CAST(AVG(t_cell_max) AS INTEGER),
-  CAST(AVG(eps) AS INTEGER)
+  CAST(AVG(eps) AS INTEGER),
+  CAST(AVG(meter2) AS INTEGER), SUM(CASE WHEN meter2 < 0 THEN -meter2 WHEN meter2 IS NOT NULL THEN 0 END) * 5 / 3600
 FROM telemetry WHERE ts >= ? AND ts < ?`
 
 // socWindowSQL returns the SoC of the latest-arriving sample in the
@@ -85,9 +90,10 @@ INSERT INTO buckets15m(bucket, sol_avg, sol_min, sol_max, sol_wh,
   grid_avg, grid_min, grid_max, grid_imp_wh, grid_exp_wh,
   batt_avg, batt_min, batt_max, batt_chg_wh, batt_dis_wh,
   acport_avg, soc_last, t_batt_avg, t_inv_avg, t_amb_avg, bms_chg_avg,
-  t_cell_min_avg, t_cell_max_avg, eps_avg, soc_est_last)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  t_cell_min_avg, t_cell_max_avg, eps_avg, meter2_avg, meter2_gen_wh, soc_est_last)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(bucket) DO UPDATE SET
+  meter2_avg = excluded.meter2_avg, meter2_gen_wh = excluded.meter2_gen_wh,
   soc_est_last = excluded.soc_est_last,
   eps_avg = excluded.eps_avg,
   t_cell_min_avg = excluded.t_cell_min_avg, t_cell_max_avg = excluded.t_cell_max_avg,
@@ -143,7 +149,7 @@ func aggCols(a *Agg, mid *int) []any {
 		&a.GridAvg, &a.GridMin, &a.GridMax, &a.GridImpWh, &a.GridExpWh,
 		&a.BattAvg, &a.BattMin, &a.BattMax, &a.BattChgWh, &a.BattDisWh,
 		&a.AcportAvg, mid, &a.TBatt, &a.TInv, &a.TAmb, &a.BMSChg,
-		&a.TCellMin, &a.TCellMax, &a.Eps,
+		&a.TCellMin, &a.TCellMax, &a.Eps, &a.Meter2, &a.Meter2GenWh,
 	}
 }
 
@@ -155,7 +161,7 @@ func upsertArgs(bucket int64, a Agg) []any {
 		a.HausAvg, a.HausMin, a.HausMax, a.HausWh,
 		a.GridAvg, a.GridMin, a.GridMax, a.GridImpWh, a.GridExpWh,
 		a.BattAvg, a.BattMin, a.BattMax, a.BattChgWh, a.BattDisWh,
-		a.AcportAvg, a.SocLast, a.TBatt, a.TInv, a.TAmb, a.BMSChg, a.TCellMin, a.TCellMax, a.Eps, a.SocEst,
+		a.AcportAvg, a.SocLast, a.TBatt, a.TInv, a.TAmb, a.BMSChg, a.TCellMin, a.TCellMax, a.Eps, a.Meter2, a.Meter2GenWh, a.SocEst,
 	}
 }
 
@@ -232,7 +238,7 @@ SELECT bucket, sol_avg, sol_min, sol_max, sol_wh,
   grid_avg, grid_min, grid_max, grid_imp_wh, grid_exp_wh,
   batt_avg, batt_min, batt_max, batt_chg_wh, batt_dis_wh,
   acport_avg, soc_last, t_batt_avg, t_inv_avg, t_amb_avg, bms_chg_avg,
-  t_cell_min_avg, t_cell_max_avg, eps_avg, soc_est_last
+  t_cell_min_avg, t_cell_max_avg, eps_avg, meter2_avg, meter2_gen_wh, soc_est_last
 FROM buckets15m WHERE bucket >= ? AND bucket < ? ORDER BY bucket`,
 		since.Unix(), until.Unix())
 	if err != nil {

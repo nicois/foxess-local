@@ -119,3 +119,27 @@ func TestKHRealtimePVSigned(t *testing.T) {
 		t.Fatalf("Tele sol %d, want 0", tl.Sol)
 	}
 }
+
+// TestKHRealtimeMeter2 (issue #2): 31051:31052 is the second CT (meter 2),
+// s32 hi:lo, − = power into the site. A KH10 with AC-coupled solar
+// (fw 1.60 and 1.73, the reporter's bundles) read 0xFFFF:0xFAD1 =
+// −1327 W while the cloud showed "Gen Load" 1330 W; the household load
+// the inverter reports (31053:31054) counts it. It reaches the telemetry
+// shape; the 150 B frame has no such field (nil).
+func TestKHRealtimeMeter2(t *testing.T) {
+	b := append([]uint16(nil), probe1452B...)
+	b[31051-KHRealtimeBAddr], b[31052-KHRealtimeBAddr] = 0xFFFF, 0xFAD1
+	r, err := ParseKHRealtime(probe1452A, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Meter2W != -1327 {
+		t.Fatalf("meter 2: %d, want -1327", r.Meter2W)
+	}
+	if m := r.Tele().Meter2; m == nil || *m != -1327 {
+		t.Fatalf("tele meter 2: %v, want -1327", m)
+	}
+	if r0, _ := ParseKHRealtime(probe1452A, probe1452B); r0.Meter2W != 0 {
+		t.Fatalf("probe meter 2 %d, want 0 (no second CT)", r0.Meter2W)
+	}
+}

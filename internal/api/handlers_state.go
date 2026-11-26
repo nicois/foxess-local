@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"foxesslocal/internal/frame"
+	"foxesslocal/internal/settings"
 	"foxesslocal/internal/socest"
 	"foxesslocal/internal/store"
 )
@@ -82,6 +83,32 @@ type Power struct {
 	// EpsW is the EPS (backup / UPS) port output (0 when the port is off
 	// or unloaded, and on telemetry without it).
 	EpsW int `json:"eps_w"`
+	// Meter2W is the second CT (meter 2), − = power into the site
+	// (AC-coupled solar, a generator: State.meter2_label says which);
+	// load_w already counts it. Null when the reading has none (the
+	// cloud-era 150 B frame, a window of only such readings).
+	Meter2W *int `json:"meter2_w"`
+}
+
+// Present says which optional power sources the site has at all, so a
+// page can leave out one it lacks (issue #2).
+type Present struct {
+	// PV: DC solar — the inverter's lifetime PV total is above zero (or
+	// not read yet) and this app has seen the strings generate (≥ 30 W,
+	// live or in the stored history).
+	PV bool `json:"pv"`
+	// Meter2: the second CT has measured ≥ 30 W, live or in the stored
+	// history.
+	Meter2 bool `json:"meter2"`
+}
+
+// meter2Of is a nullable meter-2 reading as the API's value.
+func meter2Of(m *int32) *int {
+	if m == nil {
+		return nil
+	}
+	v := int(*m)
+	return &v
 }
 
 // Battery is the spec's Battery schema.
@@ -248,6 +275,12 @@ type State struct {
 	WriteBudget map[string]WriteBudget `json:"write_budget"`
 	// ScheduleOverride is the active schedule override (D-029); null when none.
 	ScheduleOverride *ScheduleOverride `json:"schedule_override"`
+	// Present is which optional power sources the site has.
+	Present Present `json:"present"`
+	// Meter2Label is what the second CT measures (setting
+	// site.meter2_label): "ac_solar", "generator", or the installer's
+	// own words.
+	Meter2Label string `json:"meter2_label"`
 }
 
 // handleState is GET /state (spec getState): the normalized snapshot.
@@ -361,6 +394,7 @@ func (s *Server) buildState(st store.State) (State, error) {
 	body.Power = Power{
 		PVW: int(st.Sol), GridW: int(st.Grid), LoadW: int(st.Haus),
 		AcPortW: int(st.Acport), BatteryW: int(st.Batt), EpsW: int(st.Eps),
+		Meter2W: meter2Of(st.Meter2),
 	}
 	body.Battery = s.batteryOf(st)
 	if st.Temps != nil {
@@ -680,10 +714,25 @@ func inverterState(v *int) (string, *bool) {
 
 // hostParts fills what the host provides: the energy counters and the
 // write budget.
+// present is which optional sources the site has: the store's record
+// of them, with DC solar also needing a lifetime PV total above zero
+// when one has been read (owner, 2026-11-27: generation once seen, then
+// a zero total, is a site without PV strings now).
+func (s *Server) present(e Energy) Present {
+	p := s.st.Present()
+	pv := p.PV && (e.PVKWh == nil || *e.PVKWh > 0)
+	return Present{PV: pv, Meter2: p.Meter2}
+}
+
 func (s *Server) hostParts(body *State) {
 	body.WriteBudget = s.writeBudget()
 	body.Energy = Energy{Sources: map[string]string{}}
 	if s.info.Energy != nil {
 		body.Energy = s.info.Energy()
+	}
+	body.Present = s.present(body.Energy)
+	body.Meter2Label = s.info.values().Meter2Label
+	if body.Meter2Label == "" { // a server without stored settings
+		body.Meter2Label = settings.Meter2ACSolar
 	}
 }

@@ -80,6 +80,9 @@ type Store struct {
 	maintWG  sync.WaitGroup // the maintenance loop (Close waits it)
 
 	view *view // the newest values (QueryState's source; see view.go)
+	// pvSeen / meter2Seen: the site has shown DC solar / a second CT
+	// (Present)
+	pvSeen, meter2Seen atomic.Bool
 	// lastPoll is the newest register-poll telemetry (unix ns; PollFresh)
 	lastPoll atomic.Int64
 	// readChange is the OnRegisterReadChange hook (nil = none).
@@ -186,6 +189,10 @@ func openStore(path string, tick <-chan time.Time, maxOpen int, now func() time.
 		view:     newView(),
 	}
 	if err := s.seedView(); err != nil {
+		_ = s.db.Close()
+		return nil, fmt.Errorf("store: seed %s: %w", path, err)
+	}
+	if err := s.seedPresent(); err != nil {
 		_ = s.db.Close()
 		return nil, fmt.Errorf("store: seed %s: %w", path, err)
 	}
@@ -515,6 +522,16 @@ CREATE TABLE IF NOT EXISTS notices (
 );
 `
 
+// schemaV15 stores the second CT (meter 2, issue #2; W, − = into the
+// site: AC-coupled solar or a generator) on each live sample, and each
+// 15-minute bucket's average and the energy it brought in (Wh, the −
+// side). NULL where it was not read (the 150 B frame, rows before it).
+const schemaV15 = `
+ALTER TABLE telemetry ADD COLUMN meter2 INTEGER;
+ALTER TABLE buckets15m ADD COLUMN meter2_avg INTEGER;
+ALTER TABLE buckets15m ADD COLUMN meter2_gen_wh INTEGER;
+`
+
 // wrappedPVMin is the bucket sol_max that can only come from a wrapped
 // PV reading.
 const wrappedPVMin = 32768
@@ -632,6 +649,7 @@ func migrate(db *sql.DB, path string) error {
 		{12, schemaV12},
 		{13, schemaV13},
 		{14, schemaV14},
+		{15, schemaV15},
 	}
 	latest := migrations[len(migrations)-1].version
 	if n > latest {

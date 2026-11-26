@@ -502,40 +502,59 @@ func socAgrees(soc *float64, snapSoc *int) Check {
 	return pass(name)
 }
 
-// powerBalance: household load ≈ inverter AC output + grid import. A
-// map without inverter output power estimates it as PV − battery
-// charging, with a looser tolerance for the conversion losses.
+// powerBalance: household load ≈ inverter AC output + grid import −
+// meter 2 (the second CT: AC-coupled solar or a generator, − = into the
+// site, which the load counts — issue #2). A map without inverter output
+// power estimates it as PV − battery charging, with a looser tolerance
+// for the conversion losses.
 func powerBalance(v LiveValues) Check {
-	const name = "power_balance"
+	const name = CheckPowerBalance
 	if v.LoadW == nil || v.GridImportW == nil {
 		return pending(name)
 	}
-	relTol := balanceRelTol
-	var inv float64
+	inv, relTol, ok := balanceInverter(v)
+	if !ok {
+		return pending(name)
+	}
+	load, grid := *v.LoadW, *v.GridImportW
+	var m2 float64
+	if v.Meter2W != nil {
+		m2 = *v.Meter2W
+	}
+	if fabs(load) < noFlowW && fabs(inv) < noFlowW && fabs(grid) < noFlowW && fabs(m2) < noFlowW {
+		// nothing flowing: 0 = 0 + 0 proves nothing about the mapping
+		return Check{Name: name, Status: StatusSkip, Detail: "no power flow"}
+	}
+	tol := max(balanceAbsTolW, relTol*max(fabs(load), fabs(inv), fabs(grid), fabs(m2)))
+	if d := load - (inv + grid - m2); d > tol || d < -tol {
+		if m2 != 0 {
+			return fail(name, "load %.0f W vs inverter %.0f W + grid %.0f W − meter 2 %.0f W", load, inv, grid, m2)
+		}
+		return fail(name, "load %.0f W vs inverter %.0f W + grid %.0f W", load, inv, grid)
+	}
+	return pass(name)
+}
+
+// CheckPowerBalance names the household-load balance check.
+const CheckPowerBalance = "power_balance"
+
+// balanceInverter is the inverter's AC output for the power balance and
+// its tolerance: the measured output, else PV − battery charging (with
+// a looser tolerance for the conversion losses); ok is false with
+// neither.
+func balanceInverter(v LiveValues) (inv, relTol float64, ok bool) {
 	switch {
 	case v.InverterW != nil:
-		inv = *v.InverterW
+		return *v.InverterW, balanceRelTol, true
 	case v.BatteryW != nil:
-		relTol = estimatedBalanceRelTol
 		for _, s := range v.PV {
 			if s.Present {
 				inv += s.W
 			}
 		}
-		inv -= *v.BatteryW
-	default:
-		return pending(name)
+		return inv - *v.BatteryW, estimatedBalanceRelTol, true
 	}
-	load, grid := *v.LoadW, *v.GridImportW
-	if fabs(load) < noFlowW && fabs(inv) < noFlowW && fabs(grid) < noFlowW {
-		// nothing flowing: 0 = 0 + 0 proves nothing about the mapping
-		return Check{Name: name, Status: StatusSkip, Detail: "no power flow"}
-	}
-	tol := max(balanceAbsTolW, relTol*max(fabs(load), fabs(inv), fabs(grid)))
-	if d := load - (inv + grid); d > tol || d < -tol {
-		return fail(name, "load %.0f W vs inverter %.0f W + grid %.0f W", load, inv, grid)
-	}
-	return pass(name)
+	return 0, 0, false
 }
 
 // dcBalance: the PV power goes somewhere — PV ≈ inverter AC output +

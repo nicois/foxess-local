@@ -38,6 +38,7 @@ const (
 	khInvWHi               = 6  // 31045/31046: inverter AC power, + = output
 	khEpsWHi               = 8  // 31047/31048: EPS (backup) port power, + = output
 	khGridWHi              = 10 // 31049/31050: grid CT, + = import
+	khMeter2WHi            = 12 // 31051/31052: second CT (meter 2), − = into the site
 	khLoadWHi              = 14 // 31053/31054: household load
 )
 
@@ -51,11 +52,15 @@ type KHString struct {
 // sign conventions applied (grid + = import, battery + = charging).
 // Fixed-point fields keep their register units (deci-/centi-).
 type KHRealtime struct {
-	PV                [4]KHString
-	InverterW         int32 // AC port, + = output
-	EpsW              int32 // EPS (backup / UPS) port, + = output
-	GridW             int32 // + = import, − = export
-	LoadW             int32
+	PV        [4]KHString
+	InverterW int32 // AC port, + = output
+	EpsW      int32 // EPS (backup / UPS) port, + = output
+	GridW     int32 // + = import, − = export
+	LoadW     int32
+	// Meter2W is the second CT (meter 2, the cloud's "Gen Load"), − =
+	// power into the site (AC-coupled solar, a generator). The household
+	// load (LoadW) already counts it (issue #2).
+	Meter2W           int32
 	BatteryW          int32 // + = charging, − = discharging
 	SocPct            int
 	GridDeciV         int
@@ -90,6 +95,7 @@ func ParseKHRealtime(a, b []uint16) (KHRealtime, error) {
 		EpsW:              s32(b[khEpsWHi], b[khEpsWHi+1]),
 		GridW:             s32(b[khGridWHi], b[khGridWHi+1]),
 		LoadW:             s32(b[khLoadWHi], b[khLoadWHi+1]),
+		Meter2W:           s32(b[khMeter2WHi], b[khMeter2WHi+1]),
 		BatteryW:          -int32(s16(a[khBattW])), //nolint:gosec // G115: int16 range
 		SocPct:            int(a[khSoc]),
 		GridDeciV:         int(a[khGridV]),
@@ -127,8 +133,10 @@ func (r KHRealtime) Tele() Tele {
 	if soc > 100 || soc < 0 {
 		soc = 0
 	}
+	m2 := r.Meter2W
 	return Tele{
-		Sol: sol, Grid: r.GridW, Haus: r.LoadW, Acport: r.InverterW, Batt: r.BatteryW, Eps: r.EpsW,
+		Meter2: &m2,
+		Sol:    sol, Grid: r.GridW, Haus: r.LoadW, Acport: r.InverterW, Batt: r.BatteryW, Eps: r.EpsW,
 		InvState: &st,
 		Temps: &Temps{
 			BattDeciC: r.BatteryDeciC, InvDeciC: r.InverterDeciC, AmbDeciC: r.AmbientDeciC,

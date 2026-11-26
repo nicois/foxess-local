@@ -145,11 +145,11 @@ func TestMigrationSnapshot(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&latest); err != nil {
 		t.Fatal(err)
 	}
-	// back one version: the latest step (v14, the notices) undone
+	// back one version: the latest step (v15, meter 2) undone
 	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version = ?`, latest); err != nil {
 		t.Fatal(err)
 	}
-	undoV14(t, s)
+	undoV15Columns(t, s)
 	_ = s.Close()
 	s2, err := openStore(path, nil, maxConns, fixedClock(testBase), testVersion)
 	if err != nil {
@@ -178,6 +178,18 @@ func undoV9Columns(t *testing.T, s *Store) {
 }
 
 // undoV10Columns drops the schema-v10 columns.
+// undoV15Columns drops the v15 columns (meter 2).
+func undoV15Columns(t *testing.T, s *Store) {
+	t.Helper()
+	for _, c := range []string{
+		"telemetry DROP COLUMN meter2", "buckets15m DROP COLUMN meter2_avg", "buckets15m DROP COLUMN meter2_gen_wh",
+	} {
+		if _, err := s.db.Exec("ALTER TABLE " + c); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // undoV14 drops the v14 column and table (the notices).
 func undoV14(t *testing.T, s *Store) {
 	t.Helper()

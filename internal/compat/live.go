@@ -25,6 +25,10 @@ type LiveValues struct {
 	InverterW   *float64 // AC output, + = out
 	GridImportW *float64 // + = import
 	BatteryW    *float64 // + = charging
+	// Meter2W is the second CT (− = into the site: AC-coupled solar, a
+	// generator), which the household load counts; nil where the map
+	// has none (the balance then has no meter-2 term).
+	Meter2W *float64
 }
 
 // FromKH converts our own KH_PRE133 decode.
@@ -40,6 +44,7 @@ func FromKH(rt frame.KHRealtime) LiveValues {
 	v.InverterW = new(float64(rt.InverterW))
 	v.GridImportW = new(float64(rt.GridW))
 	v.BatteryW = new(float64(rt.BatteryW))
+	v.Meter2W = new(float64(rt.Meter2W))
 	return v
 }
 

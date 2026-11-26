@@ -58,6 +58,8 @@ const S = {
   histRange: loadPref("fl.histRange", ["1h", "6h", "24h", "72h", "7d", "30d"], "24h"), // dashboard history range
   public: false,          // unauthenticated public session (spec §5.5)
   epsSeen: false,        // the EPS port has supplied power (backup branch shown)
+  pvSeen: false,         // DC solar generated in a live reading (state.present.pv covers the rest)
+  m2Seen: false,         // the second CT read power live (state.present.meter2 covers the rest)
   epsRing: [],           // the last EPS_MEDIAN_N live backup-port readings (quirk eps_dropouts)
   quirks: {},            // id → on (GET /quirks)
   cfg: null,             // GET /config
@@ -1167,15 +1169,27 @@ function fmtDuration(h) {
 // and meets the grid (grid, switchboard and home on one vertical line,
 // its label a tag on the line to the home: clear at phone width). The
 // top row is outside the house (solar, grid), the bottom row inside
-// (battery, backup, home). [key, from x,y, to x,y, arrow position along
-// the line]; "fwd" flows from → to.
+// (battery, backup, home). The second CT's source (meter 2: AC-coupled
+// solar, a generator — issue #2) sits on the top row above the AC side;
+// it is wired to the switchboard, not the inverter, so its line runs
+// over the inverter and joins the AC line at a junction (x M2_JOIN):
+// the inverter's own port output up to it, port + meter 2 after it. A
+// source the site lacks (no second CT, no PV strings) is not drawn.
+// [key, from x,y, to x,y, arrow position along the line]; "fwd" flows
+// from → to.
+const M2_JOIN = 298;
+const M2_ELBOW = 100; // the height its line crosses over the inverter at
 const FLOW_LINES = [
   ["solar", 60, 50, 60, 150, 0.45],
   ["batt", 60, 150, 60, 250, 0.58], // fwd = charging (inverter → battery)
-  ["ac", 185, 150, 340, 150, 0.75], // fwd = inverter AC output
+  ["ac", 185, 150, M2_JOIN, 150, 0.75], // fwd = inverter AC output
+  ["acb", M2_JOIN, 150, 340, 150, 0.5], // fwd = AC output + meter 2 into the switchboard
   ["home", 340, 150, 340, 250, 0.55],
   ["grid", 340, 50, 340, 150, 0.7], // fwd = import (grid → switchboard)
   ["eps", 185, 150, 185, 250, 0.6], // fwd = backup port output
+  ["m2a", 185, 50, 185, M2_ELBOW, 0.5], // meter 2's line, no arrow until its last leg
+  ["m2b", 185, M2_ELBOW, M2_JOIN, M2_ELBOW, 0.5],
+  ["m2", M2_JOIN, M2_ELBOW, M2_JOIN, 150, 0.5], // fwd = generating (into the junction)
 ];
 
 // fx, fy: a grid coordinate as a percentage of the box's width / height.
@@ -1281,6 +1295,39 @@ function splitEPS(p) {
   };
 }
 
+// toSwitchboard: what the AC line carries after the junction — the
+// inverter's grid-port output plus what meter 2 brings in (− = in).
+function toSwitchboard(p) {
+  const port = splitEPS(p).toBoard;
+  return port == null ? null : port - (p?.meter2_w ?? 0);
+}
+
+// METER2_TEXT: the second CT's label presets (site.meter2_label),
+// translated; any other value is the installer's own words, shown as
+// written.
+const METER2_TEXT = { ac_solar: tr("AC-coupled solar"), generator: tr("Generator") };
+
+function meter2Label(st = S.state) {
+  const l = st?.meter2_label ?? "ac_solar";
+  return METER2_TEXT[l] ?? l;
+}
+
+// meter2Cls: the second CT's colour — solar's for AC-coupled solar, the
+// neutral one for anything else.
+function meter2Cls(st = S.state) {
+  return (st?.meter2_label ?? "ac_solar") === "ac_solar" ? "s-solar" : "s-grid";
+}
+
+// hasPV / hasMeter2: whether the site has DC solar / a second CT, so a
+// source it lacks is not drawn (state.present, issue #2; or seen live
+// on this page — once shown it stays, so the diagram does not jump).
+function hasPV(st = S.state) {
+  return S.pvSeen || !!st?.present?.pv;
+}
+function hasMeter2(st = S.state) {
+  return S.m2Seen || !!st?.present?.meter2;
+}
+
 function flowOf(p) {
   const dir = (w, pos, neg, idle) =>
     w == null ? { d: "idle", txt: "—" }
@@ -1293,6 +1340,8 @@ function flowOf(p) {
     grid: dir(p?.grid_w, tr("importing"), tr("exporting"), tr("balanced")),
     batt: dir(p?.battery_w, tr("charging"), tr("discharging"), tr("idle")),
     ac: dir(splitEPS(p).toBoard, tr("out"), tr("in"), tr("idle")),
+    acb: dir(toSwitchboard(p), tr("out"), tr("in"), tr("idle")),
+    m2: dir(p?.meter2_w == null ? null : -p.meter2_w, tr("generating"), tr("drawing"), tr("idle")),
     // the conversion: DC → AC (fwd) or AC → DC (rev, charging from the
     // grid), by the whole AC side (backup port included)
     conv: dir(p?.ac_port_w, tr("DC → AC"), tr("AC → DC"), tr("idle")),
@@ -1374,9 +1423,13 @@ function paintNow(st) {
   // the backup branch appears once the EPS port supplies power (and
   // stays: a cycling load must not make the diagram jump)
   if (!S.epsSeen && (p?.eps_w ?? 0) >= ACTIVE_W) S.epsSeen = true;
+  // live DC solar counts unless the inverter's lifetime PV total is 0
+  // (owner, 2026-11-27: a site whose PV strings are gone)
+  if (!S.pvSeen && (p?.pv_w ?? 0) >= ACTIVE_W && st?.energy?.pv_kwh !== 0) S.pvSeen = true;
+  if (!S.m2Seen && Math.abs(p?.meter2_w ?? 0) >= ACTIVE_W) S.m2Seen = true;
   const split = splitEPS(p);
-  const vals = { solar: p?.pv_w, home: split.mainLoad, grid: p?.grid_w, batt: p?.battery_w, eps: p?.eps_w };
-  for (const k of ["solar", "home", "grid", "batt", "eps"]) {
+  const vals = { solar: p?.pv_w, home: split.mainLoad, grid: p?.grid_w, batt: p?.battery_w, eps: p?.eps_w, m2: p?.meter2_w };
+  for (const k of ["solar", "home", "grid", "batt", "eps", "m2"]) {
     const v = byId("fv-" + k);
     if (v) v.textContent = fmtPower(vals[k]);
     const ph = byId("fp-" + k);
@@ -1389,7 +1442,8 @@ function paintNow(st) {
     hp0.textContent = tr("of {total}", { total: fmtPower(p.load_w) });
     hp0.title = tr("main-board circuits, of {total} for the whole household (backup circuits included)", { total: fmtPower(p.load_w) });
   }
-  for (const [k] of FLOW_LINES) paintFlowLine(k, f[k].d);
+  // meter 2's elbow legs share its last leg's state
+  for (const [k] of FLOW_LINES) paintFlowLine(k, f[k.startsWith("m2") ? "m2" : k].d);
   // the inverter: its DC side, its AC output (in when charging from the
   // grid) and its conversion loss
   const loss = inverterLoss(p);
@@ -1410,8 +1464,11 @@ function paintNow(st) {
   const flow = byId("flow");
   if (flow) {
     flow.classList.toggle("has-eps", S.epsSeen);
+    flow.classList.toggle("has-pv", hasPV(st));
+    flow.classList.toggle("has-m2", hasMeter2(st));
     flow.setAttribute("aria-label",
-      tr("Solar {w} {state}", { w: fmtPower(p?.pv_w), state: f.solar.txt }) + "; " +
+      (hasPV(st) ? tr("Solar {w} {state}", { w: fmtPower(p?.pv_w), state: f.solar.txt }) + "; " : "") +
+      (hasMeter2(st) ? tr("{source} {w} {state}", { source: meter2Label(st), w: fmtPower(p?.meter2_w), state: f.m2.txt }) + "; " : "") +
       tr("battery {w} {state}", { w: fmtPower(p?.battery_w), state: f.batt.txt }) + "; " +
       tr("inverter DC side {w}", { w: fmtPower(inverterDC(p)) }) + ", " +
       tr("inverter AC {state} {w}", { state: f.ac.txt, w: fmtPower(p?.ac_port_w) }) + ", " + f.conv.txt +
@@ -1597,6 +1654,7 @@ function exportRows(h) {
     const r = { solar_w: h.sol[i], home_w: h.haus[i], grid_w: h.grid[i], battery_w: h.batt[i], soc_pct: h.soc[i] };
     if (Object.values(r).every((v) => v == null)) return;
     r.eps_w = h.eps?.[i] ?? null;
+    r.meter2_w = h.meter2?.[i] ?? null;
     r.soc_estimate_pct = h.soc_est?.[i] ?? null;
     out.push({ time: new Date(t * 1000).toISOString(), ts: t, ...r });
   });
@@ -1604,11 +1662,11 @@ function exportRows(h) {
 }
 
 function exportCSV(h) {
-  const cols = ["time", "ts", "solar_w", "home_w", "grid_w_import_positive", "battery_w_charge_positive", "soc_pct", "eps_w"];
+  const cols = ["time", "ts", "solar_w", "home_w", "grid_w_import_positive", "battery_w_charge_positive", "soc_pct", "eps_w", "meter2_w_into_site_negative"];
   const lines = [cols.join(",")];
   for (const r of exportRows(h)) {
     const v = (x) => (x == null ? "" : String(x));
-    lines.push([r.time, r.ts, v(r.solar_w), v(r.home_w), v(r.grid_w), v(r.battery_w), v(r.soc_pct), v(r.eps_w)].join(","));
+    lines.push([r.time, r.ts, v(r.solar_w), v(r.home_w), v(r.grid_w), v(r.battery_w), v(r.soc_pct), v(r.eps_w), v(r.meter2_w)].join(","));
   }
   download(exportName("csv"), "text/csv", lines.join("\n") + "\n");
 }
@@ -1627,6 +1685,7 @@ function exportJSON(h) {
       solar_w: { unit: "W", description: "PV generation (≥ 0)" },
       home_w: { unit: "W", description: "household load (≥ 0), the backup (EPS) port included" },
       eps_w: { unit: "W", description: "the backup (EPS) port's output: the part of home_w the backup circuits drew (null = not recorded)" },
+      meter2_w: { unit: "W", description: "the second CT (meter 2: " + (S.state?.meter2_label ?? "ac_solar") + "): negative = power into the site; home_w counts it (null = not recorded)" },
       grid_w: { unit: "W", description: "grid at the panel: positive = importing, negative = exporting" },
       battery_w: { unit: "W", description: "battery: positive = charging, negative = discharging" },
       soc_pct: { unit: "%", description: "battery state of charge at the end of the step" },
@@ -1677,7 +1736,8 @@ function renderKpis(h) {
   if (!el) return;
   if (!t) { el.innerHTML = ""; return; }
   el.innerHTML =
-    kpiTile("s-solar", tr("Solar"), fmtKWh(t.sol_wh), tr("generated")) +
+    (hasPV() ? kpiTile("s-solar", tr("Solar"), fmtKWh(t.sol_wh), tr("generated")) : "") +
+    (hasMeter2() ? kpiTile(meter2Cls(), meter2Label(), fmtKWh(t.meter2_gen_wh), tr("generated")) : "") +
     kpiTile("s-home", tr("Home"), fmtKWh(t.haus_wh), tr("used")) +
     dirTile("s-grid", tr("Grid"), t.grid_import_wh, tr("imported"), t.grid_export_wh, tr("exported")) +
     dirTile("s-batt", tr("Battery"), t.batt_charged_wh, tr("charged"), t.batt_discharged_wh, tr("discharged"));
@@ -1686,7 +1746,10 @@ function renderKpis(h) {
 function histRows(h) {
   const w = (v, tick) => fmtAxisW(v, tick);
   return [
-    { key: "sol", title: tr("Solar"), cls: "s-solar", values: h.sol, fmt: w },
+    ...(hasPV() ? [{ key: "sol", title: tr("Solar"), cls: "s-solar", values: h.sol, fmt: w }] : []),
+    // meter 2 drawn generation-positive, like solar (the API's − = in)
+    ...(hasMeter2() ? [{ key: "m2", title: meter2Label(), cls: meter2Cls(), values: (h.meter2 ?? []).map((v) => (v == null ? null : -v)), fmt: w,
+      legend: tr("above 0 = generating · below 0 = drawing") }] : []),
     homeRow(h, w),
     { key: "grid", title: tr("Grid"), cls: "s-grid", values: h.grid, fmt: w, legend: tr("above 0 = importing · below 0 = exporting") },
     { key: "batt", title: tr("Battery"), cls: "s-batt", values: h.batt, fmt: w, legend: tr("above 0 = charging · below 0 = discharging") },
@@ -1743,16 +1806,17 @@ function renderHistTable(h) {
   const rows = [];
   for (let i = h.ts.length - 1; i >= 0; i--) {
     if ([h.sol, h.haus, h.grid, h.batt, h.soc].every((s) => s[i] == null)) continue;
+    const m2 = hasMeter2() ? c(h.meter2?.[i] == null ? null : -h.meter2[i]) : "";
     const c = (v) => `<td class="num">${v == null ? "—" : esc(fmtAxisW(v, false))}</td>`;
     const u = (s, f) => `<td class="num">${s?.[i] == null ? "—" : esc(f(s[i], false))}</td>`;
-    rows.push(`<tr><td>${esc(new Date(h.ts[i] * 1000).toLocaleString(locale()))}</td>${c(h.sol[i])}${c(h.haus[i])}${c(h.grid[i])}${c(h.batt[i])}` +
+    rows.push(`<tr><td>${esc(new Date(h.ts[i] * 1000).toLocaleString(locale()))}</td>${hasPV() ? c(h.sol[i]) : ""}${m2}${c(h.haus[i])}${c(h.grid[i])}${c(h.batt[i])}` +
       `<td class="num">${h.soc[i] == null ? "—" : h.soc[i] + " %"}</td>${u(h.soc_est, fmtAxisSoc)}${c(h.eps?.[i])}` +
       `${u(h.bms_chg_a, fmtAxisA)}${u(h.t_cell_min, fmtAxisC)}${u(h.t_batt, fmtAxisC)}${u(h.t_inv, fmtAxisC)}${u(h.t_amb, fmtAxisC)}</tr>`);
   }
   const th = (s) => `<th scope="col">${esc(s)}</th>`;
   el.innerHTML = rows.length === 0 ? `<p class="muted small">${esc(tr("No data in this range yet."))}</p>` :
     `<table><caption class="sr-only">${esc(tr("History values, {range}, newest first", { range: RANGES.find(([r]) => r === S.histRange)?.[2] ?? "" }))}</caption>` +
-    `<thead><tr>${th(tr("time"))}${th(tr("solar"))}${th(tr("home"))}${th(tr("grid (+ import)"))}${th(tr("battery (+ charging)"))}${th(tr("SoC"))}${th(tr("SoC estimate"))}${th(tr("backup port"))}` +
+    `<thead><tr>${th(tr("time"))}${hasPV() ? th(tr("solar")) : ""}${hasMeter2() ? th(meter2Label()) : ""}${th(tr("home"))}${th(tr("grid (+ import)"))}${th(tr("battery (+ charging)"))}${th(tr("SoC"))}${th(tr("SoC estimate"))}${th(tr("backup port"))}` +
     `${th(tr("BMS charge limit"))}${th(tr("coldest cell"))}${th(tr("battery temp"))}${th(tr("inverter temp"))}${th(tr("ambient temp"))}</tr></thead>` +
     `<tbody>${rows.join("")}</tbody></table>`;
 }
@@ -1836,9 +1900,9 @@ function flowNode(k, label, area) {
 const FLOW_LIMITS = [
   // each sits on the stretch of its line no node covers at phone width
   { n: 1, x: 362, y: 118, key: "grid" },   // the grid connection (CT)
-  { n: 2, x: 300, y: 132, key: "port" },   // the inverter's grid port
+  { n: 2, x: 280, y: 170, key: "port" },   // the inverter's grid port: below its line, before meter 2's junction
   { n: 3, x: 80, y: 200, key: "batt" },    // the battery (beside its line: the nodes cover most of it on a phone)
-  { n: 4, x: 205, y: 98, key: "inv" },     // the inverter's output rating (above its AC side)
+  { n: 4, x: 150, y: 98, key: "inv" },     // the inverter's output rating (above it, clear of meter 2's line)
   { n: 5, x: 203, y: 206, key: "eps" },    // the backup (EPS) port
 ];
 
@@ -1922,7 +1986,7 @@ function flowMarkup(withLimits) {
   // .flow is the container (its width picks the box's shape); .flow-box
   // holds the drawing
   return `
-      <div id="flow" class="flow${S.epsSeen ? " has-eps" : ""}" role="img"><div class="flow-box">
+      <div id="flow" class="flow${S.epsSeen ? " has-eps" : ""}${hasPV() ? " has-pv" : ""}${hasMeter2() ? " has-m2" : ""}" role="img"><div class="flow-box">
         <svg class="flow-lines" aria-hidden="true">
           ${FLOW_LINES.map(([k, x1, y1, x2, y2]) =>
             `<line id="fl-${k}" class="fl s-${k} idle" x1="${fx(x1)}" y1="${fy(y1)}" x2="${fx(x2)}" y2="${fy(y2)}"/>`).join("")}
@@ -1932,6 +1996,7 @@ function flowMarkup(withLimits) {
         ${marks ? `<svg class="flow-marks" aria-hidden="true">${marks}</svg>` : ""}
         <span class="board-label muted">${esc(tr("switchboard"))}</span>
         ${flowNode("solar", esc(tr("Solar")), "a-solar")}
+        ${flowNode("m2", esc(meter2Label()), "a-m2 " + meter2Cls())}
         ${flowNode("batt", esc(tr("Battery")), "a-batt")}
         <div id="inv" class="node inv a-hub" data-conv="idle" title="${esc(tr("Inverter"))}">
           <div class="inv-dc">
@@ -2831,6 +2896,13 @@ async function setupAction(action) {
       if (await setupSave("/settings", "PUT", { "battery.capacity_wh": Math.round(kwh * 1000) }, tr("battery capacity saved"))) render();
       break;
     }
+    case "setup-m2": {
+      const pick = byId("setup-m2").value;
+      const label = pick === "own" ? byId("setup-m2-own").value.trim() : pick;
+      if (!label) { toast(tr("name what the second CT measures"), "warn"); return; }
+      if (await setupSave("/settings", "PUT", { "site.meter2_label": label }, tr("saved"))) render();
+      break;
+    }
     case "setup-zone": {
       const z = byId("setup-zone").value.trim();
       if (!z) { toast(tr("choose the inverter's time zone"), "warn"); return; }
@@ -3186,7 +3258,24 @@ async function renderSite() {
   <section class="stack">
     ${zonePanel(ctx, cfg)}
     ${capacityPanel(ctx)}
+    ${meter2Panel(ctx)}
   </section>`;
+}
+
+// meter2Panel: what the second CT (meter 2) measures — it names the
+// reading on the dashboard and the history (issue #2).
+function meter2Panel(ctx) {
+  const cur = ctx.val("site.meter2_label") ?? "ac_solar";
+  const own = METER2_TEXT[cur] ? "" : cur;
+  const opt = (v, t) => `<option value="${v}" ${(own ? "own" : cur) === v ? "selected" : ""}>${esc(t)}</option>`;
+  return `<article class="panel field-panel">
+    ${stepHead(null, tr("Second CT (meter 2)"))}
+    <p class="muted small">${esc(tr("Some sites have a second CT clamp on the inverter's meter: on AC-coupled solar (a separate solar inverter) or on a generator. The inverter counts it in the household load. Say what it measures, and the dashboard names it so; a site without one shows nothing."))}</p>
+    <label>${esc(tr("It measures"))}<select id="setup-m2">${opt("ac_solar", METER2_TEXT.ac_solar)}${opt("generator", METER2_TEXT.generator)}${opt("own", tr("something else (name it)"))}</select></label>
+    <label>${esc(tr("Name"))}<input type="text" id="setup-m2-own" maxlength="32" value="${esc(own)}" placeholder="${esc(tr("e.g. Shed solar"))}"></label>
+    <p class="muted small">${esc(tr("Currently {label} ({source}).", { label: METER2_TEXT[cur] ?? cur, source: SOURCE_TEXT[ctx.src("site.meter2_label")] ?? "" }))}</p>
+    <button type="button" class="cmd" data-action="setup-m2">${esc(tr("Save"))}</button>
+  </article>`;
 }
 
 async function renderStorage() {
@@ -3760,6 +3849,7 @@ document.addEventListener("click", async (e) => {
       break;
     case "setup-refresh":
     case "setup-zone":
+    case "setup-m2":
     case "setup-set-clock":
     case "setup-capacity":
     case "setup-access":

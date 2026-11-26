@@ -55,6 +55,7 @@ func (s *Server) handlePowerAverage(w http.ResponseWriter, r *http.Request, _ To
 		body.Power = &Power{
 			PVW: a.SolAvg, GridW: a.GridAvg, LoadW: a.HausAvg,
 			AcPortW: a.AcportAvg, BatteryW: a.BattAvg, EpsW: a.EpsAvg,
+			Meter2W: nullInt(a.Meter2),
 		}
 	}
 	writeJSON(w, http.StatusOK, body)

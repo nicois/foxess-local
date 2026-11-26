@@ -148,7 +148,7 @@ func TestFailedCheckIsUnknown(t *testing.T) {
 		{"grid voltage", func(r regs) { r[31006] = 900 }, FeatureLiveValues, "grid_voltage"},
 		{"grid frequency", func(r regs) { r[31009] = 7000 }, FeatureLiveValues, "grid_frequency"},
 		{"SoC over 100", func(r regs) { r[31024] = 140 }, FeatureLiveValues, "soc_range"},
-		{"power balance", func(r regs) { r[31054] = 9000 }, FeatureLiveValues, "power_balance"},
+		{"power balance", func(r regs) { r[31054] = 9000 }, FeatureLiveValues, CheckPowerBalance},
 		{"limit high word", func(r regs) { r[41023] = 1 }, FeaturePowerLimits, "export_limit_range"},
 		{"current limit", func(r regs) { r[41028] = 5000 }, FeatureCurrentLimits, "export_current_range"},
 		{"meter compensation", func(r regs) { r[41029] = 0x1000 }, FeatureMeterCompensation, "meter_compensation_range"},
@@ -239,5 +239,29 @@ func TestPortLimitsPending(t *testing.T) {
 	in.Regs = r.get
 	if f := level(t, Evaluate(in), FeaturePortLimits); f.Level != LevelPending {
 		t.Fatalf("port limits without 41200: %s", f.Level)
+	}
+}
+
+// TestPowerBalanceMeter2 (issue #2): with AC-coupled solar on the second
+// CT (31051:31052), the inverter's household load counts it — load ≈
+// inverter + grid − meter 2. The reporter's KH10 (fw 1.60): inverter
+// −904 W (charging), grid −139 W, meter 2 −1327 W, load 354 W. Without
+// the meter-2 term the balance is 1.4 kW out and live values would drop.
+func TestPowerBalanceMeter2(t *testing.T) {
+	in := ref()
+	r := reference()
+	s32 := func(lo int, v int32) { u := uint32(v); r[lo-1], r[lo] = uint16(u>>16), uint16(u) } //nolint:gosec // G115: test pair
+	s32(31046, -904)
+	s32(31050, -139)
+	s32(31052, -1327)
+	s32(31054, 354)
+	r[31022] = uint16(0x10000 - 769) // battery 769 W charging (+ = discharge on the wire)
+	r[31002] = 0                     // no DC solar
+	in.Regs = r.get
+	f := level(t, Evaluate(in), FeatureLiveValues)
+	for _, c := range f.Checks {
+		if c.Name == CheckPowerBalance && c.Status != StatusPass {
+			t.Fatalf("power_balance %s (%s), want pass", c.Status, c.Detail)
+		}
 	}
 }

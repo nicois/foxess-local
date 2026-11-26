@@ -258,6 +258,7 @@ func TestRepairWrappedPV(t *testing.T) {
 	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 8`); err != nil {
 		t.Fatal(err)
 	}
+	undoV15Columns(t, s)
 	undoV14(t, s)
 	undoV13Columns(t, s)
 	undoV12Columns(t, s)
@@ -456,5 +457,92 @@ func TestSocEstimateHistory(t *testing.T) {
 	}
 	if !raw[0].SocEst.Valid || raw[0].SocEst.Int64 != 6698 || raw[1].SocEst.Valid {
 		t.Fatalf("raw estimates: %+v %+v", raw[0].SocEst, raw[1].SocEst)
+	}
+}
+
+// TestMeter2RollUp (issue #2): the second CT (meter 2, − = into the
+// site) is kept per sample and averaged into the 15-minute buckets, with
+// the energy it brought in (the − side); a sample without it (the 150 B
+// frame) and a bucket of only such samples stay NULL — unknown, never 0.
+func TestMeter2RollUp(t *testing.T) {
+	s := newTestStore(t)
+	b := testBase.Truncate(15 * time.Minute)
+	s.now = fixedClock(b.Add(time.Hour))
+	m := func(v int32) *int32 { return &v }
+	for i := range 720 { // 1 h of 5 s samples at −1200 W: 1200 Wh in
+		s.RecordTelemetry(testConnID, b.Add(time.Duration(i)*5*time.Second), frame.Tele{Haus: 500, Soc: 50, Meter2: m(-1200)})
+	}
+	s.RecordTelemetry(testConnID, b.Add(-time.Hour), frame.Tele{Haus: 500, Soc: 50}) // no meter 2
+	s.Flush()
+	if _, err := s.RollUp(); err != nil {
+		t.Fatal(err)
+	}
+	aggs, err := s.HistoryBuckets(b.Add(-time.Hour), b.Add(time.Hour))
+	if err != nil || len(aggs) != 5 {
+		t.Fatalf("buckets %d %v", len(aggs), err)
+	}
+	if aggs[0].Meter2.Valid || aggs[0].Meter2GenWh.Valid {
+		t.Fatalf("a bucket without meter 2: %+v / %+v, want NULL", aggs[0].Meter2, aggs[0].Meter2GenWh)
+	}
+	for _, a := range aggs[1:] {
+		if !a.Meter2.Valid || a.Meter2.Int64 != -1200 || !a.Meter2GenWh.Valid || a.Meter2GenWh.Int64 != 300 {
+			t.Fatalf("bucket %s meter 2 %+v gen %+v, want -1200 / 300 Wh", a.TS, a.Meter2, a.Meter2GenWh)
+		}
+	}
+	checkMeter2Raw(t, s, b)
+}
+
+// checkMeter2Raw: the per-minute history and the state carry meter 2.
+func checkMeter2Raw(t *testing.T, s *Store, b time.Time) {
+	t.Helper()
+	raw, err := s.HistoryRaw(b, b.Add(time.Minute))
+	if err != nil || len(raw) != 1 || raw[0].Meter2.Int64 != -1200 {
+		t.Fatalf("raw minute meter 2 %+v %v", raw, err)
+	}
+	if st, _ := s.QueryState(); st.Meter2 == nil || *st.Meter2 != -1200 {
+		t.Fatalf("state meter 2 %v", st.Meter2)
+	}
+}
+
+// TestPresent (issue #2): whether the site has DC solar and a second CT
+// at all — from the live samples, and after a restart from the stored
+// buckets — so the dashboard can leave out a source the site lacks.
+// 30 W is the dashboard's idle threshold: standby noise is not a source.
+func TestPresent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.db")
+	b := testBase.Truncate(15 * time.Minute)
+	s, err := openStore(path, nil, maxConns, fixedClock(b.Add(time.Hour)), testVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := func(v int32) *int32 { return &v }
+	s.RecordTelemetry(testConnID, b, frame.Tele{Sol: 20, Haus: 500, Soc: 50, Meter2: m(-3)})
+	if p := s.Present(); p.PV || p.Meter2 {
+		t.Fatalf("idle readings: %+v, want neither", p)
+	}
+	s.RecordTelemetry(testConnID, b.Add(5*time.Second), frame.Tele{Sol: 0, Haus: 500, Soc: 50, Meter2: m(-900)})
+	if p := s.Present(); p.PV || !p.Meter2 {
+		t.Fatalf("meter 2 at -900 W: %+v", p)
+	}
+	s.RecordTelemetry(testConnID, b.Add(10*time.Second), frame.Tele{Sol: 2000, Haus: 500, Soc: 50, Meter2: m(0)})
+	if p := s.Present(); !p.PV || !p.Meter2 {
+		t.Fatalf("solar 2000 W: %+v", p)
+	}
+	s.Flush()
+	if _, err := s.RollUp(); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	s2, err := openStore(path, nil, maxConns, fixedClock(b.Add(time.Hour)), testVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s2.Close() }()
+	if p := s2.Present(); !p.PV || !p.Meter2 {
+		t.Fatalf("after a restart: %+v, want both from the buckets", p)
+	}
+	empty := newTestStore(t)
+	if p := empty.Present(); p.PV || p.Meter2 {
+		t.Fatalf("empty store: %+v", p)
 	}
 }

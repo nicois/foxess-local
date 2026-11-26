@@ -484,7 +484,7 @@ and **31039 ×16** (fn03).
 | 31027 | inverter state enum | | 3 (on-grid, normal) | |
 | 31028 | BMS connected | | 1 | |
 | 31049:31050 | grid CT (s32 hi:lo) | 1 W, + = import | −76 W (export) | `grid_w` |
-| 31051:31052 | CT2 meter | 1 W | 0 | |
+| 31051:31052 | second CT (meter 2; the cloud's "Gen Load", shown as "3rd Solar") (s32 hi:lo) | 1 W, − = into the site | 0 here (no second CT); −1327 W on another KH10 with AC-coupled solar (fw 1.60; the cloud showed Gen Load 1330 W) | `meter2_w` (issue #2). **31053 counts it**: load ≈ 31045 + grid − meter 2. On that site's two bundles (fw 1.60 and 1.73, 3,700 polls) the balance without it is out by a median 949 / 495 W (p90 1.45 kW), with it 114 / 150 W. Reading 31052 alone as s16 is the same below 32 kW. |
 | 31053:31054 | household load (s32 hi:lo) | 1 W | 4326 W | `load_w` |
 
 **Identities**: these are measured values, not the cloud model behind

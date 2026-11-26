@@ -106,12 +106,15 @@ func (s *Server) writeMetrics(m *metricsWriter, checks []Check, st State, mode p
 	if st.AsOf != nil {
 		m.gauge("foxess_data_age_seconds", "Seconds since the newest reading.", s.clock().Sub(*st.AsOf).Round(time.Second).Seconds())
 		p := st.Power
-		m.family("foxess_power_watts", "Power by flow, W: pv generation; grid + importing; load; battery + charging; ac_port + output; eps backup-port output.")
+		m.family("foxess_power_watts", "Power by flow, W: pv generation; grid + importing; load; battery + charging; ac_port + output; eps backup-port output; meter2 the second CT, − into the site.")
 		for _, f := range []struct {
 			flow string
 			w    int
 		}{{"pv", p.PVW}, {"grid", p.GridW}, {"load", p.LoadW}, {"battery", p.BatteryW}, {"ac_port", p.AcPortW}, {labelEPS, p.EpsW}} {
 			m.sample("foxess_power_watts", float64(f.w), "flow", f.flow)
+		}
+		if p.Meter2W != nil {
+			m.sample("foxess_power_watts", float64(*p.Meter2W), "flow", "meter2")
 		}
 		m.gauge("foxess_battery_soc_percent", "Battery state of charge, %.", float64(st.Battery.SocPct))
 		if e := st.Battery.SocEstimatePct; e != nil {

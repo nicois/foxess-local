@@ -481,7 +481,7 @@ func TestMigrationAddsVersionColumn(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatalf("migrations: %v", err)
 	}
-	if n != 14 { // v14: the notices (D-030)
-		t.Errorf("schema_migrations max: got %d, want 14", n)
+	if n != 15 { // v15: meter 2 (issue #2)
+		t.Errorf("schema_migrations max: got %d, want 15", n)
 	}
 }

@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"foxesslocal/internal/quirks"
 
@@ -36,6 +38,7 @@ var UISettable = append([]string{
 	"notify.webhook_url", "notify.ntfy_url",
 	"store.write_delay_s",
 	"update.check_interval_h", "update.prerelease", "update.auto_apply", "site.time_zone",
+	"site.meter2_label",
 	"alerts.soc_threshold_pct", "alerts.soc_horizon_min", "alerts.soc_p_value", "alerts.soc_window_min",
 }, quirks.Keys()...)
 
@@ -222,6 +225,35 @@ type Site struct {
 	// zone of the inverter's clock and schedule. Unset until chosen
 	// (setup); never assumed to be the host's.
 	TimeZone string `toml:"time_zone"`
+	// Meter2Label is what the second CT (meter 2) measures:
+	// "ac_solar" (AC-coupled solar, the default), "generator", or the
+	// installer's own words (CheckMeter2Label). Unset = ac_solar.
+	Meter2Label string `toml:"meter2_label"`
+}
+
+// The meter-2 label presets (the web UI translates them; any other value
+// is the installer's own words, shown as written).
+const (
+	Meter2ACSolar   = "ac_solar"
+	Meter2Generator = "generator"
+)
+
+// maxMeter2Label bounds an own-words label (characters): it names a
+// node on the dashboard.
+const maxMeter2Label = 32
+
+// CheckMeter2Label validates a meter-2 label: a preset, or 1–32
+// printable characters that are not all spaces.
+func CheckMeter2Label(v string) error {
+	if strings.TrimSpace(v) == "" || utf8.RuneCountInString(v) > maxMeter2Label || !utf8.ValidString(v) {
+		return fmt.Errorf("must be %s, %s, or a label of 1 to %d characters", Meter2ACSolar, Meter2Generator, maxMeter2Label)
+	}
+	for _, r := range v {
+		if !unicode.IsPrint(r) {
+			return fmt.Errorf("must be printable text (no tabs or line breaks), got %q", v)
+		}
+	}
+	return nil
 }
 
 // Notify holds the outbound notification targets (F2); each is optional
@@ -501,6 +533,11 @@ func (c *Config) validate() error {
 	if z := c.Site.TimeZone; z != "" {
 		if _, err := siteclock.Zone(z); err != nil {
 			return fmt.Errorf("site.time_zone: %w", err)
+		}
+	}
+	if l := c.Site.Meter2Label; l != "" {
+		if err := CheckMeter2Label(l); err != nil {
+			return fmt.Errorf("site.meter2_label: %w", err)
 		}
 	}
 	return c.validateSim()

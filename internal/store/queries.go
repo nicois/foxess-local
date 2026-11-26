@@ -100,6 +100,9 @@ type State struct {
 	Acport int32
 	Batt   int32
 	Eps    int32 // EPS (backup / UPS) port output W
+	// Meter2 is the second CT, W, − = into the site; nil when the
+	// sample did not carry it (the 150 B frame).
+	Meter2 *int32
 	Soc    int
 	// ChargeState is the tele charge-state byte (02 idle / 04 charging).
 	ChargeState int
@@ -534,7 +537,7 @@ func appendWindow(where []string, args []any, since, until, before time.Time) ([
 func (s *Store) latestTele(st *State) error {
 	rows, err := s.db.Query(`
 		SELECT ts, sol, grid, haus, acport, batt, soc, charge_state,
-			idnt_grid, idnt_ac, haus_dup, eps
+			idnt_grid, idnt_ac, haus_dup, eps, meter2
 		FROM telemetry ORDER BY ts DESC, rowid DESC LIMIT 1`)
 	if err != nil {
 		return err
@@ -543,10 +546,14 @@ func (s *Store) latestTele(st *State) error {
 		return closeRows(rows, rows.Err())
 	}
 	var tsText string
+	var m2 sql.NullInt32
 	if err := rows.Scan(&tsText, &st.Sol, &st.Grid, &st.Haus, &st.Acport,
 		&st.Batt, &st.Soc, &st.ChargeState, &st.IDGrid, &st.IDAc,
-		&st.HausDup, &st.Eps); err != nil {
+		&st.HausDup, &st.Eps, &m2); err != nil {
 		return closeRows(rows, err)
+	}
+	if m2.Valid {
+		st.Meter2 = &m2.Int32
 	}
 	return closeRows(rows, setTS(&st.TeleTS, tsText))
 }

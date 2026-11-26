@@ -74,7 +74,10 @@ type historyBody struct {
 	// Eps is the EPS (backup) port output, W: the part of haus the
 	// backup circuits drew (haus includes it). Null where unknown — a
 	// step stored before buckets kept it whose raw samples are gone.
-	Eps    []*int        `json:"eps"`
+	Eps []*int `json:"eps"`
+	// Meter2 is the second CT (meter 2), W, − = into the site; null
+	// where no sample carried it.
+	Meter2 []*int        `json:"meter2"`
 	Totals historyTotals `json:"totals"`
 }
 
@@ -86,6 +89,14 @@ func tenths(v sql.NullInt64) *float64 {
 	}
 	f := float64(v.Int64) / tenthsPerUnit
 	return &f
+}
+
+// intOr is *p, or 0 for nil.
+func intOr(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 // nullInt is a nullable stored integer as a JSON value (null when absent).
@@ -121,6 +132,9 @@ type historyTotals struct {
 	BattChargedWh    int  `json:"batt_charged_wh"`
 	BattDischargedWh int  `json:"batt_discharged_wh"`
 	StoredDeltaWh    *int `json:"stored_delta_wh"` // null: the battery capacity is not set
+	// Meter2GenWh is the energy the second CT brought into the site
+	// (its − side); null when no step carried it.
+	Meter2GenWh *int `json:"meter2_gen_wh"`
 }
 
 // handleHistory is GET /history (spec §4): bucketed series over a fixed
@@ -216,6 +230,7 @@ func foldAggs(in []store.Agg, step time.Duration) []store.Agg {
 		c.a.BattAvg = c.batt / c.n
 		c.a.TBatt, c.a.TInv, c.a.TAmb, c.a.BMSChg = c.temps[0].mean(), c.temps[1].mean(), c.temps[2].mean(), c.temps[3].mean()
 		c.a.TCellMin, c.a.TCellMax, c.a.Eps = c.temps[4].mean(), c.temps[5].mean(), c.temps[6].mean()
+		c.a.Meter2, c.a.Meter2GenWh = c.temps[7].mean(), c.m2Wh.total()
 		out = append(out, c.a)
 	}
 	return out
@@ -228,8 +243,9 @@ type hourAcc struct {
 	sol, haus, grid, batt int // sums of present 15-min avgs
 	// battery, inverter, ambient temperature, BMS charge limit, the
 	// lowest / highest cell temperature and the EPS port: the mean of the
-	// windows that carried them
-	temps [7]nullMean
+	// windows that carried them, and meter 2
+	temps [8]nullMean
+	m2Wh  nullMean // meter 2's energy in: summed
 }
 
 // nullMean averages the present values of a nullable series.
@@ -245,6 +261,14 @@ func (m *nullMean) add(v sql.NullInt64) {
 	}
 }
 
+// total is the present values' sum (not Valid when none was present).
+func (m *nullMean) total() sql.NullInt64 {
+	if m.n == 0 {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: m.sum, Valid: true}
+}
+
 func (m *nullMean) mean() sql.NullInt64 {
 	if m.n == 0 {
 		return sql.NullInt64{}
@@ -254,9 +278,10 @@ func (m *nullMean) mean() sql.NullInt64 {
 
 // addTemps folds one window's nullable averages (temperatures, EPS).
 func (c *hourAcc) addTemps(b store.Agg) {
-	for i, v := range [7]sql.NullInt64{b.TBatt, b.TInv, b.TAmb, b.BMSChg, b.TCellMin, b.TCellMax, b.Eps} {
+	for i, v := range [8]sql.NullInt64{b.TBatt, b.TInv, b.TAmb, b.BMSChg, b.TCellMin, b.TCellMax, b.Eps, b.Meter2} {
 		c.temps[i].add(v)
 	}
+	c.m2Wh.add(b.Meter2GenWh)
 }
 
 // add folds a later bucket into a seeded row: sums for the means,
@@ -290,28 +315,10 @@ func (c *hourAcc) add(b store.Agg) {
 // returns literally empty arrays (spec §4). firstSoc/lastSoc are the SoC
 // span over the present data (spec §4 stored_delta_wh endpoints).
 func buildHistory(rangeLabel string, rv historyRange, since, until time.Time, aggs []store.Agg, firstSoc, lastSoc, capacityWh int) historyBody {
-	if len(aggs) == 0 {
-		return historyBody{
-			Range:    rangeLabel,
-			Step:     rv.step,
-			TS:       []int64{},
-			Sol:      []*int{},
-			Grid:     []*int{},
-			Haus:     []*int{},
-			Batt:     []*int{},
-			Soc:      []*int{},
-			SocEst:   []*float64{},
-			TBatt:    []*float64{},
-			TInv:     []*float64{},
-			TAmb:     []*float64{},
-			BMSChg:   []*float64{},
-			TCellMin: []*float64{},
-			TCellMax: []*float64{},
-			Eps:      []*int{},
-			Totals:   historyTotals{},
-		}
-	}
 	n := int(until.Sub(since) / rv.stepDur)
+	if len(aggs) == 0 {
+		n = 0 // an empty range: literally empty arrays, zero totals
+	}
 	body := historyBody{
 		Range:    rangeLabel,
 		Step:     rv.step,
@@ -329,6 +336,7 @@ func buildHistory(rangeLabel string, rv historyRange, since, until time.Time, ag
 		TCellMin: make([]*float64, n),
 		TCellMax: make([]*float64, n),
 		Eps:      make([]*int, n),
+		Meter2:   make([]*int, n),
 	}
 	bySlot := make(map[int64]int, len(aggs))
 	for i, a := range aggs {
@@ -350,6 +358,10 @@ func buildHistory(rangeLabel string, rv historyRange, since, until time.Time, ag
 		body.TBatt[i], body.TInv[i], body.TAmb[i], body.BMSChg[i] = tenths(a.TBatt), tenths(a.TInv), tenths(a.TAmb), tenths(a.BMSChg)
 		body.TCellMin[i], body.TCellMax[i] = tenths(a.TCellMin), tenths(a.TCellMax)
 		body.Eps[i] = nullInt(a.Eps)
+		body.Meter2[i] = nullInt(a.Meter2)
+	}
+	if len(aggs) == 0 {
+		return body
 	}
 	t := historyTotals{}
 	for _, a := range aggs {
@@ -359,6 +371,9 @@ func buildHistory(rangeLabel string, rv historyRange, since, until time.Time, ag
 		t.GridExportWh += a.GridExpWh
 		t.BattChargedWh += a.BattChgWh
 		t.BattDischargedWh += a.BattDisWh
+		if a.Meter2GenWh.Valid {
+			t.Meter2GenWh = new(intOr(t.Meter2GenWh) + int(a.Meter2GenWh.Int64))
+		}
 	}
 	if capacityWh > 0 {
 		d := (lastSoc - firstSoc) * capacityWh / 100

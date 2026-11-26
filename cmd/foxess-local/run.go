@@ -858,6 +858,7 @@ func (h *handle) svcObs(ev framesvc.Event) {
 				PVW: int(ev.Tele.Sol), GridW: int(ev.Tele.Grid),
 				LoadW: int(ev.Tele.Haus), AcPortW: int(ev.Tele.Acport),
 				BatteryW: int(ev.Tele.Batt), EpsW: int(ev.Tele.Eps),
+				Meter2W: meter2W(ev.Tele.Meter2),
 			},
 			SocPct:         int(ev.Tele.Soc),
 			SocEstimatePct: est,
@@ -1259,4 +1260,14 @@ func (h *handle) writeBudget() map[string]api.WriteBudget {
 		return map[string]api.WriteBudget{}
 	}
 	return api.BudgetView(h.gw.Budget())
+}
+
+// meter2W is a telemetry sample's second-CT reading as the API's value
+// (nil when the sample has none).
+func meter2W(m *int32) *int {
+	if m == nil {
+		return nil
+	}
+	v := int(*m)
+	return &v
 }
