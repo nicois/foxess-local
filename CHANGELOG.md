@@ -68,6 +68,10 @@ version; anything else bumps the patch version.
   the cloud's are kept.
 - Problem reports keep network errors intact: "connection reset by
   peer" no longer reads "connection reset by a token".
+- Stopping the service no longer panics ("store: RecordChunk after
+  Close") when the drain force-closes the inverter's session and its
+  capture finishes after the database closed. That capture is dropped
+  and logged instead.
 
 ## [v0.5.0] - 2026-11-25
 

@@ -1,6 +1,10 @@
 package store
 
-import "github.com/nicois/prox/pkg/capture"
+import (
+	"log/slog"
+
+	"github.com/nicois/prox/pkg/capture"
+)
 
 // AttachRegistry wires the capture registry: every connection record
 // gets one persistStream goroutine that blocks on the stream's Wait and
@@ -15,14 +19,26 @@ func (s *Store) AttachRegistry(reg *capture.Registry) {
 }
 
 // persistStream blocks until the stream finishes, then enqueues its
-// connections row and chunk rows.
+// connections row and chunk rows. A stream that finishes after Close is
+// dropped, never a panic: a stop must not crash on a flow the drain
+// force-closed (2026-11-18 23:37:20, "RecordChunk after Close"). Holding
+// persistMu keeps Close from landing between the rows.
 func (s *Store) persistStream(st *capture.Stream) {
 	defer s.streamWG.Done()
 	<-st.Wait()
 	info := st.Info()
-	s.RecordConn(info, st.Evicted())
+	s.persistMu.RLock()
+	defer s.persistMu.RUnlock()
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		slog.Warn("store: capture stream finished after close; not persisted", "id", info.ID, "chunks", len(st.Chunks()))
+		return
+	}
+	s.recordConn(info, st.Evicted())
 	for _, c := range st.Chunks() {
-		s.RecordChunk(c, info.ID)
+		s.recordChunk(c, info.ID)
 	}
 }
 

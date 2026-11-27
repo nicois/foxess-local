@@ -77,7 +77,11 @@ type Store struct {
 	enq, applied atomic.Int64
 
 	streamWG sync.WaitGroup // in-flight persistStream goroutines
-	maintWG  sync.WaitGroup // the maintenance loop (Close waits it)
+	// persistMu: a persistStream recording a finished stream holds it
+	// shared; Close takes it exclusively after marking the store closed,
+	// so a stream is persisted whole or (finished after Close) dropped
+	persistMu sync.RWMutex
+	maintWG   sync.WaitGroup // the maintenance loop (Close waits it)
 
 	view *view // the newest values (QueryState's source; see view.go)
 	// pvSeen / meter2Seen: the site has shown DC solar / a second CT
@@ -216,17 +220,20 @@ func openStore(path string, tick <-chan time.Time, maxOpen int, now func() time.
 
 // Close drains the write queue, stops the flusher, and closes the
 // database. Idempotent. Record* after Close panics (programmer error:
-// producers must stop before Close); capture streams that finish after
-// Close are dropped by the same guard, so the host must quiesce the
-// registry before closing the store.
+// producers must stop before Close). Capture streams are the exception:
+// one still recording finishes first, and one that finishes after Close
+// is dropped (logged), so the host quiesces the registry first
+// (WaitStreams) to keep its rows.
 func (s *Store) Close() error {
+	s.persistMu.Lock() // a persistStream still recording finishes first
 	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return nil
-	}
+	wasClosed := s.closed
 	s.closed = true
 	s.mu.Unlock()
+	s.persistMu.Unlock()
+	if wasClosed {
+		return nil
+	}
 	if s.ticker != nil {
 		s.ticker.Stop()
 	}

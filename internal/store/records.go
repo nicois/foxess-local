@@ -199,6 +199,10 @@ func (s *Store) RecordTelemetry(connID string, ts time.Time, tele frame.Tele) {
 // row.
 func (s *Store) RecordConn(info capture.CloseInfo, evicted int) {
 	s.checkOpen("RecordConn")
+	s.recordConn(info, evicted)
+}
+
+func (s *Store) recordConn(info capture.CloseInfo, evicted int) {
 	s.enqueue(connItem{info: info, evicted: evicted})
 }
 
@@ -207,6 +211,10 @@ func (s *Store) RecordConn(info capture.CloseInfo, evicted int) {
 // and a connection is persisted exactly once by persistStream.
 func (s *Store) RecordChunk(c capture.Chunk, connID string) {
 	s.checkOpen("RecordChunk")
+	s.recordChunk(c, connID)
+}
+
+func (s *Store) recordChunk(c capture.Chunk, connID string) {
 	s.mu.Lock()
 	seq := s.chunkSeq[connID]
 	s.chunkSeq[connID] = seq + 1

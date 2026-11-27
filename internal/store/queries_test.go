@@ -181,3 +181,25 @@ func checkTelemetryEnds(t *testing.T, s *Store, runFrames int, cadence time.Dura
 		t.Errorf("last row: got %+v", last)
 	}
 }
+
+// TestCaptureStreamAfterClose pins the shutdown panic of 2026-11-18
+// 23:37:20 ("store: RecordChunk after Close", a force-closed inverter
+// session at systemctl stop): a capture stream that finishes after the
+// store closed is dropped. Its persister must not panic and kill the
+// process.
+func TestCaptureStreamAfterClose(t *testing.T) {
+	s := newTestStore(t)
+	reg := capture.NewRegistry()
+	s.AttachRegistry(reg)
+
+	st := reg.Open(capture.CloseInfo{
+		ID: testStreamID, Kind: testKindTLS, SNI: testSNI,
+		Client: testClient, Dst: testDst,
+	})
+	st.Record(capture.Chunk{Dir: capture.DirC2S, TS: testBase, Len: 74, Decision: capture.Forwarded})
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	st.Finish(testCauseEOF)
+	s.streamWG.Wait() // the persister ran to the end (a panic would abort the test binary)
+}
