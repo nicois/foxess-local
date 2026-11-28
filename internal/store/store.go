@@ -155,10 +155,15 @@ func (s *Store) synthesizeRestartConnections() (int, error) {
 // openStore is Open with an injected tick channel (nil = no tick),
 // pool size, and clock.
 func openStore(path string, tick <-chan time.Time, maxOpen int, now func() time.Time, version string) (*Store, error) {
-	// auto_vacuum first: it only takes effect on a new database (before
-	// the WAL switch writes its header) or at the next VACUUM
-	// (EnableIncrementalVacuum); on an existing database it is a no-op.
-	dsn := "file:" + path + "?_pragma=auto_vacuum(INCREMENTAL)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)"
+	// The pragmas run in this order on every new pool connection.
+	// busy_timeout first: the others can need a lock, and before it is
+	// set a connection opened while another holds the write lock fails
+	// at once with SQLITE_BUSY (the batch that hit it was lost; seen in
+	// CI with the smoke's 4-connection pool). auto_vacuum before the WAL
+	// switch: it only takes effect on a new database (before the switch
+	// writes its header) or at the next VACUUM (EnableIncrementalVacuum);
+	// on an existing database it is a no-op.
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=auto_vacuum(INCREMENTAL)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
 	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
