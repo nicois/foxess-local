@@ -19,7 +19,13 @@
 import { tr, locale, setLang } from "./i18n.js";
 import { smallMultiples } from "./charts.js";
 import { socView } from "./socview.js";
+import { feedView } from "./feedview.js";
 import { bundlePeriods, reportPeriods } from "./periods.js";
+
+// feed: what the page shows of the live stream — a brief reconnect (a
+// tab coming back to the foreground) never flashes a warning.
+const feed = feedView();
+let feedTimer = null;
 
 // API is the API's path, relative to the page: the UI also works behind
 // a reverse proxy under a path prefix (/foxess/ → /foxess/api/v1). A
@@ -185,7 +191,8 @@ function gate(msg) {
   renderPending = false;
   setBusy(false);
   S.feed = "—";
-  paintConn();
+  feed.reset();
+  paintFeed();
   byId("forward-badge").textContent = tr("cloud: {mode}", { mode: "—" });
   byId("forward-badge").className = "badge";
   byId("public-badge").hidden = true;
@@ -682,15 +689,16 @@ function paintConn() {
   let cls = "";
   let label = "—";
   let title = "";
-  if (S.feed && S.feed !== "connected" && S.feed !== "—") {
+  const f = feed.shown(Date.now()); // a degraded feed shows after its grace (feedview.js)
+  if (f && f !== "connected" && f !== "—") {
     cls = "warn";
-    label = S.feed.startsWith("connecting") ? tr("connecting…") : tr("reconnecting…");
-    title = tr("live feed: {state}", { state: S.feedLabel ?? S.feed });
+    label = f.startsWith("connecting") ? tr("connecting…") : tr("reconnecting…");
+    title = tr("live feed: {state}", { state: S.feedLabel ?? f });
   } else if (online === false) {
     cls = "err";
     label = tr("inverter offline");
     title = S.offlineSince ? tr("no inverter data since {time}", { time: fmtTime(S.offlineSince) }) : tr("no recent inverter data");
-  } else if (online === true && S.feed === "connected") {
+  } else if (online === true && f === "connected") {
     cls = "ok";
     label = tr("live");
     title = tr("receiving inverter data");
@@ -705,13 +713,26 @@ function paintConn() {
 function setFeed(text, label = text) {
   S.feed = text;
   S.feedLabel = label;
+  feed.set(text, Date.now());
+  paintFeed();
+}
+
+// paintFeed paints the indicator and the banner from the shown feed
+// state, and repaints when a degraded state's grace runs out.
+function paintFeed() {
+  clearTimeout(feedTimer);
+  feedTimer = null;
+  const now = Date.now();
   paintConn();
+  const f = feed.shown(now);
   const banner = byId("banner-feed");
-  const degraded = text !== "connected" && text !== "—" && authed();
+  const degraded = f !== "connected" && f !== "—" && authed();
   banner.hidden = !degraded;
   if (degraded) {
-    banner.textContent = tr("live feed: {state} — values shown are last known until the stream recovers.", { state: label });
+    banner.textContent = tr("live feed: {state} — values shown are last known until the stream recovers.", { state: S.feedLabel ?? f });
   }
+  const wake = feed.wakeAt();
+  if (wake !== null && wake > now) feedTimer = setTimeout(paintFeed, wake - now);
 }
 
 document.body.addEventListener("htmx:sse:before:connection", (e) => {
@@ -4060,7 +4081,11 @@ async function checkUITag() {
 
 window.addEventListener("pageshow", (e) => { if (e.persisted) checkUITag(); });
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") checkUITag();
+  if (document.visibilityState === "visible") {
+    feed.visible(Date.now()); // time hidden does not count towards the feed's grace
+    paintFeed();
+    checkUITag();
+  }
 });
 
 init();

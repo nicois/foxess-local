@@ -62,3 +62,16 @@ func TestPeriods(t *testing.T) {
 		t.Fatalf("periods tests:\n%s", out)
 	}
 }
+
+// TestFeedView runs the live-feed display tests
+// (testdata/feedview.test.mjs) under node's test runner.
+func TestFeedView(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed: the live-feed display tests do not run here")
+	}
+	//nolint:gosec // G204: node on this package's own test file
+	if out, err := exec.Command(node, "--test", "testdata/feedview.test.mjs").CombinedOutput(); err != nil {
+		t.Fatalf("feedview tests:\n%s", out)
+	}
+}

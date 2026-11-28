@@ -72,6 +72,9 @@ version; anything else bumps the patch version.
   Close") when the drain force-closes the inverter's session and its
   capture finishes after the database closed. That capture is dropped
   and logged instead.
+- Switching back to the web UI's tab no longer flashes "reconnecting…"
+  while the live feed resumes. A connection problem shows once it has
+  lasted 3 seconds; time spent in the background does not count.
 
 ## [v0.5.0] - 2026-11-25
 
