@@ -53,6 +53,7 @@ func TestProblemReport(t *testing.T) {
 	h.seedFrame(testBase, dirC2S, "snap01", decisionForwarded, snap01Fixture("1.73", "1.03", "1.71", "0.00"), nil)
 	// a cloud frame full held: the event that outlives its frame row
 	h.st.RecordAudit(testBase, "cloud-drop", "1794820938317-1: mode:full hold:kind=other")
+	h.st.Flush() // RecordAudit enqueues: the report reads the database
 
 	if rr := h.do(t, httpPost, pathReport, RoleExpert, map[string]any{fieldDescr: "x"}); rr.Code != http.StatusForbidden {
 		t.Fatalf("expert: %d", rr.Code)
