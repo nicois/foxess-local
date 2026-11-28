@@ -715,7 +715,7 @@ dl.kv {
   align-items: center;
 }
 @container (max-width: 640px) {
-  .now-body { grid-template-columns: 1fr; }
+  .now-body { grid-template-columns: 1fr; gap: 0.5rem; }
 }
 
 /* power flow: HTML nodes over an SVG of the connections. Both place
@@ -733,13 +733,16 @@ dl.kv {
   position: relative;
   aspect-ratio: 4 / 3;
 }
-/* narrow (a phone, the Inverter page's column): taller, so the three
-   rows stand apart — the nodes keep their size as the box shrinks */
+/* narrow (a phone, the Inverter page's column): the nodes keep their
+   size as the box narrows, so its height follows theirs (rem), not the
+   width — three rows with a short line between each. A taller-than-wide
+   box left a band of empty space above, between and below the rows and
+   pushed the battery's state of charge off a small phone's first
+   screen (owner, 2026-11-28). */
 @container flow (max-width: 440px) {
-  .flow-box { aspect-ratio: 1 / 1; }
-}
-@container flow (max-width: 340px) {
-  .flow-box { aspect-ratio: 5 / 6; }
+  .flow-box { aspect-ratio: auto; height: 18rem; }
+  /* meter 2's label wraps to more lines: room for it above the inverter */
+  .flow.has-m2 .flow-box { height: 20rem; }
 }
 .flow {
   .node {

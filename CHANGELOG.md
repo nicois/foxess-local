@@ -79,6 +79,9 @@ version; anything else bumps the patch version.
   the service rejects leads to the sign-in page ("the token was
   rejected"), and without a token it asks you to sign in. Settings and
   inverter quirks handle a rejected token the same way.
+- On a phone the dashboard's power-flow diagram no longer has wide
+  empty bands above, between and below its rows, so the battery's state
+  of charge moves about 110 px up the screen.
 
 ## [v0.5.0] - 2026-11-25
 
