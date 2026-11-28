@@ -75,6 +75,10 @@ version; anything else bumps the patch version.
 - Switching back to the web UI's tab no longer flashes "reconnecting…"
   while the live feed resumes. A connection problem shows once it has
   lasted 3 seconds; time spent in the background does not count.
+- The Updates page says why it cannot show the update state: a token
+  the service rejects leads to the sign-in page ("the token was
+  rejected"), and without a token it asks you to sign in. Settings and
+  inverter quirks handle a rejected token the same way.
 
 ## [v0.5.0] - 2026-11-25
 

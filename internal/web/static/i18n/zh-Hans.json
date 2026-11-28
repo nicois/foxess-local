@@ -57,6 +57,7 @@
   "Cannot load the quirks.": "无法加载怪癖列表。",
   "Cannot load the token list.": "无法加载令牌列表。",
   "Cannot load the update state.": "无法加载更新状态。",
+  "Sign in to see the update state.": "登录以查看更新状态。",
   "Captures": "抓包记录",
   "Changes": "更改",
   "Changes are sent to the inverter and confirmed by reading them back.": "更改会发送到逆变器，并通过回读确认。",

@@ -57,6 +57,7 @@
   "Cannot load the quirks.": "Die Eigenheiten können nicht geladen werden.",
   "Cannot load the token list.": "Die Tokenliste kann nicht geladen werden.",
   "Cannot load the update state.": "Der Update-Status kann nicht geladen werden.",
+  "Sign in to see the update state.": "Melden Sie sich an, um den Update-Status zu sehen.",
   "Captures": "Mitschnitte",
   "Changes": "Änderungen",
   "Changes are sent to the inverter and confirmed by reading them back.": "Änderungen werden an den Wechselrichter gesendet und durch Zurücklesen bestätigt.",

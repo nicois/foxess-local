@@ -57,6 +57,7 @@
   "Cannot load the quirks.": "Impossibile caricare le particolarità.",
   "Cannot load the token list.": "Impossibile caricare l’elenco dei token.",
   "Cannot load the update state.": "Impossibile caricare lo stato degli aggiornamenti.",
+  "Sign in to see the update state.": "Accedete per vedere lo stato degli aggiornamenti.",
   "Captures": "Acquisizioni",
   "Changes": "Modifiche",
   "Changes are sent to the inverter and confirmed by reading them back.": "Le modifiche vengono inviate all’inverter e confermate rileggendole.",

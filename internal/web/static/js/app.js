@@ -1398,6 +1398,7 @@ function median(xs) {
 async function loadQuirks() {
   try {
     const r = await apiFetch("/quirks");
+    if (r.status === 401 && S.token) { gate(tr("the token was rejected — sign in again")); return null; }
     if (!r.ok) return null;
     const b = await r.json();
     S.quirks = Object.fromEntries(b.quirks.map((q) => [q.id, q.enabled]));
@@ -2588,6 +2589,7 @@ async function loadCfg() {
 async function loadSettings() {
   try {
     const r = await apiFetch("/settings");
+    if (r.status === 401 && S.token) { gate(tr("the token was rejected — sign in again")); return null; }
     if (r.ok) return await r.json();
   } catch { /* the panel says it cannot load */ }
   return null;
@@ -3260,15 +3262,19 @@ async function renderNotifications() {
 
 async function renderUpdates() {
   let upd = null;
+  let status = 0; // the failed answer's status (0: no answer)
   try {
     const r = await apiFetch("/update");
+    if (r.status === 401 && S.token) { gate(tr("the token was rejected — sign in again")); return ""; }
     if (r.ok) upd = await r.json();
+    else status = r.status;
   } catch { /* the page says it cannot load */ }
   if (upd) refreshUpdateBadge(upd);
+  const why = status === 401 ? tr("Sign in to see the update state.") : tr("Cannot load the update state.");
   return `
   ${pageHead(tr("Updates"))}
   <section class="stack">
-    ${updatesPanel(upd) || `<p class="muted">${esc(tr("Cannot load the update state."))}</p>`}
+    ${updatesPanel(upd) || `<p class="muted">${esc(why)}</p>`}
   </section>`;
 }
 
